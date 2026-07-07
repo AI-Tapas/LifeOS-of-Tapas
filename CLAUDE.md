@@ -121,7 +121,9 @@ and email-verification rules live in lib/accounts.ts.
 
 - npm run test:rls proves anon cannot read or write any table, non
   allow-listed users cannot be created, and the owner sees the seeded data.
-  Requires supabase start.
+  Requires supabase start. npm run test:rls:cloud runs the same proof against
+  the cloud project via the SUPABASE_URL / SUPABASE_ANON_KEY aliases in
+  .env.local.
 - npm run test:oauth proves the pure OAuth token logic (PKCE S256 vector,
   token-response parse, Google/Microsoft refresh, invalid_grant to revoked)
-  with mocked providers. No stack; needs Node 24+ for .ts type stripping.
+  with mocked providers. No stack; needs Node 22.18+ for .ts type stripping.

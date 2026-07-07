@@ -9,6 +9,7 @@
     "lint": "eslint",
     "db:types": "supabase gen types typescript --local > lib/database.types.ts",
     "test:rls": "node --test scripts/rls.test.mjs",
+    "test:rls:cloud": "node --env-file=.env.local --test scripts/rls.test.mjs",
     "test:oauth": "node --test scripts/oauth.test.ts",
     "icons": "node scripts/gen-icons.mjs"
   },

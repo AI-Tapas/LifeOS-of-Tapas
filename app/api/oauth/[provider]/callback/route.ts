@@ -112,6 +112,17 @@ export async function GET(
 
   const scopes = tok.scope ? tok.scope.split(" ").filter(Boolean) : slot.scopes;
   const svc = createServiceClient();
+
+  // Distinguish a reconnect (recovery from needs_reauth) from a first connect
+  // in the audit log.
+  const { data: prior } = await svc
+    .from("accounts")
+    .select("status")
+    .eq("user_id", user.id)
+    .eq("slot", slot.key)
+    .maybeSingle();
+  const isReconnect = prior?.status === "needs_reauth";
+
   const { data: acct, error: upErr } = await svc
     .from("accounts")
     .upsert(
@@ -147,7 +158,7 @@ export async function GET(
   await svc.from("audit_log").insert({
     user_id: user.id,
     actor: "user",
-    action: "oauth_connected",
+    action: isReconnect ? "oauth_reconnected" : "oauth_connected",
     entity: "accounts",
     entity_id: acct.id,
     meta: { slot: slot.key, email, scopes },

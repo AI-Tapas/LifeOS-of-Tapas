@@ -38,8 +38,11 @@ Settings.
 - `npm run dev` - dev server
 - `npm run build` - production build
 - `npm run test:rls` - RLS and allow-list proof against the local stack
+- `npm run test:rls:cloud` - the same proof against the cloud project; reads
+  `.env.local` via `--env-file` and needs the non-prefixed `SUPABASE_URL` /
+  `SUPABASE_ANON_KEY` aliases set there (see `.env.example`)
 - `npm run test:oauth` - pure-logic proof of the OAuth token layer (PKCE, token
-  parse, refresh, revocation); no stack needed, requires Node 24+
+  parse, refresh, revocation); no stack needed, requires Node 22.18+
 - `npm run db:types` - regenerate lib/database.types.ts from the local schema
 - `npm run icons` - regenerate placeholder PWA icons
 

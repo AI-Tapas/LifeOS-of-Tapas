@@ -6,6 +6,17 @@ import { createClient } from "@/lib/supabase/client";
 
 const ALLOWED_EMAIL = "tapas.tnr@gmail.com";
 
+// The signup allowlist is a DB trigger, so Auth surfaces its rejection as an
+// opaque server error (sometimes an empty "{}" body). Map anything unreadable
+// to plain copy instead of rendering the raw message.
+function friendlySendError(message: string | undefined): string {
+  const m = (message ?? "").trim();
+  if (!m || m === "{}" || /database error|unexpected_failure/i.test(m)) {
+    return "This email is not allowed.";
+  }
+  return m;
+}
+
 export default function LoginPage() {
   const [email, setEmail] = useState(ALLOWED_EMAIL);
   const [code, setCode] = useState("");
@@ -25,7 +36,7 @@ export default function LoginPage() {
     });
     setBusy(false);
     if (error) {
-      setError(error.message);
+      setError(friendlySendError(error.message));
     } else {
       setStage("code");
     }
