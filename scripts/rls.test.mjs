@@ -81,6 +81,13 @@ test("owner exists, is seeded, and can read own data", async () => {
   assert.ifError(ins.error);
   const del = await owner.from("people").delete().eq("id", ins.data.id);
   assert.ifError(del.error);
+
+  // M2: the Vault decrypt path must never be reachable by the authenticated
+  // browser role. The token functions are granted to service_role only.
+  const denied = await owner.rpc("get_account_tokens", {
+    p_account_id: "00000000-0000-0000-0000-000000000000",
+  });
+  assert.ok(denied.error, "authenticated must not execute get_account_tokens");
 });
 
 test("anon role cannot read any table", async () => {

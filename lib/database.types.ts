@@ -13,6 +13,8 @@ export type Json =
 
 type AccountProvider = "google" | "microsoft";
 type AccountConnectMode = "direct" | "forwarded";
+type AccountStatus = "connected" | "needs_reauth" | "forwarded" | "disconnected";
+type OauthClient = "google_internal" | "google_external" | "microsoft";
 type EventSource = "synced" | "app" | "reminder";
 type WorkStreamKind =
   | "training"
@@ -71,6 +73,12 @@ export type Database = {
           mail_scan: boolean;
           connect_mode: AccountConnectMode;
           created_at: string;
+          slot: string | null;
+          status: AccountStatus;
+          oauth_client: OauthClient | null;
+          access_token_enc: string | null;
+          token_expires_at: string | null;
+          last_token_use: string | null;
         };
         Insert: {
           id?: string;
@@ -84,6 +92,12 @@ export type Database = {
           mail_scan?: boolean;
           connect_mode?: AccountConnectMode;
           created_at?: string;
+          slot?: string | null;
+          status?: AccountStatus;
+          oauth_client?: OauthClient | null;
+          access_token_enc?: string | null;
+          token_expires_at?: string | null;
+          last_token_use?: string | null;
         };
         Update: {
           id?: string;
@@ -97,6 +111,12 @@ export type Database = {
           mail_scan?: boolean;
           connect_mode?: AccountConnectMode;
           created_at?: string;
+          slot?: string | null;
+          status?: AccountStatus;
+          oauth_client?: OauthClient | null;
+          access_token_enc?: string | null;
+          token_expires_at?: string | null;
+          last_token_use?: string | null;
         };
         Relationships: [];
       };
@@ -732,10 +752,34 @@ export type Database = {
       };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      set_account_tokens: {
+        Args: {
+          p_account_id: string;
+          p_refresh?: string;
+          p_access?: string;
+          p_access_expires?: string;
+        };
+        Returns: undefined;
+      };
+      get_account_tokens: {
+        Args: { p_account_id: string };
+        Returns: {
+          refresh_token: string | null;
+          access_token: string | null;
+          token_expires_at: string | null;
+        }[];
+      };
+      clear_account_tokens: {
+        Args: { p_account_id: string };
+        Returns: undefined;
+      };
+    };
     Enums: {
       account_provider: AccountProvider;
       account_connect_mode: AccountConnectMode;
+      account_status: AccountStatus;
+      oauth_client: OauthClient;
       event_source: EventSource;
       work_stream_kind: WorkStreamKind;
       project_status: ProjectStatus;

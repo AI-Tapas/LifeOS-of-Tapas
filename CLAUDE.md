@@ -74,8 +74,54 @@ service role), read them via vault.decrypted_secrets server-side only. No
 client path may ever select the decrypted value. assistant_persona is equally
 sensitive: owner-session access only.
 
+## OAuth account connections (Milestone 2)
+
+App-level OAuth to external accounts, separate from Supabase sign-in. Four
+slots, keyed by accounts.slot: taxstrategia (google_internal), ca_tapasnr
+(google_external), altechon (microsoft), icai (google_external). Slot config
+and email-verification rules live in lib/accounts.ts.
+
+- Two Google clients are mandatory: an Internal-audience client cannot serve
+  accounts outside its org. Internal serves taxstrategia; External serves
+  ca_tapasnr and icai.
+- Flow: /api/oauth/[provider]/start and /callback (route handlers), not
+  Supabase Auth. PKCE S256 + state on every flow; Google adds
+  access_type=offline and prompt=consent to guarantee a refresh token. State
+  and verifier ride a short-lived httpOnly oauth_flow cookie. One redirect URI
+  per provider; both Google clients register the same string, and the slot in
+  the cookie picks the client.
+- Callback verifies the returned email against the slot and always rejects
+  tapas.tnr@gmail.com. Internal-google and single-tenant-MS are org-bound by
+  the client, so only ca_tapasnr (exact email) and icai (domain) need an
+  explicit check.
+- Tokens: refresh and access tokens both live in Vault. accounts columns
+  refresh_token_enc and access_token_enc are secret ids; token_expires_at and
+  last_token_use cache expiry. The only decryption path is three security
+  definer functions granted to service_role only (set_account_tokens,
+  get_account_tokens, clear_account_tokens); no browser role can execute them.
+  lib/supabase/service.ts is the server-only service-role client.
+- lib/oauth/tokens.ts get_valid_access_token(account_id) returns the cached
+  access token or refreshes it, persists Microsoft's rolled refresh token, and
+  on invalid_grant throws TokenRevokedError, sets status=needs_reauth, and
+  writes an audit_log row.
+- Re-auth design: needs_reauth surfaces as an amber banner in the (app) shell
+  and Settings with one-tap Reconnect (reruns /start). This is the expected
+  path when the ca_tapasnr password changes. connect, disconnect,
+  refresh-failure and reconnect are all audit-logged.
+- icai fallback: if the org blocks the unverified app, the row is saved with
+  connect_mode=forwarded, status=forwarded, no tokens (Settings toggle). Mail
+  then arrives via a Gmail forwarding filter into ca_tapasnr.
+- Calendars: metadata only (event sync is M3). calendars.is_primary_write is
+  one-per-account and is_reminder_home one-per-user (partial unique indexes);
+  a trigger forces the reminder-home onto the ca_tapasnr account.
+- accounts.status enum: connected, needs_reauth, forwarded, disconnected.
+  accounts.oauth_client enum: google_internal, google_external, microsoft.
+
 ## Testing
 
 - npm run test:rls proves anon cannot read or write any table, non
   allow-listed users cannot be created, and the owner sees the seeded data.
   Requires supabase start.
+- npm run test:oauth proves the pure OAuth token logic (PKCE S256 vector,
+  token-response parse, Google/Microsoft refresh, invalid_grant to revoked)
+  with mocked providers. No stack; needs Node 24+ for .ts type stripping.
