@@ -12,6 +12,13 @@ practising CA in Ahmedabad, India. Sole user: tapas.tnr@gmail.com.
   (requires Docker Desktop).
 - Deploy: Vercel (frontend) + Supabase cloud (backend).
 
+## Environment note (Cowork sandbox mount)
+
+This repo lives on a local disk, NOT in OneDrive. If a session sees file
+truncation, stale reads, or leftover `.git/index.lock` or `.git/HEAD.lock`, that
+is the Cowork sandbox mount's shared-filesystem behaviour, not OneDrive. Clear
+the stale lock and retry; do not attribute it to OneDrive or re-diagnose.
+
 ## Firm constraints (apply to every milestone)
 
 1. Confidential boundary: the app stores task metadata, due dates, and
