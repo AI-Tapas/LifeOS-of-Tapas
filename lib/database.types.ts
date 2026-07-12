@@ -263,7 +263,10 @@ export type Database = {
           id: string
           is_primary_write: boolean
           is_reminder_home: boolean
+          last_synced_at: string | null
           name: string
+          sync_enabled: boolean
+          sync_token: string | null
           user_id: string
         }
         Insert: {
@@ -273,7 +276,10 @@ export type Database = {
           id?: string
           is_primary_write?: boolean
           is_reminder_home?: boolean
+          last_synced_at?: string | null
           name: string
+          sync_enabled?: boolean
+          sync_token?: string | null
           user_id?: string
         }
         Update: {
@@ -283,7 +289,10 @@ export type Database = {
           id?: string
           is_primary_write?: boolean
           is_reminder_home?: boolean
+          last_synced_at?: string | null
           name?: string
+          sync_enabled?: boolean
+          sync_token?: string | null
           user_id?: string
         }
         Relationships: [
