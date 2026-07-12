@@ -174,3 +174,17 @@ export async function setReminderHomeAction(calendarId: string): Promise<void> {
   if (error) throw error;
   revalidatePath("/settings");
 }
+
+// M3: choose which calendars the unified view syncs. Defaults to true for a
+// newly discovered calendar; this lets the user turn a noisy calendar off.
+export async function setCalendarSyncAction(
+  calendarId: string,
+  enabled: boolean
+): Promise<void> {
+  const { supabase } = await requireUser();
+  await supabase
+    .from("calendars")
+    .update({ sync_enabled: enabled })
+    .eq("id", calendarId);
+  revalidatePath("/settings");
+}

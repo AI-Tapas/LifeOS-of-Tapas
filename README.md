@@ -187,3 +187,76 @@ Frontend (Vercel):
   stores only the secret ids. Decryption is server-side only, through
   service-role functions never granted to the browser.
 - No document contents or file uploads, by design.
+
+## Calendar, tasks and reminders (Milestone 3)
+
+### Event sync (read path)
+
+On-demand only; there is no background daemon (that is M5). The calendar page
+syncs on open when the data is stale (older than 15 minutes) and offers a manual
+Refresh. Sync runs across every sync-enabled calendar on all connected accounts.
+Each calendar can be toggled for sync under Settings > Accounts; a newly
+discovered calendar defaults to on.
+
+Incremental where the provider supports it: Google `syncToken` and Microsoft
+Graph `calendarView` delta. The cursor is stored per calendar
+(`calendars.sync_token`, added by migration `20260712000100`). When the cursor is
+invalidated (HTTP 410) the sync falls back to a full window and reconciles
+deletions. Rolling window: 60 days back, 12 months forward.
+
+Every provider call goes through `withResourceAuth`. An account in
+`needs_reauth` is skipped; its events stay stale and the M2 amber banner prompts
+a reconnect, while the other accounts sync normally. Timestamps are stored UTC
+and shown IST; all-day and multi-day events are handled. Events created in the
+app carry `source = 'app'` and keep `ext_event_id` for round-trip edits, and a
+re-sync never downgrades an app or reminder event to `synced`.
+
+### Event write and the confirmation gate
+
+Events are created and edited on each account's `is_primary_write` calendar;
+editing a synced event writes back to its own source calendar. icai is
+read-only. Solo events save directly. An event that carries attendees needs an
+explicit confirmation ("This will send an invite to N people") enforced in code,
+not only in the UI: the server write path refuses an attendee-bearing payload
+without the confirmed flag.
+
+### Reminders on Google Calendar
+
+A task with a due date, or an active recurring obligation, writes ONE Google
+Calendar event to the reminder-home calendar on ca.tapasnr, with four reminder
+overrides at 10080, 4320, 1440 and 0 minutes (7, 3, 1 and 0 days), never four
+separate events. `remind_offsets` is stored in days (default {7,3,1,0}) and
+mapped to minute overrides; Google allows at most five overrides, each at most 28
+days, and the mapping validates this. Google fires the notifications whether the
+app is open or closed.
+
+The writer targets only the `is_reminder_home` calendar. It resolves that
+calendar from the database and guards it in code (and in tests); there is no
+parameter to point it anywhere else. Changing a due date updates the same event
+by `ext_event_id`. Completing, dropping or deleting the source removes the event
+and closes the reminders row, so no orphan events remain on the calendar.
+
+A recurring obligation becomes one recurring event; the RRULE is derived from
+frequency plus due day (plus due month for yearly): monthly
+`FREQ=MONTHLY;BYMONTHDAY=<day>`; bi-monthly, quarterly and half-yearly add
+`INTERVAL=2/3/6`; yearly `FREQ=YEARLY;BYMONTH=<month>;BYMONTHDAY=<day>`.
+
+Retry behaviour: if ca.tapasnr is in `needs_reauth` when a reminder should be
+written, the source row is still saved, `reminders.created` is set false and
+"Reminder not set: reconnect ca.tapasnr" is shown inline. A retry sweep runs on
+each sync and creates any pending reminder events once the account reconnects.
+
+### Recurring task rule format
+
+`recurring_rule` is `<freq>` or `<freq>:<interval>`, where freq is daily,
+weekly, monthly or yearly and interval is a positive integer (default 1), for
+example `weekly:2` for fortnightly. Completing an occurrence advances the due
+timestamp by one interval, keeping the IST time-of-day, and spawns the next task.
+
+### Notes on this milestone
+
+The calendar is coloured by account (one fixed hue per slot) for legibility on a
+phone, and the week view is a readable 7-day agenda rather than a tiny time grid.
+`lib/database.types.ts` was hand-updated to match migration `20260712000100`
+(this machine has no Docker); run `npm run db:types` to regenerate it once the
+local stack is up. Offline proof: `npm run test:m3` (Node 22.18+).

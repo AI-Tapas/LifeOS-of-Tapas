@@ -8,6 +8,7 @@ import {
   setForwardedAction,
   setPrimaryWriteAction,
   setReminderHomeAction,
+  setCalendarSyncAction,
 } from "@/app/(app)/settings/actions";
 
 export interface AccountView {
@@ -27,6 +28,7 @@ export interface CalendarView {
   name: string;
   is_primary_write: boolean;
   is_reminder_home: boolean;
+  sync_enabled: boolean;
 }
 
 const STATUS_STYLE: Record<AccountView["status"], string> = {
@@ -200,6 +202,25 @@ export default function AccountsPanel({
                       ))}
                     </select>
                   </label>
+                )}
+
+                {cals.length > 0 && (
+                  <div className="space-y-1">
+                    <span className="text-sm font-medium">Sync these calendars</span>
+                    {cals.map((c) => (
+                      <label key={c.id} className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={c.sync_enabled}
+                          disabled={pending}
+                          onChange={(e) =>
+                            run(() => setCalendarSyncAction(c.id, e.target.checked))
+                          }
+                        />
+                        <span>{c.name}</span>
+                      </label>
+                    ))}
+                  </div>
                 )}
 
                 <div className="flex flex-wrap gap-2">

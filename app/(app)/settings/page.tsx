@@ -71,7 +71,7 @@ export default async function SettingsPage({
         .order("slot"),
       supabase
         .from("calendars")
-        .select("id, account_id, name, is_primary_write, is_reminder_home")
+        .select("id, account_id, name, is_primary_write, is_reminder_home, sync_enabled")
         .order("name"),
       supabase
         .from("work_streams")
