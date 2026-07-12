@@ -11,6 +11,7 @@
     "test:rls": "node --test scripts/rls.test.mjs",
     "test:rls:cloud": "node --env-file=.env.local --test scripts/rls.test.mjs",
     "test:oauth": "node --test scripts/oauth.test.ts",
+    "test:m3": "node --test scripts/m3.test.ts",
     "icons": "node scripts/gen-icons.mjs"
   },
   "dependencies": {
