@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { slotByKey } from "@/lib/accounts";
 import { syncCalendars } from "@/lib/calendars";
+import { TokenRevokedError } from "@/lib/oauth/core";
 
 async function requireUser() {
   const supabase = await createClient();
@@ -15,16 +16,44 @@ async function requireUser() {
   return { supabase, user };
 }
 
-export async function refreshCalendarsAction(accountId: string): Promise<void> {
+export type RefreshResult =
+  | { ok: true; count: number }
+  | { ok: false; reason: "needs_reauth" }
+  | { ok: false; message: string };
+
+// Never throws a raw error to the render. A revoked grant returns a clean
+// needs_reauth result (and revalidates so the reauth banner shows); anything
+// else returns a readable message instead of an opaque 500.
+export async function refreshCalendarsAction(
+  accountId: string
+): Promise<RefreshResult> {
   const { supabase, user } = await requireUser();
   const { data: acct } = await supabase
     .from("accounts")
-    .select("id, provider")
+    .select("id, provider, status")
     .eq("id", accountId)
     .single();
-  if (!acct) throw new Error("account not found");
-  await syncCalendars(acct.id, acct.provider, user.id);
-  revalidatePath("/settings");
+  if (!acct) return { ok: false, message: "Account not found." };
+  // Already revoked: send the user to Reconnect instead of a doomed resource call.
+  if (acct.status === "needs_reauth") return { ok: false, reason: "needs_reauth" };
+  if (acct.status !== "connected") {
+    return { ok: false, message: `Account is ${acct.status}.` };
+  }
+
+  try {
+    const count = await syncCalendars(acct.id, acct.provider, user.id);
+    revalidatePath("/settings");
+    return { ok: true, count };
+  } catch (e) {
+    if (e instanceof TokenRevokedError) {
+      revalidatePath("/settings"); // status is now needs_reauth; banner will show
+      return { ok: false, reason: "needs_reauth" };
+    }
+    return {
+      ok: false,
+      message: e instanceof Error ? e.message : "Could not refresh calendars.",
+    };
+  }
 }
 
 export async function disconnectAction(accountId: string): Promise<void> {

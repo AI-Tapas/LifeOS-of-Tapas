@@ -70,6 +70,9 @@ export default function AccountsPanel({
 }) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<
+    { id: string; tone: "ok" | "warn" | "err"; text: string } | null
+  >(null);
 
   const bySlot = new Map(accounts.filter((a) => a.slot).map((a) => [a.slot!, a]));
   const calsByAccount = new Map<string, CalendarView[]>();
@@ -86,6 +89,39 @@ export default function AccountsPanel({
         await fn();
       } catch (e) {
         setError(e instanceof Error ? e.message : "Something went wrong.");
+      }
+    });
+  }
+
+  // Refresh calendars reports its own per-card result: a synced count, a
+  // needs_reauth prompt, or a readable error. It never throws to the render.
+  function runRefresh(accountId: string) {
+    setError(null);
+    setNotice(null);
+    startTransition(async () => {
+      try {
+        const r = await refreshCalendarsAction(accountId);
+        if (r.ok) {
+          setNotice({
+            id: accountId,
+            tone: "ok",
+            text: `${r.count} calendar${r.count === 1 ? "" : "s"} synced.`,
+          });
+        } else if ("reason" in r) {
+          setNotice({
+            id: accountId,
+            tone: "warn",
+            text: "Access was revoked. Use Reconnect to restore service.",
+          });
+        } else {
+          setNotice({ id: accountId, tone: "err", text: r.message });
+        }
+      } catch (e) {
+        setNotice({
+          id: accountId,
+          tone: "err",
+          text: e instanceof Error ? e.message : "Could not refresh calendars.",
+        });
       }
     });
   }
@@ -167,13 +203,15 @@ export default function AccountsPanel({
                 )}
 
                 <div className="flex flex-wrap gap-2">
-                  <button
-                    onClick={() => run(() => refreshCalendarsAction(acct!.id))}
-                    disabled={pending}
-                    className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm disabled:opacity-50 dark:border-neutral-700"
-                  >
-                    Refresh calendars ({cals.length})
-                  </button>
+                  {status === "connected" && (
+                    <button
+                      onClick={() => runRefresh(acct!.id)}
+                      disabled={pending}
+                      className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm disabled:opacity-50 dark:border-neutral-700"
+                    >
+                      {pending ? "Refreshing" : `Refresh calendars (${cals.length})`}
+                    </button>
+                  )}
                   {status === "needs_reauth" && (
                     <a
                       href={startHref}
@@ -194,6 +232,21 @@ export default function AccountsPanel({
                     Disconnect
                   </button>
                 </div>
+
+                {notice && notice.id === acct!.id && (
+                  <p
+                    className={
+                      "text-sm " +
+                      (notice.tone === "ok"
+                        ? "text-green-600"
+                        : notice.tone === "warn"
+                          ? "text-amber-700 dark:text-amber-300"
+                          : "text-red-600")
+                    }
+                  >
+                    {notice.text}
+                  </p>
+                )}
               </div>
             )}
 

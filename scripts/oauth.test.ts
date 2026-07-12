@@ -16,6 +16,7 @@ import {
 import {
   buildAuthUrl,
   refreshAccessToken,
+  resourceWithReauth,
   type ClientConfig,
 } from "../lib/oauth/providers.ts";
 
@@ -126,4 +127,99 @@ test("refreshAccessToken surfaces revocation from a mocked provider", async () =
     refreshAccessToken(CFG, "dead-refresh", mockFetch(400, { error: "invalid_grant" })),
     TokenRevokedError
   );
+});
+
+// --- 401 -> forced refresh -> retry recovery (resourceWithReauth) -----------
+
+function resp(status: number, body: unknown = {}): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+test("resourceWithReauth passes a healthy response through without refreshing", async () => {
+  let forced = false;
+  const res = await resourceWithReauth({
+    getToken: async () => "good",
+    forceRefresh: async () => {
+      forced = true;
+      return "unused";
+    },
+    request: async () => resp(200, { items: [] }),
+    onDead: async () => {},
+  });
+  assert.equal(res.status, 200);
+  assert.equal(forced, false, "no refresh when the cached token works");
+});
+
+test("resourceWithReauth forces one refresh on 401 and retries with the fresh token", async () => {
+  const tokensUsed: string[] = [];
+  let forced = false;
+  let deadCalled = false;
+  const queue = [resp(401), resp(200, { items: [{ id: "c1" }] })];
+  const res = await resourceWithReauth({
+    getToken: async () => "stale",
+    forceRefresh: async () => {
+      forced = true; // stands in for persisting the new access token
+      return "fresh";
+    },
+    request: async (token) => {
+      tokensUsed.push(token);
+      return queue.shift()!;
+    },
+    onDead: async () => {
+      deadCalled = true;
+    },
+  });
+  assert.equal(res.status, 200);
+  assert.deepEqual(await res.json(), { items: [{ id: "c1" }] });
+  assert.deepEqual(tokensUsed, ["stale", "fresh"], "retried with the refreshed token");
+  assert.equal(forced, true);
+  assert.equal(deadCalled, false, "a successful retry is not a revocation");
+});
+
+test("resourceWithReauth surfaces needs_reauth when the forced refresh is invalid_grant", async () => {
+  const tokensUsed: string[] = [];
+  let deadCalled = false;
+  await assert.rejects(
+    resourceWithReauth({
+      getToken: async () => "stale",
+      // The DB-wired forceRefresh flips needs_reauth then rethrows this.
+      forceRefresh: async () => {
+        throw new TokenRevokedError("invalid_grant");
+      },
+      request: async (token) => {
+        tokensUsed.push(token);
+        return resp(401);
+      },
+      onDead: async () => {
+        deadCalled = true;
+      },
+    }),
+    TokenRevokedError
+  );
+  assert.deepEqual(tokensUsed, ["stale"], "no retry after a revoked refresh");
+  assert.equal(deadCalled, false);
+});
+
+test("resourceWithReauth flips needs_reauth when 401 persists after a fresh token", async () => {
+  const tokensUsed: string[] = [];
+  let deadCalled = false;
+  await assert.rejects(
+    resourceWithReauth({
+      getToken: async () => "stale",
+      forceRefresh: async () => "fresh",
+      request: async (token) => {
+        tokensUsed.push(token);
+        return resp(401);
+      },
+      onDead: async () => {
+        deadCalled = true;
+      },
+    }),
+    TokenRevokedError
+  );
+  assert.deepEqual(tokensUsed, ["stale", "fresh"]);
+  assert.equal(deadCalled, true, "persistent 401 must flip the account to needs_reauth");
 });

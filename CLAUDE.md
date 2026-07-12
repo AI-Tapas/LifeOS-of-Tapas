@@ -104,6 +104,12 @@ and email-verification rules live in lib/accounts.ts.
   access token or refreshes it, persists Microsoft's rolled refresh token, and
   on invalid_grant throws TokenRevokedError, sets status=needs_reauth, and
   writes an audit_log row.
+- A provider-side revocation kills the access token before its expiry clock, so
+  a cached token can still 401 at the resource API. Every resource call (M3
+  calendar/mail included) must go through lib/oauth/tokens.ts withResourceAuth:
+  on a 401 it forces one refresh and retries once, and on a revoked grant or a
+  persistent 401 it flips status=needs_reauth (never a raw 500). The pure
+  orchestration is providers.ts resourceWithReauth (unit-tested offline).
 - Re-auth design: needs_reauth surfaces as an amber banner in the (app) shell
   and Settings with one-tap Reconnect (reruns /start). This is the expected
   path when the ca_tapasnr password changes. connect, disconnect,

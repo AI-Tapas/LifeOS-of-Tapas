@@ -1,6 +1,10 @@
 // Relative import (with extension) so scripts/oauth.test.ts can load this file
 // directly under `node --test` type-stripping; the type-only import is erased.
-import { parseTokenResponse, type NormalizedToken } from "./core.ts";
+import {
+  parseTokenResponse,
+  TokenRevokedError,
+  type NormalizedToken,
+} from "./core.ts";
 import type { Provider } from "@/lib/accounts";
 
 // Fully-resolved config for one OAuth client (built from env in config.ts).
@@ -98,4 +102,36 @@ export function refreshAccessToken(
     { grant_type: "refresh_token", refresh_token: refreshToken },
     fetchImpl
   );
+}
+
+// Deps for resourceWithReauth, injected so the orchestration is unit-tested
+// offline. The DB-wired implementation is lib/oauth/tokens.ts withResourceAuth.
+export interface ResourceAuthDeps {
+  getToken: () => Promise<string>; // cached-or-refreshed token (fast path)
+  forceRefresh: () => Promise<string>; // unconditional refresh; may throw TokenRevokedError
+  request: (accessToken: string) => Promise<Response>; // the resource API call
+  onDead: () => Promise<void>; // flip needs_reauth when 401 persists after refresh
+}
+
+// Run a resource API request with 401-driven reauth recovery. A provider-side
+// revocation invalidates the access token immediately, before its expiry clock,
+// so the cached token can 401 while still looking valid. On a 401 we force one
+// refresh and retry once. If the refresh is revoked (forceRefresh throws
+// TokenRevokedError) or the retry still 401s, the account is flipped to
+// needs_reauth and TokenRevokedError is thrown for the caller to turn into the
+// reauth banner (never a raw 500). Pure orchestration: no DB or network of its
+// own.
+export async function resourceWithReauth(deps: ResourceAuthDeps): Promise<Response> {
+  let res = await deps.request(await deps.getToken());
+  if (res.status !== 401) return res;
+
+  const fresh = await deps.forceRefresh();
+  res = await deps.request(fresh);
+  if (res.status === 401) {
+    await deps.onDead();
+    throw new TokenRevokedError(
+      "resource returned 401 after a forced token refresh"
+    );
+  }
+  return res;
 }

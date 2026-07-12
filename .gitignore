@@ -43,3 +43,6 @@ supabase/.temp
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# claude code local settings (machine-specific, keep out of the repo)
+.claude/settings.local.json

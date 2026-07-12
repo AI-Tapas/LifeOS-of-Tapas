@@ -1,19 +1,22 @@
-import { getValidAccessToken } from "@/lib/oauth/tokens";
+import { withResourceAuth } from "@/lib/oauth/tokens";
 import { createServiceClient } from "@/lib/supabase/service";
 import type { Provider } from "@/lib/accounts";
 
 // Metadata only. Event contents are Milestone 3; this just lists the calendars
 // an account exposes so the user can pick a write-back / reminder-home target.
+// Resource calls go through withResourceAuth so a 401 from a provider-side
+// revocation is turned into a refresh, then needs_reauth, not a raw 500.
 interface RawCal {
   ext: string;
   name: string;
   color: string | null;
 }
 
-async function googleCalendars(token: string): Promise<RawCal[]> {
-  const res = await fetch(
-    "https://www.googleapis.com/calendar/v3/users/me/calendarList",
-    { headers: { authorization: `Bearer ${token}` } }
+async function googleCalendars(accountId: string): Promise<RawCal[]> {
+  const res = await withResourceAuth(accountId, (token) =>
+    fetch("https://www.googleapis.com/calendar/v3/users/me/calendarList", {
+      headers: { authorization: `Bearer ${token}` },
+    })
   );
   if (!res.ok) throw new Error(`google calendarList ${res.status}`);
   const j = (await res.json()) as { items?: GoogleCalItem[] };
@@ -24,10 +27,11 @@ async function googleCalendars(token: string): Promise<RawCal[]> {
   }));
 }
 
-async function microsoftCalendars(token: string): Promise<RawCal[]> {
-  const res = await fetch(
-    "https://graph.microsoft.com/v1.0/me/calendars?$select=id,name,hexColor",
-    { headers: { authorization: `Bearer ${token}` } }
+async function microsoftCalendars(accountId: string): Promise<RawCal[]> {
+  const res = await withResourceAuth(accountId, (token) =>
+    fetch("https://graph.microsoft.com/v1.0/me/calendars?$select=id,name,hexColor", {
+      headers: { authorization: `Bearer ${token}` },
+    })
   );
   if (!res.ok) throw new Error(`graph calendars ${res.status}`);
   const j = (await res.json()) as { value?: MsCalItem[] };
@@ -57,11 +61,10 @@ export async function syncCalendars(
   provider: Provider,
   userId: string
 ): Promise<number> {
-  const token = await getValidAccessToken(accountId);
   const cals =
     provider === "google"
-      ? await googleCalendars(token)
-      : await microsoftCalendars(token);
+      ? await googleCalendars(accountId)
+      : await microsoftCalendars(accountId);
 
   if (cals.length === 0) return 0;
 
