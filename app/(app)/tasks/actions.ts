@@ -4,6 +4,10 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { syncTaskReminder, removeTaskReminder } from "@/lib/reminders/writer";
 import { nextDueIso, isValidRecurringRule } from "@/lib/tasks/recurring";
+import {
+  runStatusTransition,
+  type TransitionOutcome,
+} from "@/lib/tasks/transitions";
 import type { Database } from "@/lib/database.types";
 
 type TaskStatus = Database["public"]["Enums"]["task_status"];
@@ -84,12 +88,14 @@ export async function updateTaskAction(
   if (patch.recurring_rule !== undefined && !isValidRecurringRule(patch.recurring_rule)) {
     return { ok: false, message: "Invalid recurring rule." };
   }
+  // Field update first, WITHOUT status: status (and completed_at, reminder
+  // cleanup, spawning) is owned by the shared transition helper below, so the
+  // form path and the quick toggle behave identically (defect D2).
   const { error } = await supabase
     .from("tasks")
     .update({
       ...(patch.title !== undefined ? { title: patch.title.trim() } : {}),
       ...(patch.notes !== undefined ? { notes: patch.notes } : {}),
-      ...(patch.status !== undefined ? { status: patch.status } : {}),
       ...(patch.priority !== undefined ? { priority: patch.priority } : {}),
       ...(patch.due_ts !== undefined ? { due_ts: patch.due_ts } : {}),
       ...(patch.work_stream_id !== undefined ? { work_stream_id: patch.work_stream_id } : {}),
@@ -101,10 +107,17 @@ export async function updateTaskAction(
     .eq("id", id);
   if (error) return { ok: false, message: error.message };
 
-  // Any change to the due date, offsets or status re-syncs the reminder.
-  const outcome = await syncTaskReminder(user.id, id);
+  let note: string | undefined;
+  if (patch.status !== undefined) {
+    const t = await transitionTaskStatus(supabase, user.id, id, patch.status);
+    if (!t.ok) return { ok: false, message: t.message ?? "Could not save the task." };
+    note = t.reminderNote;
+  } else {
+    // No status supplied: a change to the due date or offsets still re-syncs.
+    note = reminderNote(await syncTaskReminder(user.id, id));
+  }
   revalidatePath("/tasks");
-  return { ok: true, id, reminderNote: reminderNote(outcome) };
+  return { ok: true, id, reminderNote: note };
 }
 
 export async function setTaskStatusAction(
@@ -112,27 +125,53 @@ export async function setTaskStatusAction(
   status: TaskStatus
 ): Promise<TaskResult> {
   const { supabase, user } = await requireUser();
-  const completing = status === "done";
-  const { error } = await supabase
-    .from("tasks")
-    .update({
-      status,
-      completed_at: completing ? new Date().toISOString() : null,
-    })
-    .eq("id", id);
-  if (error) return { ok: false, message: error.message };
-
-  let spawnedNote: string | undefined;
-  if (status === "done" || status === "dropped") {
-    // Remove this occurrence's reminder.
-    await syncTaskReminder(user.id, id);
-    // Completing a recurring task spawns the next occurrence.
-    if (completing) spawnedNote = await spawnNextOccurrence(supabase, user.id, id);
-  } else {
-    await syncTaskReminder(user.id, id);
-  }
+  const t = await transitionTaskStatus(supabase, user.id, id, status);
+  if (!t.ok) return { ok: false, message: t.message ?? "Could not update the task." };
   revalidatePath("/tasks");
-  return { ok: true, id, reminderNote: spawnedNote };
+  return { ok: true, id, reminderNote: t.reminderNote };
+}
+
+// The ONE status-transition path shared by the quick toggle and the Edit-task
+// form. Semantics and guards live in lib/tasks/transitions.ts (offline-tested);
+// this only binds the real database, reminder writer and spawner to it.
+async function transitionTaskStatus(
+  supabase: Awaited<ReturnType<typeof requireUser>>["supabase"],
+  userId: string,
+  taskId: string,
+  nextStatus: TaskStatus
+): Promise<TransitionOutcome> {
+  return runStatusTransition(
+    {
+      readTask: async () => {
+        const { data } = await supabase
+          .from("tasks")
+          .select("status, due_ts, recurring_rule")
+          .eq("id", taskId)
+          .single();
+        return data ?? null;
+      },
+      // Compare-and-swap on the previous status: a doubly submitted or
+      // concurrent transition claims the row exactly once, so the spawn
+      // can never run twice for the same completion.
+      applyStatus: async (prev, next, completedAt) => {
+        const { data, error } = await supabase
+          .from("tasks")
+          .update({
+            status: next,
+            ...(completedAt !== undefined ? { completed_at: completedAt } : {}),
+          })
+          .eq("id", taskId)
+          .eq("status", prev)
+          .select("id");
+        if (error) throw new Error(error.message);
+        return (data?.length ?? 0) > 0;
+      },
+      syncReminder: () => syncTaskReminder(userId, taskId),
+      spawnNext: () => spawnNextOccurrence(supabase, userId, taskId),
+      now: () => new Date(),
+    },
+    nextStatus
+  );
 }
 
 async function spawnNextOccurrence(

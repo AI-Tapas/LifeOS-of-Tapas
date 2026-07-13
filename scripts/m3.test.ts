@@ -1,7 +1,8 @@
 // Pure-logic proof for Milestone 3: reminder offsets mapping, the reminder-home
 // structural guard, cleanup with the stored ext_event_id, the attendee
-// confirmation gate, and the obligation RRULE. No network, no DB: the same
-// offline pattern as scripts/oauth.test.ts. Run: npm run test:m3 (Node 22.18+).
+// confirmation gate, the obligation RRULE, and the shared status-transition
+// semantics (defect D2). No network, no DB: the same offline pattern as
+// scripts/oauth.test.ts. Run: npm run test:m3 (Node 22.18+).
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -20,6 +21,11 @@ import {
   parseGraphEvent,
   type AppEventInput,
 } from "../lib/events/payload.ts";
+import {
+  runStatusTransition,
+  type TransitionDeps,
+  type TransitionTaskState,
+} from "../lib/tasks/transitions.ts";
 
 // --- offsets mapping: days -> minute overrides on ONE event ------------------
 
@@ -211,4 +217,115 @@ test("parseGraphEvent handles removed and timed events", () => {
     timed && "start_ts" in timed && timed.start_ts,
     "2026-07-20T04:00:00.000Z"
   );
+});
+
+// --- status transitions shared by the form and the quick toggle (defect D2) --
+//
+// runStatusTransition is the ONE path both setTaskStatusAction and
+// updateTaskAction bind to (app/(app)/tasks/actions.ts), so proving the
+// helper proves the form path. The harness records every dependency call in
+// order; "sync" is the status-aware reminder sync (removal for done/dropped).
+
+const FIXED_NOW = "2026-07-13T06:00:00.000Z";
+const FUTURE_DUE = "2026-08-01T04:30:00.000Z";
+const PAST_DUE = "2026-06-01T04:30:00.000Z";
+
+function transitionHarness(
+  state?: Partial<TransitionTaskState>,
+  opts?: { claim?: boolean }
+) {
+  const task: TransitionTaskState = {
+    status: state?.status ?? "todo",
+    due_ts: state?.due_ts === undefined ? FUTURE_DUE : state.due_ts,
+    recurring_rule:
+      state?.recurring_rule === undefined ? "monthly:1" : state.recurring_rule,
+  };
+  const calls: string[] = [];
+  const statusWrites: { next: string; completed_at: string | null | undefined }[] =
+    [];
+  const deps: TransitionDeps = {
+    readTask: async () => task,
+    applyStatus: async (prev, next, completedAt) => {
+      calls.push(`apply:${prev}->${next}`);
+      statusWrites.push({ next, completed_at: completedAt });
+      if (opts?.claim === false) return false; // lost the compare-and-swap
+      task.status = next;
+      return true;
+    },
+    syncReminder: async () => {
+      calls.push("sync");
+      return { created: false };
+    },
+    spawnNext: async () => {
+      calls.push("spawn");
+      return "Next occurrence created.";
+    },
+    now: () => new Date(FIXED_NOW),
+  };
+  return { deps, calls, statusWrites };
+}
+
+test("completing through the form path sets completed_at, cleans up, spawns exactly once", async () => {
+  const h = transitionHarness(); // recurring task, previously todo
+  const r = await runStatusTransition(h.deps, "done");
+  assert.equal(r.ok, true);
+  assert.equal(r.spawned, true);
+  // Cleanup runs after the claim and before the spawn, exactly once each.
+  assert.deepEqual(h.calls, ["apply:todo->done", "sync", "spawn"]);
+  assert.deepEqual(h.statusWrites, [{ next: "done", completed_at: FIXED_NOW }]);
+});
+
+test("a repeated save of an already-done task spawns nothing and never rewrites completed_at", async () => {
+  const h = transitionHarness({ status: "done" });
+  const r = await runStatusTransition(h.deps, "done");
+  assert.equal(r.ok, true);
+  assert.equal(r.spawned, false);
+  // No status write at all: completed_at keeps its original value. The lone
+  // sync is the idempotent removal for a finished task.
+  assert.deepEqual(h.calls, ["sync"]);
+  assert.deepEqual(h.statusWrites, []);
+});
+
+test("a doubly submitted completion loses the compare-and-swap and never double-spawns", async () => {
+  const h = transitionHarness({}, { claim: false });
+  const r = await runStatusTransition(h.deps, "done");
+  assert.equal(r.ok, true);
+  assert.equal(r.spawned, false, "the losing submission must not spawn");
+  assert.deepEqual(h.calls, ["apply:todo->done", "sync"]);
+});
+
+test("dropping cleans up the reminder and never spawns; completed_at stays null", async () => {
+  const h = transitionHarness(); // recurring, so a wrong spawn would show up
+  const r = await runStatusTransition(h.deps, "dropped");
+  assert.equal(r.ok, true);
+  assert.equal(r.spawned, false);
+  assert.deepEqual(h.calls, ["apply:todo->dropped", "sync"]);
+  assert.deepEqual(h.statusWrites, [{ next: "dropped", completed_at: null }]);
+});
+
+test("reopening clears completed_at and recreates the reminder for a future due date", async () => {
+  const h = transitionHarness({ status: "done", due_ts: FUTURE_DUE });
+  const r = await runStatusTransition(h.deps, "todo");
+  assert.equal(r.ok, true);
+  assert.equal(r.spawned, false, "reopening never spawns");
+  assert.deepEqual(h.calls, ["apply:done->todo", "sync"]);
+  assert.deepEqual(h.statusWrites, [{ next: "todo", completed_at: null }]);
+});
+
+test("reopening past the due date clears completed_at but writes no reminder event", async () => {
+  const h = transitionHarness({ status: "dropped", due_ts: PAST_DUE });
+  const r = await runStatusTransition(h.deps, "todo");
+  assert.equal(r.ok, true);
+  assert.equal(r.spawned, false);
+  // No sync call: a past-due reminder's notifications are already spent.
+  assert.deepEqual(h.calls, ["apply:dropped->todo"]);
+  assert.deepEqual(h.statusWrites, [{ next: "todo", completed_at: null }]);
+});
+
+test("completing a non-recurring task cleans up and spawns nothing", async () => {
+  const h = transitionHarness({ recurring_rule: null });
+  const r = await runStatusTransition(h.deps, "done");
+  assert.equal(r.ok, true);
+  assert.equal(r.spawned, false);
+  assert.deepEqual(h.calls, ["apply:todo->done", "sync"]);
 });
