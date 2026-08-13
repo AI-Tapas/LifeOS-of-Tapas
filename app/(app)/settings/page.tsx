@@ -6,7 +6,11 @@ import AccountsPanel, {
   type AccountView,
   type CalendarView,
 } from "@/components/accounts-panel";
+import PersonaPanel, {
+  type PersonaVersionView,
+} from "@/components/settings/persona-panel";
 import { slotByKey } from "@/lib/accounts";
+import { formatDateIST } from "@/lib/datetime";
 
 export const dynamic = "force-dynamic";
 
@@ -62,7 +66,7 @@ export default async function SettingsPage({
   const status = statusMessage(sp);
   const supabase = await createClient();
 
-  const [{ data: accounts }, { data: calendars }, { data: streams, error }] =
+  const [{ data: accounts }, { data: calendars }, { data: streams, error }, { data: personas }] =
     await Promise.all([
       supabase
         .from("accounts")
@@ -78,7 +82,20 @@ export default async function SettingsPage({
         .from("work_streams")
         .select("id, name, kind, billing_entity, feeds_billing, active")
         .order("name"),
+      supabase
+        .from("assistant_persona")
+        .select("id, version, source, active, created_at, sections_md")
+        .order("version", { ascending: false }),
     ]);
+
+  const personaVersions: PersonaVersionView[] = (personas ?? []).map((p) => ({
+    id: p.id,
+    version: p.version,
+    source: p.source,
+    active: p.active,
+    created_label: formatDateIST(p.created_at),
+  }));
+  const activePersonaMd = (personas ?? []).find((p) => p.active)?.sections_md ?? "";
 
   const toneClass =
     status?.tone === "ok"
@@ -129,6 +146,14 @@ export default async function SettingsPage({
             </li>
           ))}
         </ul>
+      </div>
+
+      <h2 className="mt-10 text-lg font-medium">Assistant persona</h2>
+      <p className="mt-1 text-sm text-neutral-500">
+        How the assistant sounds and judges. Kept private to your session.
+      </p>
+      <div className="mt-2">
+        <PersonaPanel versions={personaVersions} activeMd={activePersonaMd} />
       </div>
 
       <h2 className="mt-10 text-lg font-medium">Security</h2>

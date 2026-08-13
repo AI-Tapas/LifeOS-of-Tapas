@@ -1,5 +1,233 @@
-import Placeholder from "@/components/placeholder";
+import Link from "next/link";
+import { createClient } from "@/lib/supabase/server";
+import { PageHeader } from "@/components/ui";
+import AssistantChat from "@/components/assistant/chat";
+import {
+  PendingCard,
+  HistoryRow,
+  AuditList,
+  type PendingView,
+  type HistoryView,
+  type AuditView,
+  type RecipientFlag,
+} from "@/components/assistant/queue";
+import { formatDateTimeIST, formatDateIST } from "@/lib/datetime";
 
-export default function AssistantPage() {
-  return <Placeholder title="Assistant" />;
+export const dynamic = "force-dynamic";
+
+type Search = Record<string, string | string[] | undefined>;
+
+const TABS = [
+  { key: "chat", label: "Chat" },
+  { key: "queue", label: "Queue" },
+  { key: "history", label: "History" },
+  { key: "audit", label: "Audit" },
+] as const;
+
+const UNDOABLE = new Set([
+  "create_task",
+  "update_task",
+  "set_reminder",
+  "add_note",
+  "add_person",
+  "add_obligation",
+  "add_event_solo",
+]);
+
+interface SendPayload {
+  to?: string[];
+  cc?: string[];
+  subject?: string;
+  body?: string;
+  attendees?: { email: string; name?: string }[];
+  date?: string;
+  start_time?: string | null;
+  end_time?: string | null;
+  location?: string | null;
+}
+
+export default async function AssistantPage({
+  searchParams,
+}: {
+  searchParams: Promise<Search>;
+}) {
+  const sp = await searchParams;
+  const rawTab = Array.isArray(sp.tab) ? sp.tab[0] : sp.tab;
+  const tab = TABS.some((t) => t.key === rawTab) ? (rawTab as string) : "chat";
+
+  const supabase = await createClient();
+  const [{ data: pendingRows }, { data: historyRows }, { data: auditRows }, { data: accounts }, { data: people }, { data: sentBefore }] =
+    await Promise.all([
+      supabase
+        .from("assistant_actions")
+        .select("id, kind, title, payload, created_at, account_id")
+        .eq("status", "proposed")
+        .order("created_at"),
+      supabase
+        .from("assistant_actions")
+        .select("id, kind, title, status, created_at, executed_at, undone_at, error, result")
+        .in("status", ["executed", "failed", "rejected", "undone", "approved"])
+        .order("created_at", { ascending: false })
+        .limit(40),
+      supabase
+        .from("audit_log")
+        .select("id, actor, action, entity, ts, meta")
+        .order("ts", { ascending: false })
+        .limit(50),
+      supabase.from("accounts").select("id, slot, email"),
+      supabase.from("people").select("emails, unverified"),
+      supabase
+        .from("assistant_actions")
+        .select("payload")
+        .eq("kind", "send_email")
+        .eq("status", "executed")
+        .limit(200),
+    ]);
+
+  // Ground-truth recipient flags (A5/A6): unverified person records and
+  // first-time recipients are highlighted on every pending card.
+  const unverifiedEmails = new Set<string>();
+  for (const p of people ?? []) {
+    if (p.unverified) for (const e of p.emails) unverifiedEmails.add(e.toLowerCase());
+  }
+  const mailedBefore = new Set<string>();
+  for (const row of sentBefore ?? []) {
+    const pl = row.payload as SendPayload | null;
+    for (const e of [...(pl?.to ?? []), ...(pl?.cc ?? [])]) {
+      mailedBefore.add(e.toLowerCase());
+    }
+  }
+  const accountLabel = (id: string | null) => {
+    const a = (accounts ?? []).find((x) => x.id === id);
+    return a ? `${a.slot ?? "account"} (${a.email})` : "unknown account";
+  };
+  const flag = (email: string): RecipientFlag => {
+    const e = email.toLowerCase();
+    const flags: string[] = [];
+    if (unverifiedEmails.has(e)) flags.push("unverified record");
+    if (!mailedBefore.has(e)) flags.push("first send from here");
+    return { email, flags };
+  };
+
+  const pending: PendingView[] = (pendingRows ?? []).map((row) => {
+    const pl = (row.payload ?? {}) as SendPayload;
+    const base = {
+      id: row.id,
+      kind: row.kind,
+      title: row.title,
+      created_at_label: formatDateTimeIST(row.created_at),
+      account_label: accountLabel(row.account_id),
+    };
+    if (row.kind === "send_email") {
+      return {
+        ...base,
+        to: (pl.to ?? []).map(flag),
+        cc: (pl.cc ?? []).map(flag),
+        subject: pl.subject ?? "",
+        body: pl.body ?? "",
+      };
+    }
+    return {
+      ...base,
+      attendees: (pl.attendees ?? []).map((a) => flag(a.email)),
+      subject: (pl as { title?: string }).title,
+      event_line: [
+        pl.date ? formatDateIST(`${pl.date}T00:00:00+05:30`) : "",
+        pl.start_time ? `at ${pl.start_time}` : "",
+        pl.location ? `in ${pl.location}` : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
+    };
+  });
+
+  const history: HistoryView[] = (historyRows ?? []).map((row) => ({
+    id: row.id,
+    kind: row.kind,
+    title: row.title,
+    status: row.status,
+    when_label: formatDateTimeIST(row.executed_at ?? row.created_at),
+    undoable:
+      row.status === "executed" &&
+      UNDOABLE.has(row.kind) &&
+      !!(row.result as { undo?: unknown } | null)?.undo,
+    error: row.error,
+  }));
+
+  const audit: AuditView[] = (auditRows ?? []).map((row) => {
+    const meta = (row.meta ?? {}) as Record<string, unknown>;
+    const detail = [meta.kind, meta.slot, meta.reason]
+      .filter((v) => typeof v === "string")
+      .join(", ");
+    return {
+      id: row.id,
+      ts_label: formatDateTimeIST(row.ts),
+      actor: row.actor,
+      action: row.action,
+      entity: row.entity,
+      detail,
+    };
+  });
+
+  return (
+    <main>
+      <PageHeader
+        title="Assistant"
+        subtitle="Acts on its own for your private lists; asks before anything reaches another person."
+      />
+
+      <div className="mb-4 flex gap-1 rounded-xl border border-neutral-200 bg-white p-1 dark:border-neutral-800 dark:bg-neutral-900">
+        {TABS.map((t) => (
+          <Link
+            key={t.key}
+            href={t.key === "chat" ? "/assistant" : `/assistant?tab=${t.key}`}
+            className={
+              "flex-1 rounded-lg py-1.5 text-center text-sm font-medium " +
+              (tab === t.key
+                ? "bg-indigo-600 text-white"
+                : "text-neutral-600 dark:text-neutral-300")
+            }
+          >
+            {t.label}
+            {t.key === "queue" && pending.length > 0 ? ` (${pending.length})` : ""}
+          </Link>
+        ))}
+      </div>
+
+      {tab === "chat" && <AssistantChat />}
+
+      {tab === "queue" && (
+        <div className="space-y-3">
+          {pending.length === 0 && (
+            <p className="rounded-xl border border-dashed border-neutral-300 p-6 text-center text-sm text-neutral-500 dark:border-neutral-700">
+              Nothing waiting for approval.
+            </p>
+          )}
+          {pending.map((item) => (
+            <PendingCard key={item.id} item={item} />
+          ))}
+        </div>
+      )}
+
+      {tab === "history" && (
+        <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+          {history.length === 0 ? (
+            <p className="text-sm text-neutral-500">No assistant actions yet.</p>
+          ) : (
+            <ul className="divide-y divide-neutral-200 dark:divide-neutral-800">
+              {history.map((item) => (
+                <HistoryRow key={item.id} item={item} />
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {tab === "audit" && (
+        <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+          <AuditList rows={audit} />
+        </div>
+      )}
+    </main>
+  );
 }

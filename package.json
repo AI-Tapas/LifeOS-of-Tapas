@@ -12,9 +12,11 @@
     "test:rls:cloud": "node --env-file=.env.local --test scripts/rls.test.mjs",
     "test:oauth": "node --test scripts/oauth.test.ts",
     "test:m3": "node --test scripts/m3.test.ts",
-    "icons": "node scripts/gen-icons.mjs"
+    "icons": "node scripts/gen-icons.mjs",
+    "test:m4": "node --test scripts/m4.test.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.116.0",
     "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.110.0",
     "next": "16.2.10",

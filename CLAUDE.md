@@ -140,3 +140,50 @@ and email-verification rules live in lib/accounts.ts.
 - npm run test:oauth proves the pure OAuth token logic (PKCE S256 vector,
   token-response parse, Google/Microsoft refresh, invalid_grant to revoked)
   with mocked providers. No stack; needs Node 22.18+ for .ts type stripping.
+
+## Assistant layer (Milestone 4)
+
+- LLM: open provider config in lib/assistant/config.ts. LLM_BASE_URL /
+  LLM_API_KEY / LLM_MODEL select any Anthropic-Messages-compatible endpoint
+  (default https://api.anthropic.com, claude-opus-5). Streaming via the
+  official SDK, adaptive thinking (LLM_THINKING=off to disable), strict:true
+  on every tool schema, cache_control on the hard-rules system block.
+- Tool registry: lib/assistant/tools.ts is the fixed tool list and the
+  security boundary. Buckets enforced in lib/assistant/execute.ts:
+  autonomous (tasks, reminders, notes, people, obligations, solo events,
+  app-DB email drafts) execute immediately and are undoable; confirm
+  (send_email, propose_event_with_invites) only ever insert a proposed
+  assistant_actions row. Stubs: gst wiki, trips, bills. There is no tool
+  that mutates assistant_actions.status, fetches URLs, or reads documents.
+- Approval gate: approve happens only in the owner-session server action
+  (app/(app)/assistant/actions.ts -> approveAndExecute). Approval records a
+  sha256 payload hash; the executor (runApprovedExecution in
+  lib/assistant/core.ts, pure and offline-tested) requires status=approved,
+  a hash match, and a compare-and-swap claim on executed_at. The DB trigger
+  guard_assistant_action_update freezes payloads once status leaves
+  proposed and whitelists status transitions for every role.
+- add_event_solo has no attendees field in its schema, the executor refuses
+  smuggled attendee keys, and it calls createEvent with confirmed=false so
+  the M3 attendee gate is a third belt. Invite events execute only through
+  the approved queue with confirmed=true.
+- Mail-to-task (on demand, Assistant tab button): per-account isolated model
+  context whose only tool is propose_task. Gmail metadata format + snippet,
+  Graph bodyPreview; bodies and attachments never fetched or stored. Mail
+  text enters context inside fenceUntrusted (fixed data-not-instructions
+  preamble + provenance). Output schema-constrained; external_ref must match
+  a scanned message id; capped 20 proposals/account/day; deduped on
+  external_ref. Tasks land source=email, and context rendering wraps
+  source=email rows in the same untrusted framing.
+- Persona: assistant_persona versions, seeded v1 by migration. System prompt
+  order is fixed: hard rules (with the precedence line), app context, then
+  the persona inside a labelled tone-only block. Persona writes happen only
+  through Settings server actions; the model has no persona tool. A hostile
+  persona provably cannot change gate behaviour (scripts/m4.test.ts).
+- audit_log is append-only for authenticated (UPDATE/DELETE revoked);
+  propose/approve/reject/execute/undo and mail scans are all logged.
+- people.unverified flags assistant-created people; the queue UI shows raw
+  recipient addresses, the sending account, the full body, and highlights
+  unverified and first-time recipients. Approval is a two-tap button; there
+  is no approve-all.
+- Tests: npm run test:m4 (offline, the R6 red-team controls). rls.test.mjs
+  adds audit_log append-only and payload-immutability trigger proofs.

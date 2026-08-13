@@ -260,3 +260,39 @@ phone, and the week view is a readable 7-day agenda rather than a tiny time grid
 `lib/database.types.ts` was hand-updated to match migration `20260712000100`
 (this machine has no Docker); run `npm run db:types` to regenerate it once the
 local stack is up. Offline proof: `npm run test:m3` (Node 22.18+).
+
+## Assistant (Milestone 4)
+
+The Assistant tab is a chat over the app's own data with a fixed tool set.
+Private actions (tasks, reminders, notes, people, obligations, solo calendar
+events, email drafts) run immediately, show up under History and can be
+undone. Anything that would reach another person (sending an email, inviting
+people to an event) always lands in the Queue tab and goes out only after a
+deliberate two-tap approval there. Email drafts live in the app database
+only, never in Gmail or Outlook. "Scan mail now" reads recent inbox metadata
+(never bodies or attachments) and proposes tasks into the Tasks inbox,
+capped at 20 per account per day.
+
+### LLM configuration
+
+Server-side env vars (Vercel: plain vars, never NEXT_PUBLIC_):
+
+- `LLM_API_KEY` (or `ANTHROPIC_API_KEY`): the API key. Required.
+- `LLM_BASE_URL`: optional, defaults to https://api.anthropic.com. Any
+  endpoint that speaks the Anthropic Messages API works (OpenRouter, a
+  LiteLLM proxy, and similar), so the model is swappable without code
+  changes.
+- `LLM_MODEL`: optional, defaults to claude-opus-5.
+- `LLM_THINKING=off`: optional, for providers that reject the adaptive
+  thinking parameter.
+
+### Security in one paragraph
+
+The tool list is the boundary: no document tools, no URL fetch, no SQL, no
+status mutation. Approval is a server-side fact recorded with a payload
+hash; the executor re-checks the hash and claims execution exactly once,
+and a database trigger freezes payloads and status transitions for every
+role. The mail scanner runs in an isolated context whose only tool proposes
+tasks, mail text is always framed as data-not-instructions, and the persona
+(Settings > Assistant persona) is tone-only by construction: a persona that
+says "skip confirmations" provably changes nothing (npm run test:m4).

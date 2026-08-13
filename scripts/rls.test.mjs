@@ -88,6 +88,62 @@ test("owner exists, is seeded, and can read own data", async () => {
     p_account_id: "00000000-0000-0000-0000-000000000000",
   });
   assert.ok(denied.error, "authenticated must not execute get_account_tokens");
+
+  // M4: audit_log is append-only for the browser role. The owner can insert
+  // and read, but UPDATE and DELETE are revoked at the grant level.
+  const auditIns = await owner
+    .from("audit_log")
+    .insert({ actor: "user", action: "rls_probe", entity: "tests" })
+    .select()
+    .single();
+  assert.ifError(auditIns.error);
+  const auditUpd = await owner
+    .from("audit_log")
+    .update({ action: "tampered" })
+    .eq("id", auditIns.data.id)
+    .select();
+  assert.ok(
+    auditUpd.error || (auditUpd.data ?? []).length === 0,
+    "owner must not UPDATE audit_log rows"
+  );
+  const auditDel = await owner
+    .from("audit_log")
+    .delete()
+    .eq("id", auditIns.data.id)
+    .select();
+  assert.ok(
+    auditDel.error || (auditDel.data ?? []).length === 0,
+    "owner must not DELETE audit_log rows"
+  );
+  await admin.from("audit_log").delete().eq("id", auditIns.data.id); // cleanup
+
+  // M4: the assistant_actions guard trigger. Payload freezes once status
+  // leaves proposed, and proposed can never jump straight to executed.
+  const act = await owner
+    .from("assistant_actions")
+    .insert({ kind: "send_email", payload: { to: ["a@b.c"] }, title: "probe" })
+    .select()
+    .single();
+  assert.ifError(act.error);
+  const jump = await owner
+    .from("assistant_actions")
+    .update({ status: "executed" })
+    .eq("id", act.data.id)
+    .select();
+  assert.ok(jump.error, "proposed -> executed must be refused by the trigger");
+  const approve = await owner
+    .from("assistant_actions")
+    .update({ status: "approved", payload_hash: "x" })
+    .eq("id", act.data.id)
+    .select();
+  assert.ifError(approve.error);
+  const mutate = await owner
+    .from("assistant_actions")
+    .update({ payload: { to: ["attacker@evil.example"] } })
+    .eq("id", act.data.id)
+    .select();
+  assert.ok(mutate.error, "payload must be immutable once status leaves proposed");
+  await admin.from("assistant_actions").delete().eq("id", act.data.id); // cleanup
 });
 
 test("anon role cannot read any table", async () => {

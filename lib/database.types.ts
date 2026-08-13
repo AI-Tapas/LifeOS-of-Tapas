@@ -101,33 +101,68 @@ export type Database = {
       }
       assistant_actions: {
         Row: {
+          account_id: string | null
+          approved_at: string | null
           created_at: string
+          error: string | null
+          executed_at: string | null
           id: string
           kind: string
           mode: Database["public"]["Enums"]["assistant_action_mode"]
           payload: Json
+          payload_hash: string | null
+          rejected_at: string | null
+          result: Json | null
           status: Database["public"]["Enums"]["assistant_action_status"]
+          title: string
+          undone_at: string | null
           user_id: string
         }
         Insert: {
+          account_id?: string | null
+          approved_at?: string | null
           created_at?: string
+          error?: string | null
+          executed_at?: string | null
           id?: string
           kind: string
           mode?: Database["public"]["Enums"]["assistant_action_mode"]
           payload?: Json
+          payload_hash?: string | null
+          rejected_at?: string | null
+          result?: Json | null
           status?: Database["public"]["Enums"]["assistant_action_status"]
+          title?: string
+          undone_at?: string | null
           user_id?: string
         }
         Update: {
+          account_id?: string | null
+          approved_at?: string | null
           created_at?: string
+          error?: string | null
+          executed_at?: string | null
           id?: string
           kind?: string
           mode?: Database["public"]["Enums"]["assistant_action_mode"]
           payload?: Json
+          payload_hash?: string | null
+          rejected_at?: string | null
+          result?: Json | null
           status?: Database["public"]["Enums"]["assistant_action_status"]
+          title?: string
+          undone_at?: string | null
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "assistant_actions_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       assistant_persona: {
         Row: {
@@ -486,6 +521,7 @@ export type Database = {
           org: string | null
           phones: string[]
           role: string | null
+          unverified: boolean
           user_id: string
         }
         Insert: {
@@ -497,6 +533,7 @@ export type Database = {
           org?: string | null
           phones?: string[]
           role?: string | null
+          unverified?: boolean
           user_id?: string
         }
         Update: {
@@ -894,7 +931,13 @@ export type Database = {
         | "forwarded"
         | "disconnected"
       assistant_action_mode: "auto" | "draft"
-      assistant_action_status: "proposed" | "approved" | "executed" | "rejected"
+      assistant_action_status:
+        | "proposed"
+        | "approved"
+        | "executed"
+        | "rejected"
+        | "failed"
+        | "undone"
       assistant_persona_source: "interview" | "seeded" | "edited"
       audit_actor: "user" | "assistant"
       bill_recipient: "institute" | "client" | "other"
@@ -1074,7 +1117,14 @@ export const Constants = {
         "disconnected",
       ],
       assistant_action_mode: ["auto", "draft"],
-      assistant_action_status: ["proposed", "approved", "executed", "rejected"],
+      assistant_action_status: [
+        "proposed",
+        "approved",
+        "executed",
+        "rejected",
+        "failed",
+        "undone",
+      ],
       assistant_persona_source: ["interview", "seeded", "edited"],
       audit_actor: ["user", "assistant"],
       bill_recipient: ["institute", "client", "other"],

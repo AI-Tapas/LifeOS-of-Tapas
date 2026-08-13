@@ -188,3 +188,74 @@ export async function setCalendarSyncAction(
     .eq("id", calendarId);
   revalidatePath("/settings");
 }
+
+// ---------------------------------------------------------------------------
+// M4: assistant persona. Owner-session only; the model and the mail scanner
+// hold no persona tool, so these server actions are the ONLY write path
+// (attack A9). Edits create a NEW version, never overwrite.
+// ---------------------------------------------------------------------------
+export async function savePersonaVersionAction(
+  sectionsMd: string
+): Promise<{ ok: boolean; message?: string; version?: number }> {
+  const { supabase, user } = await requireUser();
+  const text = sectionsMd.trim();
+  if (!text) return { ok: false, message: "The persona cannot be empty." };
+
+  const { data: latest } = await supabase
+    .from("assistant_persona")
+    .select("version")
+    .order("version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const version = (latest?.version ?? 0) + 1;
+
+  await supabase
+    .from("assistant_persona")
+    .update({ active: false })
+    .eq("active", true);
+  const { error } = await supabase.from("assistant_persona").insert({
+    user_id: user.id,
+    version,
+    sections_md: text,
+    source: "edited",
+    active: true,
+  });
+  if (error) return { ok: false, message: error.message };
+  await supabase.from("audit_log").insert({
+    user_id: user.id,
+    actor: "user",
+    action: "persona_new_version",
+    entity: "assistant_persona",
+    meta: { version },
+  });
+  revalidatePath("/settings");
+  return { ok: true, version };
+}
+
+export async function activatePersonaVersionAction(
+  personaId: string
+): Promise<{ ok: boolean; message?: string }> {
+  const { supabase, user } = await requireUser();
+  await supabase
+    .from("assistant_persona")
+    .update({ active: false })
+    .eq("active", true);
+  const { data, error } = await supabase
+    .from("assistant_persona")
+    .update({ active: true, updated_at: new Date().toISOString() })
+    .eq("id", personaId)
+    .select("version");
+  if (error || !data?.length) {
+    return { ok: false, message: error?.message ?? "Version not found." };
+  }
+  await supabase.from("audit_log").insert({
+    user_id: user.id,
+    actor: "user",
+    action: "persona_activated",
+    entity: "assistant_persona",
+    entity_id: personaId,
+    meta: { version: data[0].version },
+  });
+  revalidatePath("/settings");
+  return { ok: true };
+}

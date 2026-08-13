@@ -33,6 +33,10 @@ export interface TaskInput {
   recurring_rule?: string | null;
   is_billable?: boolean;
   remind_offsets?: number[];
+  // M4: the assistant and the mail scanner create tasks too; provenance is
+  // stamped so context rendering can apply the untrusted-data framing.
+  source?: Database["public"]["Enums"]["task_source"];
+  external_ref?: string | null;
 }
 
 export type TaskResult =
@@ -65,7 +69,8 @@ export async function createTaskAction(input: TaskInput): Promise<TaskResult> {
       recurring_rule: input.recurring_rule ?? null,
       is_billable: input.is_billable ?? false,
       remind_offsets: input.remind_offsets ?? [7, 3, 1, 0],
-      source: "manual",
+      source: input.source ?? "manual",
+      external_ref: input.external_ref ?? null,
     })
     .select("id")
     .single();

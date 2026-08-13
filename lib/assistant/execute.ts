@@ -1,0 +1,786 @@
+// Server-side tool execution. The autonomy buckets live in code here:
+//   autonomous -> perform now, record an executed assistant_action (undoable)
+//   confirm    -> insert a proposed assistant_action; NOTHING is performed
+//   stub       -> fixed string, no side effect
+// plus the approved-queue executor (the only code path that ever sends mail
+// or writes an attendee-bearing event) and undo. All rows are written through
+// the owner's authenticated Supabase client, so RLS and the DB triggers
+// apply; only the provider calls use the service-role path inside
+// withResourceAuth.
+
+import { createClient } from "@/lib/supabase/server";
+import { withResourceAuth } from "@/lib/oauth/tokens";
+import { createEvent, deleteAppEvent } from "@/lib/events/write";
+import { istInstant, formatDateIST } from "@/lib/datetime";
+import {
+  createTaskAction,
+  updateTaskAction,
+  deleteTaskAction,
+  type TaskInput,
+} from "@/app/(app)/tasks/actions";
+import {
+  AUTONOMOUS_KINDS,
+  CONFIRM_KINDS,
+  STUB_KINDS,
+  STUB_REPLIES,
+  SEND_CLASS,
+  assertNoAttendees,
+} from "./tools";
+import { hashPayload, runApprovedExecution } from "./core";
+import type { Database, Json } from "@/lib/database.types";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+type Db = SupabaseClient<Database>;
+
+async function ownerClient(): Promise<{ supabase: Db; userId: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) throw new Error("not signed in");
+  return { supabase, userId: user.id };
+}
+
+async function audit(
+  supabase: Db,
+  userId: string,
+  action: string,
+  entityId: string | null,
+  meta: Record<string, unknown>
+): Promise<void> {
+  await supabase.from("audit_log").insert({
+    user_id: userId,
+    actor: "assistant",
+    action,
+    entity: "assistant_actions",
+    entity_id: entityId,
+    meta: meta as Json,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Shared payload helpers
+// ---------------------------------------------------------------------------
+function s(v: unknown): string | null {
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+}
+
+function civil(dateOnly: string): { y: number; m: number; d: number } {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateOnly);
+  if (!m) throw new Error(`Invalid date: ${dateOnly}`);
+  return { y: Number(m[1]), m: Number(m[2]), d: Number(m[3]) };
+}
+
+function hm(time: string): { h: number; m: number } {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(time);
+  if (!m) throw new Error(`Invalid time: ${time}`);
+  return { h: Number(m[1]), m: Number(m[2]) };
+}
+
+// Task due dates land at 9:30 am IST on the given day, matching when the
+// reminder popups are most useful.
+function dueIso(dateOnly: string): string {
+  return istInstant(civil(dateOnly), 9, 30).toISOString();
+}
+
+async function resolveWorkStream(
+  supabase: Db,
+  name: string | null
+): Promise<string> {
+  const { data: streams } = await supabase
+    .from("work_streams")
+    .select("id, name")
+    .order("name");
+  if (!streams?.length) throw new Error("No work streams exist.");
+  const wanted = (name ?? "personal").trim().toLowerCase();
+  const hit =
+    streams.find((w) => w.name.toLowerCase() === wanted) ??
+    streams.find((w) => w.name.toLowerCase() === "personal") ??
+    streams[0];
+  return hit.id;
+}
+
+async function resolveAccount(
+  supabase: Db,
+  slot: string
+): Promise<{ id: string; email: string; slot: string; provider: string }> {
+  const { data } = await supabase
+    .from("accounts")
+    .select("id, email, slot, provider, status, connect_mode")
+    .eq("slot", slot)
+    .maybeSingle();
+  if (!data) throw new Error(`The ${slot} account is not connected.`);
+  if (data.status !== "connected" || data.connect_mode !== "direct") {
+    throw new Error(`The ${slot} account is ${data.status}.`);
+  }
+  return { id: data.id, email: data.email, slot, provider: data.provider };
+}
+
+function asEmailList(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  const out: string[] = [];
+  for (const item of v) {
+    const e = typeof item === "string" ? item.trim() : "";
+    // Minimal shape check; the confirmation UI shows the raw address either way.
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) out.push(e);
+    else if (e) throw new Error(`Not a valid email address: ${e}`);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Tool dispatch for the chat loop
+// ---------------------------------------------------------------------------
+export interface ToolOutcome {
+  // What the model sees as the tool result.
+  reply: string;
+  // Set when a queue item was created or executed, for the UI notice line.
+  actionId?: string;
+  queued?: boolean;
+}
+
+export async function executeToolCall(
+  name: string,
+  input: Record<string, unknown>
+): Promise<ToolOutcome> {
+  if (STUB_KINDS.has(name)) {
+    return { reply: STUB_REPLIES[name] ?? "Not available yet." };
+  }
+  const { supabase, userId } = await ownerClient();
+
+  if (CONFIRM_KINDS.has(name) || name === "draft_email") {
+    return proposeAction(supabase, userId, name, input);
+  }
+  if (AUTONOMOUS_KINDS.has(name)) {
+    return performAutonomous(supabase, userId, name, input);
+  }
+  return { reply: `Unknown tool: ${name}.` };
+}
+
+// Anything that would notify a third party lands as a proposed action. The
+// model's draft_email also lands here: the draft IS the proposed send_email
+// row, stored only in the app database (attack A8: no Gmail/Outlook drafts).
+async function proposeAction(
+  supabase: Db,
+  userId: string,
+  name: string,
+  input: Record<string, unknown>
+): Promise<ToolOutcome> {
+  const kind = name === "draft_email" ? "send_email" : name;
+  if (!SEND_CLASS.has(kind)) throw new Error(`${name} cannot be proposed.`);
+
+  const slot = s(input.account);
+  if (!slot) throw new Error("An account slot is required.");
+  const account = await resolveAccount(supabase, slot);
+
+  let title: string;
+  let payload: Record<string, unknown>;
+  if (kind === "send_email") {
+    const to = asEmailList(input.to);
+    if (!to.length) throw new Error("At least one valid recipient is required.");
+    const cc = asEmailList(input.cc ?? []);
+    const subject = s(input.subject) ?? "";
+    const body = typeof input.body === "string" ? input.body : "";
+    if (!subject || !body.trim()) throw new Error("Subject and body are required.");
+    payload = { account_id: account.id, account_slot: slot, to, cc, subject, body };
+    title = `Email to ${to.join(", ")}: ${subject}`.slice(0, 200);
+  } else {
+    // propose_event_with_invites
+    const attendeesRaw = Array.isArray(input.attendees) ? input.attendees : [];
+    const attendees = attendeesRaw.map((a) => {
+      const rec = (a ?? {}) as Record<string, unknown>;
+      const email = asEmailList([rec.email])[0];
+      if (!email) throw new Error("Every attendee needs a valid email address.");
+      return { email, name: s(rec.name) ?? undefined };
+    });
+    if (!attendees.length) {
+      throw new Error("propose_event_with_invites needs at least one attendee. For a solo event use add_event_solo.");
+    }
+    const date = s(input.date);
+    const eventTitle = s(input.title);
+    if (!date || !eventTitle) throw new Error("A title and date are required.");
+    payload = {
+      account_id: account.id,
+      account_slot: slot,
+      title: eventTitle,
+      date,
+      start_time: s(input.start_time),
+      end_time: s(input.end_time),
+      description: s(input.description),
+      location: s(input.location),
+      attendees,
+    };
+    title = `Invite ${attendees.map((a) => a.email).join(", ")}: ${eventTitle}`.slice(0, 200);
+  }
+
+  const { data, error } = await supabase
+    .from("assistant_actions")
+    .insert({
+      user_id: userId,
+      kind,
+      mode: "draft",
+      status: "proposed",
+      account_id: account.id,
+      title,
+      payload: payload as Json,
+    })
+    .select("id")
+    .single();
+  if (error || !data) throw new Error(error?.message ?? "Could not queue the action.");
+  await audit(supabase, userId, "propose", data.id, {
+    kind,
+    account_slot: slot,
+    via: name,
+  });
+  return {
+    reply:
+      kind === "send_email"
+        ? `Draft stored and queued for approval (action ${data.id}). It will not be sent until Tapas approves it in the Assistant queue.`
+        : `Invite proposal queued for approval (action ${data.id}). No invitation goes out until Tapas approves it.`,
+    actionId: data.id,
+    queued: true,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Autonomous kinds: perform now, record an executed action with undo info.
+// ---------------------------------------------------------------------------
+interface Performed {
+  summary: string;
+  undo: Record<string, unknown> | null;
+  accountId?: string;
+}
+
+async function performAutonomous(
+  supabase: Db,
+  userId: string,
+  name: string,
+  input: Record<string, unknown>
+): Promise<ToolOutcome> {
+  if (!AUTONOMOUS_KINDS.has(name)) {
+    throw new Error(`${name} is not an autonomous tool.`);
+  }
+  const done = await performers[name](supabase, userId, input);
+  const { data } = await supabase
+    .from("assistant_actions")
+    .insert({
+      user_id: userId,
+      kind: name,
+      mode: "auto",
+      status: "executed",
+      account_id: done.accountId ?? null,
+      title: done.summary.slice(0, 200),
+      payload: input as Json,
+      payload_hash: hashPayload(input),
+      executed_at: new Date().toISOString(),
+      result: { undo: done.undo } as Json,
+    })
+    .select("id")
+    .single();
+  await audit(supabase, userId, "execute_autonomous", data?.id ?? null, {
+    kind: name,
+  });
+  return { reply: done.summary, actionId: data?.id };
+}
+
+type Performer = (
+  supabase: Db,
+  userId: string,
+  input: Record<string, unknown>
+) => Promise<Performed>;
+
+const performers: Record<string, Performer> = {
+  async create_task(supabase, _userId, input) {
+    const title = s(input.title);
+    if (!title) throw new Error("A task title is required.");
+    const workStreamId = await resolveWorkStream(supabase, s(input.work_stream));
+    const due = s(input.due_date);
+    const priority = s(input.priority) as TaskInput["priority"] | null;
+    const r = await createTaskAction({
+      title,
+      notes: s(input.note),
+      status: "todo",
+      priority: priority ?? "medium",
+      due_ts: due ? dueIso(due) : null,
+      work_stream_id: workStreamId,
+      is_billable: input.billable === true,
+      source: "assistant",
+    });
+    if (!r.ok) throw new Error(r.message);
+    return {
+      summary: `Task created: ${title}${due ? `, due ${formatDateIST(dueIso(due))}` : ""}.`,
+      undo: { task_id: r.id },
+    };
+  },
+
+  async update_task(supabase, _userId, input) {
+    const taskId = s(input.task_id);
+    if (!taskId) throw new Error("task_id is required.");
+    const { data: prev } = await supabase
+      .from("tasks")
+      .select("title, notes, status, priority, due_ts, remind_offsets")
+      .eq("id", taskId)
+      .single();
+    if (!prev) throw new Error("Task not found.");
+    const patch: Partial<TaskInput> = {};
+    if (s(input.title)) patch.title = s(input.title)!;
+    if (input.note !== null && input.note !== undefined) patch.notes = s(input.note);
+    if (s(input.status)) patch.status = s(input.status) as TaskInput["status"];
+    if (s(input.priority)) patch.priority = s(input.priority) as TaskInput["priority"];
+    if (s(input.due_date)) patch.due_ts = dueIso(s(input.due_date)!);
+    const r = await updateTaskAction(taskId, patch);
+    if (!r.ok) throw new Error(r.message);
+    return {
+      summary: `Task updated: ${patch.title ?? prev.title}.`,
+      undo: { task_id: taskId, prev },
+    };
+  },
+
+  async set_reminder(supabase, _userId, input) {
+    const taskId = s(input.task_id);
+    const due = s(input.due_date);
+    if (!taskId || !due) throw new Error("task_id and due_date are required.");
+    const { data: prev } = await supabase
+      .from("tasks")
+      .select("title, notes, status, priority, due_ts, remind_offsets")
+      .eq("id", taskId)
+      .single();
+    if (!prev) throw new Error("Task not found.");
+    const offsets = Array.isArray(input.remind_days)
+      ? (input.remind_days as number[]).filter((n) => Number.isInteger(n) && n >= 0)
+      : undefined;
+    const r = await updateTaskAction(taskId, {
+      due_ts: dueIso(due),
+      ...(offsets ? { remind_offsets: offsets } : {}),
+    });
+    if (!r.ok) throw new Error(r.message);
+    return {
+      summary: `Reminder set on "${prev.title}" for ${formatDateIST(dueIso(due))}${
+        r.reminderNote ? ` (${r.reminderNote})` : ""
+      }.`,
+      undo: { task_id: taskId, prev },
+    };
+  },
+
+  async add_note(supabase, userId, input) {
+    const title = s(input.title);
+    const type = s(input.type);
+    if (!title || !type) throw new Error("A note needs a type and title.");
+    const { data, error } = await supabase
+      .from("notes")
+      .insert({
+        user_id: userId,
+        type: type as Database["public"]["Enums"]["note_type"],
+        title,
+        body_md: s(input.body),
+      })
+      .select("id")
+      .single();
+    if (error || !data) throw new Error(error?.message ?? "Could not save the note.");
+    return { summary: `Note saved: ${title}.`, undo: { note_id: data.id } };
+  },
+
+  async add_person(supabase, userId, input) {
+    const name = s(input.name);
+    if (!name) throw new Error("A name is required.");
+    const email = s(input.email);
+    const phone = s(input.phone);
+    const { data, error } = await supabase
+      .from("people")
+      .insert({
+        user_id: userId,
+        name,
+        org: s(input.org),
+        role: s(input.role),
+        emails: email ? [email.toLowerCase()] : [],
+        phones: phone ? [phone] : [],
+        context_md: s(input.context),
+        // A5: assistant-created people stay unverified until Tapas confirms
+        // them; the send-confirmation UI highlights unverified recipients.
+        unverified: true,
+      })
+      .select("id")
+      .single();
+    if (error || !data) throw new Error(error?.message ?? "Could not save the person.");
+    return {
+      summary: `Person saved (unverified until you confirm): ${name}.`,
+      undo: { person_id: data.id },
+    };
+  },
+
+  async add_obligation(supabase, userId, input) {
+    const name = s(input.name);
+    const category = s(input.category);
+    const frequency = s(input.frequency);
+    const dueDay = Number(input.due_day);
+    if (!name || !category || !frequency || !Number.isInteger(dueDay)) {
+      throw new Error("Name, category, frequency and due_day are required.");
+    }
+    const { data, error } = await supabase
+      .from("recurring_obligations")
+      .insert({
+        user_id: userId,
+        name,
+        category: category as Database["public"]["Enums"]["obligation_category"],
+        amount: typeof input.amount === "number" ? input.amount : null,
+        variable_amount: typeof input.amount !== "number",
+        frequency: frequency as Database["public"]["Enums"]["obligation_frequency"],
+        due_day: dueDay,
+        due_month: typeof input.due_month === "number" ? input.due_month : null,
+        autopay: input.autopay === true,
+      })
+      .select("id")
+      .single();
+    if (error || !data) throw new Error(error?.message ?? "Could not save it.");
+    return { summary: `Obligation added: ${name}.`, undo: { obligation_id: data.id } };
+  },
+
+  async add_event_solo(supabase, userId, input) {
+    // Structural gates for attack A3: the schema has no attendees field,
+    // smuggled attendee keys are refused here, and confirmed=false below
+    // means prepareEventWrite would throw on any attendee that slipped
+    // through anyway. Writes go only to the account's write-back calendar.
+    assertNoAttendees(input);
+    const slot = s(input.account);
+    const title = s(input.title);
+    const date = s(input.date);
+    if (!slot || !title || !date) throw new Error("Account, title and date are required.");
+    const account = await resolveAccount(supabase, slot);
+    const c = civil(date);
+    const start = s(input.start_time);
+    const end = s(input.end_time);
+    const allDay = !start;
+    const startIso = allDay
+      ? istInstant(c, 0, 0).toISOString()
+      : istInstant(c, hm(start).h, hm(start).m).toISOString();
+    const endIso = !allDay && end
+      ? istInstant(c, hm(end).h, hm(end).m).toISOString()
+      : undefined;
+    const r = await createEvent(
+      userId,
+      account.id,
+      {
+        title,
+        description: s(input.description) ?? undefined,
+        location: s(input.location) ?? undefined,
+        startIso,
+        endIso,
+        allDay,
+      },
+      false // never confirmed: any attendee-bearing payload throws
+    );
+    return {
+      summary: `Event added to the ${slot} calendar: ${title} on ${formatDateIST(startIso)}.`,
+      undo: { event_id: r.id },
+      accountId: account.id,
+    };
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Approval lifecycle (owner-session server actions call these)
+// ---------------------------------------------------------------------------
+export async function approveAndExecute(actionId: string): Promise<{
+  ok: boolean;
+  message?: string;
+}> {
+  const { supabase, userId } = await ownerClient();
+  const { data: action } = await supabase
+    .from("assistant_actions")
+    .select("id, kind, status, payload")
+    .eq("id", actionId)
+    .single();
+  if (!action) return { ok: false, message: "Action not found." };
+  if (action.status !== "proposed") {
+    return { ok: false, message: `This action is already ${action.status}.` };
+  }
+  // Approval binds the exact payload: the hash recorded here is what the
+  // executor verifies. CAS on status=proposed so a double tap approves once.
+  const { data: approved } = await supabase
+    .from("assistant_actions")
+    .update({
+      status: "approved",
+      approved_at: new Date().toISOString(),
+      payload_hash: hashPayload(action.payload),
+    })
+    .eq("id", actionId)
+    .eq("status", "proposed")
+    .select("id");
+  if (!approved?.length) return { ok: false, message: "The action changed state." };
+  await audit(supabase, userId, "approve", actionId, { kind: action.kind });
+  return executeApprovedAction(actionId);
+}
+
+export async function executeApprovedAction(actionId: string): Promise<{
+  ok: boolean;
+  message?: string;
+}> {
+  const { supabase, userId } = await ownerClient();
+  return runApprovedExecution({
+    loadAction: async () => {
+      const { data } = await supabase
+        .from("assistant_actions")
+        .select("id, kind, status, payload, payload_hash")
+        .eq("id", actionId)
+        .single();
+      return data ?? null;
+    },
+    claimExecution: async () => {
+      const { data, error } = await supabase
+        .from("assistant_actions")
+        .update({ executed_at: new Date().toISOString() })
+        .eq("id", actionId)
+        .eq("status", "approved")
+        .is("executed_at", null)
+        .select("id");
+      if (error) throw new Error(error.message);
+      return (data?.length ?? 0) > 0;
+    },
+    perform: (kind, payload) =>
+      performSendClass(userId, kind, payload as Record<string, unknown>),
+    markExecuted: async (result) => {
+      await supabase
+        .from("assistant_actions")
+        .update({ status: "executed", result: result as Json })
+        .eq("id", actionId);
+    },
+    markFailed: async (message) => {
+      await supabase
+        .from("assistant_actions")
+        .update({ status: "failed", error: message })
+        .eq("id", actionId);
+    },
+    audit: (action, meta) => audit(supabase, userId, action, actionId, meta),
+  });
+}
+
+// The ONLY function in the codebase that sends mail or writes an
+// attendee-bearing event, reachable solely through runApprovedExecution.
+async function performSendClass(
+  userId: string,
+  kind: string,
+  payload: Record<string, unknown>
+): Promise<unknown> {
+  const accountId = s(payload.account_id);
+  if (!accountId) throw new Error("The action has no account bound to it.");
+
+  if (kind === "send_email") {
+    return sendEmail(accountId, payload);
+  }
+  if (kind === "propose_event_with_invites") {
+    const c = civil(s(payload.date) ?? "");
+    const start = s(payload.start_time);
+    const end = s(payload.end_time);
+    const attendees = (payload.attendees as { email: string; name?: string }[]) ?? [];
+    const r = await createEvent(
+      userId,
+      accountId,
+      {
+        title: s(payload.title) ?? "",
+        description: s(payload.description) ?? undefined,
+        location: s(payload.location) ?? undefined,
+        startIso: start
+          ? istInstant(c, hm(start).h, hm(start).m).toISOString()
+          : istInstant(c, 0, 0).toISOString(),
+        endIso: end ? istInstant(c, hm(end).h, hm(end).m).toISOString() : undefined,
+        allDay: !start,
+        attendees,
+      },
+      true // approved through the queue; this is the confirmation
+    );
+    return { event_id: r.id, ext_event_id: r.extEventId };
+  }
+  throw new Error(`Unknown send-class kind: ${kind}`);
+}
+
+async function sendEmail(
+  accountId: string,
+  payload: Record<string, unknown>
+): Promise<unknown> {
+  const { supabase } = await ownerClient();
+  const { data: account } = await supabase
+    .from("accounts")
+    .select("id, email, provider, slot")
+    .eq("id", accountId)
+    .single();
+  if (!account) throw new Error("Account not found.");
+  const to = (payload.to as string[]) ?? [];
+  const cc = (payload.cc as string[]) ?? [];
+  const subject = s(payload.subject) ?? "";
+  const body = typeof payload.body === "string" ? payload.body : "";
+  if (!to.length) throw new Error("No recipients.");
+
+  if (account.provider === "google") {
+    const mime = [
+      `From: ${account.email}`,
+      `To: ${to.join(", ")}`,
+      ...(cc.length ? [`Cc: ${cc.join(", ")}`] : []),
+      `Subject: ${subject}`,
+      "MIME-Version: 1.0",
+      'Content-Type: text/plain; charset="UTF-8"',
+      "",
+      body,
+    ].join("\r\n");
+    const res = await withResourceAuth(accountId, (token) =>
+      fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ raw: Buffer.from(mime, "utf8").toString("base64url") }),
+      })
+    );
+    if (!res.ok) throw new Error(`Gmail send failed (${res.status}).`);
+    const j = (await res.json()) as { id?: string };
+    return { provider_message_id: j.id ?? null };
+  }
+
+  // Microsoft Graph
+  const res = await withResourceAuth(accountId, (token) =>
+    fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        message: {
+          subject,
+          body: { contentType: "Text", content: body },
+          toRecipients: to.map((a) => ({ emailAddress: { address: a } })),
+          ccRecipients: cc.map((a) => ({ emailAddress: { address: a } })),
+        },
+        saveToSentItems: true,
+      }),
+    })
+  );
+  if (!res.ok && res.status !== 202) throw new Error(`Graph send failed (${res.status}).`);
+  return { provider_message_id: null };
+}
+
+// ---------------------------------------------------------------------------
+// Reject and undo
+// ---------------------------------------------------------------------------
+export async function rejectProposedAction(actionId: string): Promise<{
+  ok: boolean;
+  message?: string;
+}> {
+  const { supabase, userId } = await ownerClient();
+  const { data } = await supabase
+    .from("assistant_actions")
+    .update({ status: "rejected", rejected_at: new Date().toISOString() })
+    .eq("id", actionId)
+    .eq("status", "proposed")
+    .select("id, kind");
+  if (!data?.length) return { ok: false, message: "Only proposed actions can be rejected." };
+  await audit(supabase, userId, "reject", actionId, { kind: data[0].kind });
+  return { ok: true };
+}
+
+// Kinds with a reversible inverse. Send-class actions are deliberately absent:
+// a sent mail cannot be unsent.
+const UNDOABLE = new Set([
+  "create_task",
+  "update_task",
+  "set_reminder",
+  "add_note",
+  "add_person",
+  "add_obligation",
+  "add_event_solo",
+]);
+
+export async function undoExecutedAction(actionId: string): Promise<{
+  ok: boolean;
+  message?: string;
+}> {
+  const { supabase, userId } = await ownerClient();
+  const { data: action } = await supabase
+    .from("assistant_actions")
+    .select("id, kind, status, result")
+    .eq("id", actionId)
+    .single();
+  if (!action) return { ok: false, message: "Action not found." };
+  if (action.status !== "executed") {
+    return { ok: false, message: `Only executed actions can be undone (this one is ${action.status}).` };
+  }
+  if (!UNDOABLE.has(action.kind)) {
+    return { ok: false, message: `${action.kind} cannot be undone.` };
+  }
+  const undo = ((action.result as Record<string, unknown> | null)?.undo ?? null) as
+    | Record<string, unknown>
+    | null;
+  if (!undo) return { ok: false, message: "No undo information was recorded." };
+
+  // Claim the row first (executed -> undone via the trigger whitelist), so a
+  // double tap performs the inverse exactly once.
+  const { data: claimed } = await supabase
+    .from("assistant_actions")
+    .update({ status: "undone", undone_at: new Date().toISOString() })
+    .eq("id", actionId)
+    .eq("status", "executed")
+    .select("id");
+  if (!claimed?.length) return { ok: false, message: "The action changed state." };
+
+  try {
+    await performUndo(supabase, userId, action.kind, undo);
+    await audit(supabase, userId, "undo", actionId, { kind: action.kind });
+    return { ok: true };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Undo failed.";
+    await audit(supabase, userId, "undo_failed", actionId, { reason: message });
+    return { ok: false, message };
+  }
+}
+
+async function performUndo(
+  supabase: Db,
+  userId: string,
+  kind: string,
+  undo: Record<string, unknown>
+): Promise<void> {
+  switch (kind) {
+    case "create_task": {
+      const r = await deleteTaskAction(String(undo.task_id));
+      if (!r.ok) throw new Error(r.message ?? "Could not delete the task.");
+      return;
+    }
+    case "update_task":
+    case "set_reminder": {
+      const prev = (undo.prev ?? {}) as Record<string, unknown>;
+      const r = await updateTaskAction(String(undo.task_id), {
+        title: prev.title as string | undefined,
+        notes: (prev.notes as string | null | undefined) ?? null,
+        status: prev.status as TaskInput["status"],
+        priority: prev.priority as TaskInput["priority"],
+        due_ts: (prev.due_ts as string | null | undefined) ?? null,
+        remind_offsets: prev.remind_offsets as number[] | undefined,
+      });
+      if (!r.ok) throw new Error(r.message);
+      return;
+    }
+    case "add_note": {
+      await supabase.from("notes").delete().eq("id", String(undo.note_id));
+      return;
+    }
+    case "add_person": {
+      await supabase.from("people").delete().eq("id", String(undo.person_id));
+      return;
+    }
+    case "add_obligation": {
+      // ponytail: direct delete; the obligation was just created by the
+      // assistant, so no reminder event exists yet for it in practice.
+      await supabase
+        .from("recurring_obligations")
+        .delete()
+        .eq("id", String(undo.obligation_id));
+      return;
+    }
+    case "add_event_solo": {
+      await deleteAppEvent(userId, String(undo.event_id));
+      return;
+    }
+    default:
+      throw new Error(`${kind} cannot be undone.`);
+  }
+}
