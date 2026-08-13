@@ -70,8 +70,12 @@ export default function AccountsPanel({
   accounts: AccountView[];
   calendars: CalendarView[];
 }) {
-  const [pending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  // Busy state is scoped per account so one slot's action does not freeze the rest.
+  const [busyId, setBusyId] = useState<string | null>(null);
+  // Two-step disconnect: holds the id of the account armed for disconnection.
+  const [armedId, setArmedId] = useState<string | null>(null);
   const [notice, setNotice] = useState<
     { id: string; tone: "ok" | "warn" | "err"; text: string } | null
   >(null);
@@ -84,13 +88,16 @@ export default function AccountsPanel({
     calsByAccount.set(c.account_id, list);
   }
 
-  function run(fn: () => Promise<void>) {
+  function run(busyKey: string, fn: () => Promise<void>) {
     setError(null);
+    setBusyId(busyKey);
     startTransition(async () => {
       try {
         await fn();
       } catch (e) {
         setError(e instanceof Error ? e.message : "Something went wrong.");
+      } finally {
+        setBusyId(null);
       }
     });
   }
@@ -100,6 +107,7 @@ export default function AccountsPanel({
   function runRefresh(accountId: string) {
     setError(null);
     setNotice(null);
+    setBusyId(accountId);
     startTransition(async () => {
       try {
         const r = await refreshCalendarsAction(accountId);
@@ -124,6 +132,8 @@ export default function AccountsPanel({
           tone: "err",
           text: e instanceof Error ? e.message : "Could not refresh calendars.",
         });
+      } finally {
+        setBusyId(null);
       }
     });
   }
@@ -186,9 +196,9 @@ export default function AccountsPanel({
                     <span className="text-sm font-medium">Write-back calendar</span>
                     <select
                       value={writeCal?.id ?? ""}
-                      disabled={pending}
+                      disabled={busyId === acct!.id}
                       onChange={(e) =>
-                        run(() => setPrimaryWriteAction(acct!.id, e.target.value))
+                        run(acct!.id, () => setPrimaryWriteAction(acct!.id, e.target.value))
                       }
                       className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-900"
                     >
@@ -212,9 +222,9 @@ export default function AccountsPanel({
                         <input
                           type="checkbox"
                           checked={c.sync_enabled}
-                          disabled={pending}
+                          disabled={busyId === acct!.id}
                           onChange={(e) =>
-                            run(() => setCalendarSyncAction(c.id, e.target.checked))
+                            run(acct!.id, () => setCalendarSyncAction(c.id, e.target.checked))
                           }
                         />
                         <span>{c.name}</span>
@@ -226,11 +236,16 @@ export default function AccountsPanel({
                 <div className="flex flex-wrap gap-2">
                   {status === "connected" && (
                     <button
-                      onClick={() => runRefresh(acct!.id)}
-                      disabled={pending}
+                      onClick={() => {
+                        setArmedId(null);
+                        runRefresh(acct!.id);
+                      }}
+                      disabled={busyId === acct!.id}
                       className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm disabled:opacity-50 dark:border-neutral-700"
                     >
-                      {pending ? "Refreshing" : `Refresh calendars (${cals.length})`}
+                      {busyId === acct!.id
+                        ? "Refreshing"
+                        : `Refresh calendars (${cals.length})`}
                     </button>
                   )}
                   {status === "needs_reauth" && (
@@ -243,14 +258,21 @@ export default function AccountsPanel({
                   )}
                   <button
                     onClick={() => {
-                      if (confirm(`Disconnect ${slot.label}?`)) {
-                        run(() => disconnectAction(acct!.id));
+                      if (armedId !== acct!.id) {
+                        setArmedId(acct!.id);
+                        return;
                       }
+                      setArmedId(null);
+                      run(acct!.id, () => disconnectAction(acct!.id));
                     }}
-                    disabled={pending}
-                    className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm text-red-600 disabled:opacity-50 dark:border-neutral-700"
+                    disabled={busyId === acct!.id}
+                    className={
+                      armedId === acct!.id
+                        ? "rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                        : "rounded-lg border border-neutral-300 px-3 py-1.5 text-sm text-red-600 disabled:opacity-50 dark:border-neutral-700"
+                    }
                   >
-                    Disconnect
+                    {armedId === acct!.id ? "Confirm disconnect" : "Disconnect"}
                   </button>
                 </div>
 
@@ -294,8 +316,10 @@ export default function AccountsPanel({
                 <input
                   type="checkbox"
                   checked={status === "forwarded"}
-                  disabled={pending}
-                  onChange={(e) => run(() => setForwardedAction(e.target.checked))}
+                  disabled={busyId === (acct?.id ?? slot.key)}
+                  onChange={(e) =>
+                    run(acct?.id ?? slot.key, () => setForwardedAction(e.target.checked))
+                  }
                 />
                 <span>Treat as forwarded (admin blocked the direct connection)</span>
               </label>
@@ -312,8 +336,8 @@ export default function AccountsPanel({
           </p>
           <select
             value={currentReminderHome?.id ?? ""}
-            disabled={pending}
-            onChange={(e) => run(() => setReminderHomeAction(e.target.value))}
+            disabled={busyId === caAccount.id}
+            onChange={(e) => run(caAccount.id, () => setReminderHomeAction(e.target.value))}
             className="mt-2 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-900"
           >
             <option value="" disabled>

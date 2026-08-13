@@ -2,7 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Drawer, Field, inputCls } from "@/components/ui";
+import {
+  Drawer,
+  Empty,
+  Field,
+  RemindChips,
+  drawerFooterCls,
+  inputCls,
+} from "@/components/ui";
 import { formatINR } from "@/lib/datetime";
 import {
   createObligationAction,
@@ -125,12 +132,12 @@ export default function ObligationsPanel({
 
       <div className="mt-4 space-y-2">
         {obligations.length === 0 ? (
-          <p className="text-sm text-neutral-400">No obligations yet.</p>
+          <Empty>No obligations yet. Use + Add to track recurring bills.</Empty>
         ) : (
           obligations.map((o) => (
             <div
               key={o.id}
-              className="rounded-lg border border-neutral-200 p-3 dark:border-neutral-800"
+              className="rounded-lg border border-neutral-200 bg-white p-3 shadow-sm dark:border-neutral-800 dark:bg-neutral-900"
             >
               <div className="flex items-start justify-between gap-2">
                 <button onClick={() => setEditing(o)} className="min-w-0 text-left">
@@ -182,7 +189,7 @@ interface Fields {
   accountRef: string;
   active: boolean;
   notes: string;
-  offsets: string;
+  offsets: number[];
 }
 
 function toFields(o: ObligationRow | null): Fields {
@@ -198,7 +205,7 @@ function toFields(o: ObligationRow | null): Fields {
     accountRef: o?.account_ref ?? "",
     active: o?.active ?? true,
     notes: o?.notes ?? "",
-    offsets: (o?.remind_offsets ?? [7, 3, 1, 0]).join(", "),
+    offsets: o?.remind_offsets ?? [7, 3, 1, 0],
   };
 }
 
@@ -215,13 +222,11 @@ function ObligationForm({
   const [f, setF] = useState<Fields>(() => toFields(obligation));
   const [pending, startTransition] = useTransition();
   const [err, setErr] = useState<string | null>(null);
+  const [armed, setArmed] = useState(false);
   const isEdit = !!obligation;
 
   function buildInput(): ObligationInput {
-    const offsets = f.offsets
-      .split(/[,\s]+/)
-      .map((x) => parseInt(x, 10))
-      .filter((n) => Number.isInteger(n) && n >= 0 && n <= 28);
+    const offsets = [...f.offsets].sort((a, b) => b - a);
     return {
       name: f.name,
       category: f.category,
@@ -240,6 +245,7 @@ function ObligationForm({
 
   function submit() {
     setErr(null);
+    setArmed(false);
     const input = buildInput();
     if (!input.name.trim()) {
       setErr("A name is required.");
@@ -261,7 +267,10 @@ function ObligationForm({
 
   function remove() {
     if (!obligation) return;
-    if (!confirm("Delete this obligation?")) return;
+    if (!armed) {
+      setArmed(true);
+      return;
+    }
     startTransition(async () => {
       await deleteObligationAction(obligation.id);
       onClose();
@@ -376,12 +385,8 @@ function ObligationForm({
             Active
           </label>
         </div>
-        <Field label="Remind (days before, comma separated; max 5, max 28)">
-          <input
-            value={f.offsets}
-            onChange={(e) => setF({ ...f, offsets: e.target.value })}
-            className={inputCls}
-          />
+        <Field label="Remind, days before due">
+          <RemindChips value={f.offsets} onChange={(v) => setF({ ...f, offsets: v })} />
         </Field>
         <Field label="Notes">
           <textarea
@@ -393,7 +398,7 @@ function ObligationForm({
         </Field>
 
         {err && <p className="text-sm text-red-600">{err}</p>}
-        <div className="flex gap-2">
+        <div className={drawerFooterCls + " flex gap-2"}>
           <button
             onClick={submit}
             disabled={pending}
@@ -405,9 +410,13 @@ function ObligationForm({
             <button
               onClick={remove}
               disabled={pending}
-              className="rounded-lg border border-neutral-300 px-3 py-2 text-sm text-red-600 disabled:opacity-50 dark:border-neutral-700"
+              className={
+                armed
+                  ? "rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+                  : "rounded-lg border border-neutral-300 px-3 py-2 text-sm text-red-600 disabled:opacity-50 dark:border-neutral-700"
+              }
             >
-              Delete
+              {armed ? "Confirm delete" : "Delete"}
             </button>
           )}
         </div>

@@ -112,27 +112,31 @@ export default async function SettingsPage({
           Could not load work streams: {error.message}
         </p>
       )}
-      <ul className="mt-2 divide-y divide-neutral-200 dark:divide-neutral-800">
-        {streams?.map((s) => (
-          <li key={s.id} className="flex items-baseline justify-between py-3">
-            <div>
-              <p className="font-medium">{s.name}</p>
-              <p className="text-sm text-neutral-500">
-                {s.kind.replace(/_/g, " ")}
-                {s.billing_entity ? `, bills as ${s.billing_entity}` : ""}
-              </p>
-            </div>
-            <span className="text-xs text-neutral-400">
-              {s.feeds_billing ? "billable" : "non-billing"}
-            </span>
-          </li>
-        ))}
-      </ul>
+      <div className="mt-2 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+        <ul className="divide-y divide-neutral-200 dark:divide-neutral-800">
+          {streams?.map((s) => (
+            <li key={s.id} className="flex items-baseline justify-between py-3 first:pt-0 last:pb-0">
+              <div>
+                <p className="font-medium">{s.name}</p>
+                <p className="text-sm text-neutral-500">
+                  {s.kind.replace(/_/g, " ")}
+                  {s.billing_entity ? `, bills as ${s.billing_entity}` : ""}
+                </p>
+              </div>
+              <span className="text-xs text-neutral-400">
+                {s.feeds_billing ? "billable" : "non-billing"}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
 
       <h2 className="mt-10 text-lg font-medium">Security</h2>
-      <div className="mt-2 space-y-4">
-        <PasskeyButton />
-        <SignOutButton />
+      <div className="mt-2 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+        <div className="space-y-4">
+          <PasskeyButton />
+          <SignOutButton />
+        </div>
       </div>
     </main>
   );

@@ -18,6 +18,7 @@ import {
   type CivilDate,
 } from "@/lib/datetime";
 import { accountColor } from "@/lib/account-colors";
+import { Drawer, Field, inputCls, drawerFooterCls } from "@/components/ui";
 import {
   syncEventsAction,
   createEventAction,
@@ -169,13 +170,21 @@ export default function CalendarView({
     <div>
       <div className="mb-1 flex items-center justify-between gap-2">
         <h1 className="text-[19px] font-bold tracking-tight">{title}</h1>
-        <button
-          onClick={manualRefresh}
-          disabled={pending}
-          className="shrink-0 rounded-xl border border-neutral-300 px-3 py-1.5 text-xs font-medium disabled:opacity-50 dark:border-neutral-700"
-        >
-          {pending ? "Syncing" : "Refresh"}
-        </button>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <button
+            onClick={manualRefresh}
+            disabled={pending}
+            className="rounded-xl border border-neutral-300 px-3 py-1.5 text-xs font-medium disabled:opacity-50 dark:border-neutral-700"
+          >
+            {pending ? "Syncing" : "Refresh"}
+          </button>
+          <button
+            onClick={() => openCreate(anchor, istHour(new Date().toISOString()) + 1)}
+            className="rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white"
+          >
+            + New
+          </button>
+        </div>
       </div>
 
       <div className="mt-3 flex items-center justify-between gap-2">
@@ -184,11 +193,12 @@ export default function CalendarView({
             <button
               key={v}
               onClick={() => go(v, anchor)}
+              aria-pressed={v === view}
               className={
-                "rounded-full px-3 py-1 text-sm capitalize " +
+                "rounded-full px-3.5 py-1.5 text-sm capitalize " +
                 (v === view
                   ? "bg-indigo-600 text-white"
-                  : "border border-neutral-300 dark:border-neutral-700")
+                  : "border border-neutral-300 text-neutral-600 dark:border-neutral-700 dark:text-neutral-300")
               }
             >
               {v}
@@ -229,12 +239,6 @@ export default function CalendarView({
             {a.label}
           </span>
         ))}
-        <button
-          onClick={() => openCreate(anchor, istHour(new Date().toISOString()) + 1)}
-          className="ml-auto rounded-lg bg-indigo-600 px-3 py-1 text-sm font-medium text-white"
-        >
-          + New
-        </button>
       </div>
 
       {notice && (
@@ -251,7 +255,6 @@ export default function CalendarView({
             events={events}
             accountById={accountById}
             onDay={(d) => go("day", d)}
-            onEvent={setSelected}
           />
         )}
         {view === "week" && (
@@ -313,14 +316,12 @@ function MonthGrid({
   events,
   accountById,
   onDay,
-  onEvent,
 }: {
   anchor: CivilDate;
   todayKey: string;
   events: CalEvent[];
   accountById: Map<string, CalAccount>;
   onDay: (d: CivilDate) => void;
-  onEvent: (e: CalEvent) => void;
 }) {
   const first: CivilDate = { y: anchor.y, m: anchor.m, d: 1 };
   const lead = (civilWeekday(first) + 6) % 7; // Monday-start offset
@@ -369,12 +370,11 @@ function MonthGrid({
                   return (
                     <div
                       key={e.id + key}
-                      onClick={(ev) => {
-                        ev.stopPropagation();
-                        onEvent(e);
+                      className="pointer-events-none truncate rounded px-1 text-[10px] leading-tight"
+                      style={{
+                        backgroundColor: col.soft,
+                        borderLeft: `2px solid ${col.hex}`,
                       }}
-                      className="truncate rounded px-1 text-[10px] leading-tight"
-                      style={{ backgroundColor: col.soft, color: col.hex }}
                     >
                       {e.all_day ? "" : formatTimeIST(e.start_ts) + " "}
                       {e.title}
@@ -431,7 +431,7 @@ function WeekAgenda({
               </h3>
               <button
                 onClick={() => onAddDay(c)}
-                className="text-xs text-neutral-400"
+                className="-m-2 p-2 text-xs font-medium text-neutral-500 dark:text-neutral-400"
                 aria-label="Add event"
               >
                 + add
@@ -507,7 +507,7 @@ function DayGrid({
           <div key={h} className="flex gap-2 py-1">
             <button
               onClick={() => onAddHour(h)}
-              className="w-12 shrink-0 pt-1 text-right text-[11px] text-neutral-400"
+              className="w-12 shrink-0 pt-1 text-right text-[11px] text-neutral-400 active:text-indigo-600"
             >
               {hourLabel(h)}
             </button>
@@ -576,6 +576,7 @@ function EventDetail({
 }) {
   const [pending, startTransition] = useTransition();
   const [err, setErr] = useState<string | null>(null);
+  const [armed, setArmed] = useState(false);
   const readOnly = account?.slot === "icai";
   const attendees = Array.isArray(event.attendees)
     ? (event.attendees as { email?: string; name?: string }[])
@@ -611,7 +612,10 @@ function EventDetail({
       <div className="mt-4 flex gap-2">
         {!readOnly && (
           <button
-            onClick={() => onEdit(event)}
+            onClick={() => {
+              setArmed(false);
+              onEdit(event);
+            }}
             className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white"
           >
             Edit
@@ -620,7 +624,10 @@ function EventDetail({
         {event.source === "app" && !readOnly && (
           <button
             onClick={() => {
-              if (!confirm("Delete this event?")) return;
+              if (!armed) {
+                setArmed(true);
+                return;
+              }
               setErr(null);
               startTransition(async () => {
                 const r = await deleteEventAction(event.id);
@@ -629,9 +636,13 @@ function EventDetail({
               });
             }}
             disabled={pending}
-            className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm text-red-600 disabled:opacity-50 dark:border-neutral-700"
+            className={
+              armed
+                ? "rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                : "rounded-lg border border-neutral-300 px-3 py-1.5 text-sm text-red-600 disabled:opacity-50 dark:border-neutral-700"
+            }
           >
-            Delete
+            {armed ? "Confirm delete" : "Delete"}
           </button>
         )}
       </div>
@@ -856,37 +867,39 @@ function EventForm({
 
         {err && <p className="text-sm text-red-600">{err}</p>}
 
-        {confirmCount !== null ? (
-          <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950/40">
-            <p className="text-amber-900 dark:text-amber-200">
-              This will send an invite to {confirmCount}{" "}
-              {confirmCount === 1 ? "person" : "people"}.
-            </p>
-            <div className="mt-2 flex gap-2">
-              <button
-                onClick={() => submit(true)}
-                disabled={pending}
-                className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
-              >
-                {pending ? "Sending" : "Confirm and send invites"}
-              </button>
-              <button
-                onClick={() => setConfirmCount(null)}
-                className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm dark:border-neutral-700"
-              >
-                Cancel
-              </button>
+        <div className={drawerFooterCls}>
+          {confirmCount !== null ? (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950/40">
+              <p className="text-amber-900 dark:text-amber-200">
+                This will send an invite to {confirmCount}{" "}
+                {confirmCount === 1 ? "person" : "people"}.
+              </p>
+              <div className="mt-2 flex gap-2">
+                <button
+                  onClick={() => submit(true)}
+                  disabled={pending}
+                  className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                >
+                  {pending ? "Sending" : "Confirm and send invites"}
+                </button>
+                <button
+                  onClick={() => setConfirmCount(null)}
+                  className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm dark:border-neutral-700"
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
-          </div>
-        ) : (
-          <button
-            onClick={() => submit(false)}
-            disabled={pending}
-            className="w-full rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-          >
-            {pending ? "Saving" : isEdit ? "Save changes" : "Create event"}
-          </button>
-        )}
+          ) : (
+            <button
+              onClick={() => submit(false)}
+              disabled={pending}
+              className="w-full rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              {pending ? "Saving" : isEdit ? "Save changes" : "Create event"}
+            </button>
+          )}
+        </div>
       </div>
     </Drawer>
   );
@@ -895,43 +908,6 @@ function EventForm({
 // ---------------------------------------------------------------------------
 // Shared bits
 // ---------------------------------------------------------------------------
-const inputCls =
-  "w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-900";
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="block space-y-1">
-      <span className="text-xs font-medium text-neutral-500">{label}</span>
-      {children}
-    </label>
-  );
-}
-
-function Drawer({
-  title,
-  onClose,
-  children,
-}: {
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="fixed inset-0 z-40 flex items-end justify-center sm:items-center">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative z-50 max-h-[85vh] w-full max-w-md overflow-y-auto rounded-t-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-950 sm:rounded-2xl">
-        <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-neutral-500">{title}</h2>
-          <button onClick={onClose} className="text-neutral-400" aria-label="Close">
-            Close
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
-
 function groupByDay(events: CalEvent[]): Map<string, CalEvent[]> {
   const map = new Map<string, CalEvent[]>();
   for (const e of events) {

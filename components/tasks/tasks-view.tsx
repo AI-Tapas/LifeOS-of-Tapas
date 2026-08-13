@@ -2,7 +2,16 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Drawer, Field, inputCls } from "@/components/ui";
+import {
+  Drawer,
+  Empty,
+  Field,
+  PageHeader,
+  RemindChips,
+  btnPrimary,
+  drawerFooterCls,
+  inputCls,
+} from "@/components/ui";
 import { formatDateIST, formatTimeIST, istInstant, istDayKey } from "@/lib/datetime";
 import {
   createTaskAction,
@@ -70,26 +79,26 @@ export default function TasksView({
 
   return (
     <div>
-      <div className="mb-1 flex items-center justify-between">
-        <h1 className="text-[22px] font-bold tracking-tight">Tasks</h1>
-        <button
-          onClick={() => setEditing("new")}
-          className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white active:bg-indigo-700"
-        >
-          + Task
-        </button>
-      </div>
+      <PageHeader
+        title="Tasks"
+        action={
+          <button onClick={() => setEditing("new")} className={btnPrimary}>
+            + Task
+          </button>
+        }
+      />
 
       <div className="mt-3 flex gap-1">
         {(["overview", "inbox", "board", "projects"] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
+            aria-pressed={t === tab}
             className={
-              "rounded-full px-3 py-1 text-sm capitalize " +
+              "rounded-full px-3.5 py-1.5 text-sm capitalize " +
               (t === tab
                 ? "bg-indigo-600 text-white"
-                : "border border-neutral-300 dark:border-neutral-700")
+                : "border border-neutral-300 text-neutral-600 dark:border-neutral-700 dark:text-neutral-300")
             }
           >
             {t}
@@ -188,7 +197,7 @@ function TaskItem({
   }
 
   return (
-    <div className="flex items-start gap-2 rounded-lg border border-neutral-200 p-2 dark:border-neutral-800">
+    <div className="flex items-start gap-2 rounded-lg border border-neutral-200 bg-white p-2 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
       <button
         onClick={complete}
         disabled={pending || task.status === "done"}
@@ -290,10 +299,13 @@ function OverviewTab({
           <button
             key={s.label}
             onClick={() => onGoTo(s.go)}
-            className="rounded-xl border border-neutral-200 p-3 text-left dark:border-neutral-800"
+            className="rounded-xl border border-neutral-200 bg-white p-3 text-left shadow-sm active:bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900 dark:active:bg-neutral-900"
           >
             <p className={"text-2xl font-semibold " + s.tone}>{s.value}</p>
-            <p className="text-xs text-neutral-500">{s.label}</p>
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="text-xs text-neutral-500">{s.label}</p>
+              <span className="text-[11px] text-neutral-400">View</span>
+            </div>
           </button>
         ))}
       </div>
@@ -325,10 +337,14 @@ function OverviewTab({
       )}
 
       {overdue.length + today.length + week.length === 0 && (
-        <p className="mt-5 text-sm text-neutral-400">
-          Nothing due in the next 7 days.
-          {noDue > 0 ? ` ${noDue} open ${noDue === 1 ? "task has" : "tasks have"} no due date (see Board).` : ""}
-        </p>
+        <div className="mt-5">
+          <Empty>
+            Nothing due in the next 7 days.
+            {noDue > 0
+              ? ` ${noDue} open ${noDue === 1 ? "task has" : "tasks have"} no due date (see Board).`
+              : " Tasks with a due date will show up here."}
+          </Empty>
+        </div>
       )}
 
       {perStream.length > 0 && (
@@ -382,7 +398,9 @@ function InboxTab({
     <div>
       <QuickAdd workStreams={workStreams} onNotice={onNotice} />
       {inbox.length === 0 ? (
-        <p className="mt-4 text-sm text-neutral-400">Inbox is empty.</p>
+        <div className="mt-4">
+          <Empty>Inbox is empty. Quick-add tasks land here first.</Empty>
+        </div>
       ) : (
         <div className="mt-3 space-y-2">
           {inbox.map((t) => (
@@ -465,18 +483,18 @@ function BoardTab({
                           <button
                             onClick={() => move(t, col.key === "done" ? "doing" : "todo")}
                             disabled={pending}
-                            className="rounded border border-neutral-300 px-1.5 py-0.5 text-[11px] dark:border-neutral-700"
+                            className="min-h-9 rounded-lg border border-neutral-300 px-2.5 text-xs font-medium disabled:opacity-50 dark:border-neutral-700"
                           >
-                            ‹
+                            Back
                           </button>
                         )}
                         {col.key !== "done" && (
                           <button
                             onClick={() => move(t, col.key === "todo" ? "doing" : "done")}
                             disabled={pending}
-                            className="rounded border border-neutral-300 px-1.5 py-0.5 text-[11px] dark:border-neutral-700"
+                            className="min-h-9 rounded-lg border border-neutral-300 px-2.5 text-xs font-medium disabled:opacity-50 dark:border-neutral-700"
                           >
-                            ›
+                            {col.key === "todo" ? "Start" : "Done"}
                           </button>
                         )}
                       </div>
@@ -513,6 +531,8 @@ function ProjectsTab({
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [wsId, setWsId] = useState(workStreams[0]?.id ?? "");
+  // Two-step delete: holds the id of the project armed for deletion.
+  const [armedId, setArmedId] = useState<string | null>(null);
 
   function addProject() {
     if (!name.trim() || !wsId) return;
@@ -531,7 +551,11 @@ function ProjectsTab({
     });
   }
   function removeProject(id: string) {
-    if (!confirm("Delete this project? Its tasks stay as unfiled.")) return;
+    if (armedId !== id) {
+      setArmedId(id);
+      return;
+    }
+    setArmedId(null);
     startTransition(async () => {
       await deleteProjectAction(id);
       if (selected === id) setSelected(null);
@@ -544,7 +568,10 @@ function ProjectsTab({
     const items = tasks.filter((t) => t.project_id === selected);
     return (
       <div>
-        <button onClick={() => setSelected(null)} className="text-sm text-neutral-500">
+        <button
+          onClick={() => setSelected(null)}
+          className="text-xs font-medium text-neutral-500 dark:text-neutral-400"
+        >
           ‹ All projects
         </button>
         <h2 className="mt-2 text-lg font-medium">{project?.name}</h2>
@@ -605,16 +632,22 @@ function ProjectsTab({
       )}
       <div className="mt-3 space-y-2">
         {projects.length === 0 ? (
-          <p className="text-sm text-neutral-400">No projects yet.</p>
+          <Empty>No projects yet. Use + Project to group related tasks.</Empty>
         ) : (
           projects.map((p) => {
             const count = tasks.filter((t) => t.project_id === p.id).length;
             return (
               <div
                 key={p.id}
-                className="flex items-center justify-between rounded-lg border border-neutral-200 p-2 dark:border-neutral-800"
+                className="flex items-center justify-between rounded-lg border border-neutral-200 bg-white p-2 shadow-sm dark:border-neutral-800 dark:bg-neutral-900"
               >
-                <button onClick={() => setSelected(p.id)} className="text-left">
+                <button
+                  onClick={() => {
+                    setArmedId(null);
+                    setSelected(p.id);
+                  }}
+                  className="text-left"
+                >
                   <p className="text-sm font-medium">{p.name}</p>
                   <p className="text-[11px] text-neutral-500">
                     {wsById.get(p.work_stream_id)} · {count} task{count === 1 ? "" : "s"}
@@ -633,9 +666,13 @@ function ProjectsTab({
                   </select>
                   <button
                     onClick={() => removeProject(p.id)}
-                    className="text-[11px] text-red-600"
+                    className={
+                      armedId === p.id
+                        ? "rounded bg-red-600 px-1.5 py-0.5 text-[11px] font-medium text-white"
+                        : "text-[11px] text-red-600"
+                    }
                   >
-                    Delete
+                    {armedId === p.id ? "Confirm delete" : "Delete"}
                   </button>
                 </div>
               </div>
@@ -713,7 +750,7 @@ interface FormFields {
   recurFreq: "" | "daily" | "weekly" | "monthly" | "yearly";
   recurInterval: string;
   isBillable: boolean;
-  offsets: string;
+  offsets: number[];
 }
 
 function taskToFields(t: TaskRow | null, workStreams: WorkStreamRow[]): FormFields {
@@ -731,7 +768,7 @@ function taskToFields(t: TaskRow | null, workStreams: WorkStreamRow[]): FormFiel
     recurFreq: (rec[0] as FormFields["recurFreq"]) || "",
     recurInterval: rec[1] ?? "1",
     isBillable: t?.is_billable ?? false,
-    offsets: (t?.remind_offsets ?? [7, 3, 1, 0]).join(", "),
+    offsets: t?.remind_offsets ?? [7, 3, 1, 0],
   };
 }
 
@@ -752,6 +789,7 @@ function TaskForm({
   const [f, setF] = useState<FormFields>(() => taskToFields(task, workStreams));
   const [pending, startTransition] = useTransition();
   const [err, setErr] = useState<string | null>(null);
+  const [armed, setArmed] = useState(false);
   const isEdit = !!task;
   const streamProjects = projects.filter((p) => p.work_stream_id === f.workStreamId);
 
@@ -765,10 +803,7 @@ function TaskForm({
     const recurring_rule = f.recurFreq
       ? `${f.recurFreq}:${Math.max(1, parseInt(f.recurInterval || "1", 10))}`
       : null;
-    const offsets = f.offsets
-      .split(/[,\s]+/)
-      .map((x) => parseInt(x, 10))
-      .filter((n) => Number.isInteger(n) && n >= 0 && n <= 28);
+    const offsets = [...f.offsets].sort((a, b) => b - a);
     return {
       title: f.title,
       notes: f.notes || null,
@@ -785,6 +820,7 @@ function TaskForm({
 
   function submit() {
     setErr(null);
+    setArmed(false);
     const input = buildInput();
     if (!input.title.trim()) {
       setErr("A title is required.");
@@ -806,7 +842,10 @@ function TaskForm({
 
   function remove() {
     if (!task) return;
-    if (!confirm("Delete this task?")) return;
+    if (!armed) {
+      setArmed(true);
+      return;
+    }
     startTransition(async () => {
       await deleteTaskAction(task.id);
       onClose();
@@ -930,12 +969,8 @@ function TaskForm({
                 />
               </Field>
             </div>
-            <Field label="Remind (days before, comma separated; max 5, max 28)">
-              <input
-                value={f.offsets}
-                onChange={(e) => setF({ ...f, offsets: e.target.value })}
-                className={inputCls}
-              />
+            <Field label="Remind, days before due">
+              <RemindChips value={f.offsets} onChange={(v) => setF({ ...f, offsets: v })} />
             </Field>
           </>
         )}
@@ -983,7 +1018,7 @@ function TaskForm({
         </Field>
 
         {err && <p className="text-sm text-red-600">{err}</p>}
-        <div className="flex gap-2">
+        <div className={drawerFooterCls + " flex gap-2"}>
           <button
             onClick={submit}
             disabled={pending}
@@ -995,9 +1030,13 @@ function TaskForm({
             <button
               onClick={remove}
               disabled={pending}
-              className="rounded-lg border border-neutral-300 px-3 py-2 text-sm text-red-600 disabled:opacity-50 dark:border-neutral-700"
+              className={
+                armed
+                  ? "rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+                  : "rounded-lg border border-neutral-300 px-3 py-2 text-sm text-red-600 disabled:opacity-50 dark:border-neutral-700"
+              }
             >
-              Delete
+              {armed ? "Confirm delete" : "Delete"}
             </button>
           )}
         </div>
