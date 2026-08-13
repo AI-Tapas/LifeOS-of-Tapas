@@ -511,7 +511,7 @@ function DayGrid({
             >
               {hourLabel(h)}
             </button>
-            <div className="min-h-6 flex-1 space-y-1">
+            <div className="min-h-6 min-w-0 flex-1 space-y-1">
               {(byHour.get(h) ?? []).map((e) => (
                 <EventRow
                   key={e.id}
@@ -541,8 +541,8 @@ function EventRow({
   return (
     <button
       onClick={onClick}
-      className="block w-full rounded-lg border-l-4 px-2 py-1 text-left text-sm"
-      style={{ borderColor: col.hex, backgroundColor: col.soft }}
+      className="block w-full min-w-0 break-words rounded-lg border-l-4 px-2 py-1 text-left text-sm"
+      style={{ borderColor: col.hex, backgroundColor: col.soft, overflowWrap: "anywhere" }}
     >
       <span className="font-medium">{event.title}</span>
       {!event.all_day && (

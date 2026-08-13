@@ -41,7 +41,7 @@ export interface WorkStreamRow {
   name: string;
 }
 
-type Tab = "inbox" | "board" | "projects";
+type Tab = "overview" | "inbox" | "board" | "projects";
 
 const PRIORITY_DOT: Record<TaskRow["priority"], string> = {
   low: "#94a3b8",
@@ -58,7 +58,7 @@ export default function TasksView({
   projects: ProjectRow[];
   workStreams: WorkStreamRow[];
 }) {
-  const [tab, setTab] = useState<Tab>("inbox");
+  const [tab, setTab] = useState<Tab>("overview");
   const [editing, setEditing] = useState<TaskRow | "new" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -81,7 +81,7 @@ export default function TasksView({
       </div>
 
       <div className="mt-3 flex gap-1">
-        {(["inbox", "board", "projects"] as Tab[]).map((t) => (
+        {(["overview", "inbox", "board", "projects"] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -104,6 +104,17 @@ export default function TasksView({
       )}
 
       <div className="mt-4">
+        {tab === "overview" && (
+          <OverviewTab
+            tasks={tasks}
+            workStreams={workStreams}
+            wsById={wsById}
+            projById={projById}
+            onEdit={setEditing}
+            onNotice={setNotice}
+            onGoTo={setTab}
+          />
+        )}
         {tab === "inbox" && (
           <InboxTab
             tasks={tasks}
@@ -209,6 +220,134 @@ function TaskItem({
         </div>
       </button>
       {extraActions}
+    </div>
+  );
+}
+
+function OverviewTab({
+  tasks,
+  workStreams,
+  wsById,
+  projById,
+  onEdit,
+  onNotice,
+  onGoTo,
+}: {
+  tasks: TaskRow[];
+  workStreams: WorkStreamRow[];
+  wsById: Map<string, string>;
+  projById: Map<string, string>;
+  onEdit: (t: TaskRow) => void;
+  onNotice: (s: string | null) => void;
+  onGoTo: (t: Tab) => void;
+}) {
+  const [now] = useState(() => Date.now());
+  const todayKey = istDayKey(new Date(now).toISOString());
+  const weekKey = istDayKey(new Date(now + 7 * 86400000).toISOString());
+
+  const open = tasks.filter(
+    (t) => t.status === "inbox" || t.status === "todo" || t.status === "doing"
+  );
+  const byDue = (a: TaskRow, b: TaskRow) =>
+    (a.due_ts ?? "9999").localeCompare(b.due_ts ?? "9999");
+
+  const overdue = open
+    .filter((t) => t.due_ts && Date.parse(t.due_ts) < now)
+    .sort(byDue);
+  const today = open
+    .filter(
+      (t) => t.due_ts && Date.parse(t.due_ts) >= now && istDayKey(t.due_ts) === todayKey
+    )
+    .sort(byDue);
+  const week = open
+    .filter((t) => {
+      if (!t.due_ts) return false;
+      const k = istDayKey(t.due_ts);
+      return k > todayKey && k <= weekKey;
+    })
+    .sort(byDue);
+  const inboxCount = tasks.filter((t) => t.status === "inbox").length;
+  const noDue = open.filter((t) => !t.due_ts).length;
+
+  const stats: { label: string; value: number; tone: string; go: Tab }[] = [
+    { label: "Overdue", value: overdue.length, tone: overdue.length ? "text-red-600" : "", go: "board" },
+    { label: "Due today", value: today.length, tone: "", go: "board" },
+    { label: "Next 7 days", value: week.length, tone: "", go: "board" },
+    { label: "Inbox", value: inboxCount, tone: inboxCount ? "text-indigo-600 dark:text-indigo-400" : "", go: "inbox" },
+  ];
+
+  const perStream = workStreams
+    .map((w) => ({
+      name: w.name,
+      count: open.filter((t) => t.work_stream_id === w.id).length,
+    }))
+    .filter((s) => s.count > 0);
+
+  return (
+    <div>
+      <div className="grid grid-cols-2 gap-2">
+        {stats.map((s) => (
+          <button
+            key={s.label}
+            onClick={() => onGoTo(s.go)}
+            className="rounded-xl border border-neutral-200 p-3 text-left dark:border-neutral-800"
+          >
+            <p className={"text-2xl font-semibold " + s.tone}>{s.value}</p>
+            <p className="text-xs text-neutral-500">{s.label}</p>
+          </button>
+        ))}
+      </div>
+
+      {(
+        [
+          ["Overdue", overdue],
+          ["Due today", today],
+          ["Next 7 days", week],
+        ] as [string, TaskRow[]][]
+      ).map(([sectionTitle, items]) =>
+        items.length === 0 ? null : (
+          <section key={sectionTitle} className="mt-5">
+            <h3 className="mb-2 text-sm font-medium text-neutral-500">{sectionTitle}</h3>
+            <div className="space-y-2">
+              {items.map((t) => (
+                <TaskItem
+                  key={t.id}
+                  task={t}
+                  wsById={wsById}
+                  projById={projById}
+                  onEdit={onEdit}
+                  onNotice={onNotice}
+                />
+              ))}
+            </div>
+          </section>
+        )
+      )}
+
+      {overdue.length + today.length + week.length === 0 && (
+        <p className="mt-5 text-sm text-neutral-400">
+          Nothing due in the next 7 days.
+          {noDue > 0 ? ` ${noDue} open ${noDue === 1 ? "task has" : "tasks have"} no due date (see Board).` : ""}
+        </p>
+      )}
+
+      {perStream.length > 0 && (
+        <section className="mt-6">
+          <h3 className="mb-2 text-sm font-medium text-neutral-500">
+            Open tasks by work stream
+          </h3>
+          <div className="flex flex-wrap gap-2">
+            {perStream.map((s) => (
+              <span
+                key={s.name}
+                className="rounded-full border border-neutral-200 px-3 py-1 text-xs text-neutral-600 dark:border-neutral-800 dark:text-neutral-300"
+              >
+                {s.name}: {s.count}
+              </span>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }
