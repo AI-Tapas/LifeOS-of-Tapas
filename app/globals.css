@@ -24,3 +24,12 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Hard clamp: the page itself can never scroll or lay out sideways (iOS
+   Safari expands the layout for any unbreakable overflow without this).
+   Scrollable rows inside the page (bottom nav) are unaffected. */
+html,
+body {
+  max-width: 100%;
+  overflow-x: hidden;
+}
