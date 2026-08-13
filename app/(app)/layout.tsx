@@ -16,7 +16,7 @@ export default async function AppLayout({
     .order("name");
 
   return (
-    <div className="mx-auto min-h-dvh max-w-3xl px-4 pb-20 pt-6">
+    <div className="mx-auto min-h-dvh max-w-3xl overflow-x-clip px-4 pb-20 pt-6">
       <ReauthBanner />
       {children}
       <QuickAddTask workStreams={streams ?? []} />

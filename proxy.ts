@@ -32,7 +32,9 @@ export default async function proxy(request: NextRequest) {
 
   const isAuthRoute =
     request.nextUrl.pathname.startsWith("/login") ||
-    request.nextUrl.pathname.startsWith("/auth");
+    request.nextUrl.pathname.startsWith("/auth") ||
+    // local-only visual harness; the page itself 404s in production
+    request.nextUrl.pathname.startsWith("/dev-preview");
 
   if (!user && !isAuthRoute) {
     const url = request.nextUrl.clone();
