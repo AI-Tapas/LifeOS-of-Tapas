@@ -181,8 +181,9 @@ function TaskItem({
       <button
         onClick={complete}
         disabled={pending || task.status === "done"}
-        className="mt-0.5 h-4 w-4 shrink-0 rounded-full border border-neutral-400 disabled:opacity-40"
-        aria-label="Complete"
+        className="mt-0.5 h-5 w-5 shrink-0 rounded-full border-2 border-neutral-400 disabled:opacity-40"
+        aria-label="Mark done"
+        title="Mark done"
         style={task.status === "done" ? { backgroundColor: "#059669", borderColor: "#059669" } : {}}
       />
       <button onClick={() => onEdit(task)} className="min-w-0 flex-1 text-left">
@@ -709,32 +710,59 @@ function TaskForm({
             </select>
           </Field>
         </div>
-        <div className="flex gap-2">
-          <Field label="Status">
-            <select
-              value={f.status}
-              onChange={(e) => setF({ ...f, status: e.target.value as TaskRow["status"] })}
-              className={inputCls}
-            >
-              <option value="inbox">Inbox</option>
-              <option value="todo">To do</option>
-              <option value="doing">Doing</option>
-              <option value="done">Done</option>
-              <option value="dropped">Dropped</option>
-            </select>
-          </Field>
-          <Field label="Priority">
-            <select
-              value={f.priority}
-              onChange={(e) => setF({ ...f, priority: e.target.value as TaskRow["priority"] })}
-              className={inputCls}
-            >
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-            </select>
-          </Field>
-        </div>
+        <Field label="Status">
+          <div className="flex flex-wrap gap-1.5">
+            {(
+              [
+                ["inbox", "Inbox"],
+                ["todo", "To do"],
+                ["doing", "Doing"],
+                ["done", "Done"],
+                ["dropped", "Dropped"],
+              ] as [TaskRow["status"], string][]
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setF({ ...f, status: value })}
+                className={
+                  "rounded-full border px-3 py-1.5 text-sm " +
+                  (f.status === value
+                    ? value === "done"
+                      ? "border-green-600 bg-green-600 text-white"
+                      : value === "dropped"
+                        ? "border-neutral-500 bg-neutral-500 text-white"
+                        : "border-indigo-600 bg-indigo-600 text-white"
+                    : "border-neutral-300 text-neutral-600 dark:border-neutral-700 dark:text-neutral-300")
+                }
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {f.recurFreq && f.status === "done" && (
+            <p className="mt-1 text-xs text-neutral-500">
+              Done removes this reminder from the calendar and schedules the next
+              occurrence.
+            </p>
+          )}
+          {f.recurFreq && f.status === "dropped" && (
+            <p className="mt-1 text-xs text-neutral-500">
+              Dropped removes the reminder and ends the series. No next occurrence.
+            </p>
+          )}
+        </Field>
+        <Field label="Priority">
+          <select
+            value={f.priority}
+            onChange={(e) => setF({ ...f, priority: e.target.value as TaskRow["priority"] })}
+            className={inputCls}
+          >
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
+        </Field>
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
