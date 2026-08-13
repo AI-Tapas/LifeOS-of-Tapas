@@ -67,7 +67,7 @@ function png(size) {
 }
 
 mkdirSync("public/icons", { recursive: true });
-for (const size of [192, 512]) {
+for (const size of [180, 192, 512]) {
   writeFileSync(`public/icons/icon-${size}.png`, png(size));
   console.log(`public/icons/icon-${size}.png`);
 }

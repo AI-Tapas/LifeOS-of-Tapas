@@ -2,13 +2,21 @@
 // reading. No offline writes in V1. Hand-written instead of a bundler plugin
 // because Next 16 builds with Turbopack, which webpack-based PWA plugins do
 // not support; this stays independent of the build tool.
-const CACHE = "life-os-v2";
+const CACHE = "life-os-v3";
 const SHELL = [
   "/offline",
   "/manifest.webmanifest",
+  "/icons/icon-180.png",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
 ];
+
+// Client-side navigations fetch RSC payloads (not full pages). They share the
+// page URL, so cache them under a synthetic key to avoid clobbering the HTML
+// copy of the same route.
+function rscKey(url) {
+  return url + (url.includes("?") ? "&" : "?") + "__sw=rsc";
+}
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -53,6 +61,23 @@ self.addEventListener("fetch", (event) => {
             .match(request)
             .then((cached) => cached || caches.match("/offline"))
         )
+    );
+    return;
+  }
+
+  // In-app tab switches (RSC payloads): network first, fall back to the
+  // last-loaded copy so reading works offline inside the installed app.
+  if (request.headers.get("RSC") === "1") {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          if (response.ok) {
+            const copy = response.clone();
+            caches.open(CACHE).then((cache) => cache.put(rscKey(request.url), copy));
+          }
+          return response;
+        })
+        .catch(() => caches.match(rscKey(request.url)).then((c) => c || Response.error()))
     );
     return;
   }

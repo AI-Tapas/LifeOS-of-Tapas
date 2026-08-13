@@ -17,6 +17,10 @@ export const metadata: Metadata = {
   title: "Life OS",
   description: "Executive assistant and work-life second brain",
   manifest: "/manifest.webmanifest",
+  icons: {
+    icon: "/icons/icon-192.png",
+    apple: "/icons/icon-180.png",
+  },
   appleWebApp: {
     capable: true,
     title: "Life OS",
