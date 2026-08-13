@@ -6,6 +6,50 @@
 export const inputCls =
   "w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-900";
 
+export const btnPrimary =
+  "rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white active:bg-indigo-700 disabled:opacity-50";
+export const btnGhost =
+  "rounded-xl border border-neutral-300 px-4 py-2 text-sm font-medium active:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:active:bg-neutral-900";
+
+export function Card({
+  children,
+  className = "",
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={
+        "rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm dark:border-neutral-800 dark:bg-neutral-900 " +
+        className
+      }
+    >
+      {children}
+    </div>
+  );
+}
+
+export function PageHeader({
+  title,
+  subtitle,
+  action,
+}: {
+  title: string;
+  subtitle?: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="mb-4 flex items-start justify-between gap-3">
+      <div>
+        <h1 className="text-[22px] font-bold tracking-tight">{title}</h1>
+        {subtitle && <p className="mt-0.5 text-sm text-neutral-500">{subtitle}</p>}
+      </div>
+      {action}
+    </div>
+  );
+}
+
 export function Field({
   label,
   children,

@@ -70,11 +70,11 @@ export default function TasksView({
 
   return (
     <div>
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Tasks</h1>
+      <div className="mb-1 flex items-center justify-between">
+        <h1 className="text-[22px] font-bold tracking-tight">Tasks</h1>
         <button
           onClick={() => setEditing("new")}
-          className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white"
+          className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white active:bg-indigo-700"
         >
           + Task
         </button>

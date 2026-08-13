@@ -167,12 +167,12 @@ export default function CalendarView({
 
   return (
     <div>
-      <div className="flex items-center justify-between gap-2">
-        <h1 className="text-xl font-semibold">{title}</h1>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <h1 className="text-[19px] font-bold tracking-tight">{title}</h1>
         <button
           onClick={manualRefresh}
           disabled={pending}
-          className="rounded-lg border border-neutral-300 px-2.5 py-1 text-xs disabled:opacity-50 dark:border-neutral-700"
+          className="shrink-0 rounded-xl border border-neutral-300 px-3 py-1.5 text-xs font-medium disabled:opacity-50 dark:border-neutral-700"
         >
           {pending ? "Syncing" : "Refresh"}
         </button>

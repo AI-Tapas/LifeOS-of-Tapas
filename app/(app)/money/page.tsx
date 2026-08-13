@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { PageHeader } from "@/components/ui";
 import ObligationsPanel, {
   type ObligationRow,
 } from "@/components/money/obligations-panel";
@@ -16,7 +17,7 @@ export default async function MoneyPage() {
 
   return (
     <main>
-      <h1 className="text-2xl font-semibold">Money</h1>
+      <PageHeader title="Money" subtitle="Recurring obligations" />
       <div className="mt-4">
         <ObligationsPanel obligations={(obligations ?? []) as ObligationRow[]} />
       </div>

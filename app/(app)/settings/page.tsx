@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { PageHeader } from "@/components/ui";
 import PasskeyButton from "@/components/passkey-button";
 import SignOutButton from "@/components/sign-out-button";
 import AccountsPanel, {
@@ -88,7 +89,7 @@ export default async function SettingsPage({
 
   return (
     <main>
-      <h1 className="text-2xl font-semibold">Settings</h1>
+      <PageHeader title="Settings" />
 
       {status && (
         <p className={"mt-4 rounded-xl border p-3 text-sm " + toneClass}>{status.text}</p>
