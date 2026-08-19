@@ -7,8 +7,8 @@
 // message ref only (attack A2).
 
 import { createClient } from "@/lib/supabase/server";
-import { llmClient, thinkingParam } from "@/lib/assistant/llm";
-import { SCAN_TOOL, anthropicTools } from "@/lib/assistant/tools";
+import { runLlmTurn } from "@/lib/assistant/llm";
+import { SCAN_TOOL } from "@/lib/assistant/tools";
 import {
   SCAN_SYSTEM,
   buildScanUserMessage,
@@ -53,8 +53,6 @@ export async function runMailScan(): Promise<ScanSummary> {
     .eq("connect_mode", "direct");
 
   const summary: ScanSummary = { scanned: 0, created: 0, skipped: 0, notes: [] };
-  const { client, cfg } = llmClient();
-  const thinking = thinkingParam(cfg);
 
   for (const account of accounts ?? []) {
     if (!account.slot) continue;
@@ -116,25 +114,21 @@ export async function runMailScan(): Promise<ScanSummary> {
     }
 
     // Isolated scanner context: one tool, no persona, mail fenced as data.
-    const response = await client.messages.create({
-      model: cfg.model,
-      max_tokens: 2048,
-      system: SCAN_SYSTEM,
-      messages: [{ role: "user", content: buildScanUserMessage(scanMails) }],
-      tools: anthropicTools([SCAN_TOOL]),
-      ...(thinking ? { thinking } : {}),
+    const turn = await runLlmTurn({
+      blocks: [{ text: SCAN_SYSTEM, stable: true }],
+      conv: [{ kind: "text", role: "user", text: buildScanUserMessage(scanMails) }],
+      tools: [SCAN_TOOL],
+      maxTokens: 2048,
     });
-    if (response.stop_reason === "refusal") {
+    if (turn.stop === "refusal") {
       summary.notes.push(`${account.slot}: the model declined the scan`);
       continue;
     }
 
-    const calls: RawToolCall[] = response.content
-      .filter((b) => b.type === "tool_use")
-      .map((b) => ({
-        name: b.name,
-        input: (b.input ?? {}) as Record<string, unknown>,
-      }));
+    const calls: RawToolCall[] = turn.calls.map((c) => ({
+      name: c.name,
+      input: c.input,
+    }));
     const { accepted, rejected } = validateScanProposals(calls, knownRefs, budget);
     summary.skipped += rejected.length;
 

@@ -143,11 +143,14 @@ and email-verification rules live in lib/accounts.ts.
 
 ## Assistant layer (Milestone 4)
 
-- LLM: open provider config in lib/assistant/config.ts. LLM_BASE_URL /
-  LLM_API_KEY / LLM_MODEL select any Anthropic-Messages-compatible endpoint
-  (default https://api.anthropic.com, claude-opus-5). Streaming via the
-  official SDK, adaptive thinking (LLM_THINKING=off to disable), strict:true
-  on every tool schema, cache_control on the hard-rules system block.
+- LLM: open provider config in lib/assistant/config.ts. Two wire formats
+  behind one runner (runLlmTurn in lib/assistant/llm.ts): LLM_API_FORMAT
+  'anthropic' (default; official SDK, adaptive thinking, cache_control on
+  the hard-rules block) or 'openai' (Chat Completions SSE, covers NVIDIA
+  Build, OpenRouter, Groq, DeepSeek, Ollama). LLM_BASE_URL / LLM_API_KEY /
+  LLM_MODEL select the provider; LLM_THINKING=off and LLM_STRICT=off are
+  the degrade switches. Dialect mapping is pure in lib/assistant/wire.ts
+  (offline-tested); buckets and gates are format-independent.
 - Tool registry: lib/assistant/tools.ts is the fixed tool list and the
   security boundary. Buckets enforced in lib/assistant/execute.ts:
   autonomous (tasks, reminders, notes, people, obligations, solo events,

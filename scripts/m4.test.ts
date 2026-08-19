@@ -357,3 +357,74 @@ test("fenceUntrusted always carries the fixed preamble and provenance label", ()
   assert.ok(fenced.includes("[email from=x@y.z]"));
   assert.equal(fenced.includes("hello ``` world"), false);
 });
+
+// --- wire formats: the OpenAI dialect maps without touching the gates -----------
+
+test("OpenAI mapping: system first, tool calls stringified, results keep ids", async () => {
+  const wire = await import("../lib/assistant/wire.ts");
+  const msgs = wire.toOpenAIMessages("SYS", [
+    { kind: "text", role: "user", text: "hi" },
+    {
+      kind: "tool_use",
+      text: "creating",
+      calls: [{ id: "c1", name: "create_task", input: { title: "T" } }],
+    },
+    { kind: "tool_results", results: [{ id: "c1", content: "done", isError: false }] },
+  ]);
+  assert.deepEqual(msgs[0], { role: "system", content: "SYS" });
+  const assistant = msgs[2] as {
+    tool_calls: { id: string; function: { name: string; arguments: string } }[];
+  };
+  assert.equal(assistant.tool_calls[0].id, "c1");
+  assert.equal(assistant.tool_calls[0].function.arguments, '{"title":"T"}');
+  const toolMsg = msgs[3] as { role: string; tool_call_id: string; content: string };
+  assert.equal(toolMsg.role, "tool");
+  assert.equal(toolMsg.tool_call_id, "c1");
+});
+
+test("OpenAI streaming assembly: split tool arguments reassemble; refusal wins", async () => {
+  const wire = await import("../lib/assistant/wire.ts");
+  const s = wire.newOpenAIStreamState();
+  wire.applyOpenAIChunk(s, {
+    delta: { tool_calls: [{ index: 0, id: "c9", function: { name: "create_task", arguments: '{"ti' } }] },
+  });
+  wire.applyOpenAIChunk(s, {
+    delta: { tool_calls: [{ index: 0, function: { arguments: 'tle":"X"}' } }] },
+    finish_reason: "tool_calls",
+  });
+  const done = wire.finishOpenAIStream(s);
+  assert.equal(done.stop, "tool_use");
+  assert.deepEqual(done.calls, [{ id: "c9", name: "create_task", input: { title: "X" } }]);
+
+  const r = wire.newOpenAIStreamState();
+  wire.applyOpenAIChunk(r, { delta: { refusal: "no" }, finish_reason: "stop" });
+  assert.equal(wire.finishOpenAIStream(r).stop, "refusal");
+});
+
+test("malformed OpenAI tool arguments become an empty input, not a crash", async () => {
+  const wire = await import("../lib/assistant/wire.ts");
+  assert.deepEqual(wire.parseOpenAIToolArgs("{broken"), {});
+  assert.deepEqual(wire.parseOpenAIToolArgs("[1,2]"), {});
+});
+
+test("the strict flag is droppable for picky OpenAI-compatible hosts", async () => {
+  const wire = await import("../lib/assistant/wire.ts");
+  const strictOn = wire.toOpenAITools([toolByName("create_task")!], true);
+  const strictOff = wire.toOpenAITools([toolByName("create_task")!], false);
+  const fnOn = (strictOn[0] as { function: { strict?: boolean } }).function;
+  const fnOff = (strictOff[0] as { function: { strict?: boolean } }).function;
+  assert.equal(fnOn.strict, true);
+  assert.equal("strict" in fnOff, false);
+});
+
+test("Anthropic mapping round-trips tool use and results", async () => {
+  const wire = await import("../lib/assistant/wire.ts");
+  const msgs = wire.toAnthropicMessages([
+    { kind: "tool_use", text: "", calls: [{ id: "a1", name: "add_note", input: { x: 1 } }] },
+    { kind: "tool_results", results: [{ id: "a1", content: "ok", isError: false }] },
+  ]);
+  const first = msgs[0].content as Array<Record<string, unknown>>;
+  assert.equal(first[0].type, "tool_use");
+  const second = msgs[1].content as Array<Record<string, unknown>>;
+  assert.equal(second[0].tool_use_id, "a1");
+});

@@ -278,13 +278,22 @@ capped at 20 per account per day.
 Server-side env vars (Vercel: plain vars, never NEXT_PUBLIC_):
 
 - `LLM_API_KEY` (or `ANTHROPIC_API_KEY`): the API key. Required.
-- `LLM_BASE_URL`: optional, defaults to https://api.anthropic.com. Any
-  endpoint that speaks the Anthropic Messages API works (OpenRouter, a
-  LiteLLM proxy, and similar), so the model is swappable without code
-  changes.
+- `LLM_API_FORMAT`: optional. `anthropic` (default) speaks the Anthropic
+  Messages API; `openai` speaks OpenAI-style Chat Completions, which covers
+  NVIDIA Build, OpenRouter, Groq, DeepSeek, Ollama and most other hosts.
+- `LLM_BASE_URL`: optional, defaults to https://api.anthropic.com. For the
+  openai format include the version path, e.g.
+  https://integrate.api.nvidia.com/v1
 - `LLM_MODEL`: optional, defaults to claude-opus-5.
-- `LLM_THINKING=off`: optional, for providers that reject the adaptive
-  thinking parameter.
+- `LLM_THINKING=off`: optional, for anthropic-format hosts that reject the
+  adaptive thinking parameter. `LLM_STRICT=off`: optional, for
+  openai-format hosts that reject strict tool schemas.
+
+  Example (free NVIDIA Build key with GLM): LLM_API_FORMAT=openai,
+  LLM_BASE_URL=https://integrate.api.nvidia.com/v1, LLM_API_KEY=nvapi-...,
+  LLM_MODEL the exact id from the NVIDIA model page. Free evaluation keys
+  are fine for trying the app; use a paid endpoint with a no-training
+  policy for real client data.
 
 ### Security in one paragraph
 
