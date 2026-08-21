@@ -509,3 +509,19 @@ test("the chat-completions URL tolerates a base URL with or without /v1", async 
     "http://localhost:11434/v1/chat/completions"
   );
 });
+
+test("the deepseek preset resolves its own key, base URL and model", async () => {
+  const { llmConfig } = await import("../lib/assistant/config.ts");
+  const env = {
+    ANTHROPIC_API_KEY: "sk-ant-x",
+    NVIDIA_API_KEY: "nvapi-y",
+    DEEPSEEK_API_KEY: "sk-ds-z",
+    LLM_PROVIDER: "deepseek",
+  };
+  const cfg = llmConfig(env);
+  assert.equal(cfg.provider, "deepseek");
+  assert.equal(cfg.format, "openai");
+  assert.equal(cfg.baseUrl, "https://api.deepseek.com/v1");
+  assert.equal(cfg.model, "deepseek-v4-flash");
+  assert.equal(cfg.apiKey, "sk-ds-z", "the other two keys stay untouched");
+});

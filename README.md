@@ -282,7 +282,7 @@ Keys for several providers can be stored at once. `LLM_PROVIDER` decides
 which one is live, so switching model is a one-variable edit and no key is
 ever overwritten.
 
-- `LLM_PROVIDER`: `anthropic` (default) or `nvidia`.
+- `LLM_PROVIDER`: `anthropic` (default), `nvidia` or `deepseek`.
 - Anthropic preset: `ANTHROPIC_API_KEY` (required for this provider),
   `ANTHROPIC_MODEL` (optional, defaults to claude-opus-5). Uses the
   Anthropic Messages API, so prompt caching and adaptive thinking stay on.
@@ -292,7 +292,11 @@ ever overwritten.
   Uses OpenAI-style Chat Completions. Note that NVIDIA Build logs usage
   and its own banner says not to send confidential data, so treat it as a
   trial endpoint only.
-- Any other host (OpenRouter, Groq, DeepSeek, Ollama, LiteLLM, Z.ai): set
+- DeepSeek preset: `DEEPSEEK_API_KEY`, `DEEPSEEK_MODEL` (optional,
+  defaults to deepseek-v4-flash; deepseek-v4-pro is the stronger one). The
+  legacy deepseek-chat and deepseek-reasoner names were retired in July
+  2026.
+- Any other host (OpenRouter, Groq, Ollama, LiteLLM, Z.ai): set
   the generic vars, which override the preset. `LLM_API_FORMAT`
   (`anthropic` or `openai`), `LLM_BASE_URL` (include the version path for
   the openai format), `LLM_API_KEY`, `LLM_MODEL`.

@@ -2,7 +2,8 @@
 // for several providers can sit side by side, with ONE variable choosing
 // which is live.
 //
-//   LLM_PROVIDER   which preset is active: 'anthropic' (default) or 'nvidia'
+//   LLM_PROVIDER   which preset is active: 'anthropic' (default), 'nvidia'
+//                  or 'deepseek'
 //
 // Each preset knows its wire format, base URL, default model, and the env
 // var holding its key, so switching provider means editing LLM_PROVIDER
@@ -10,6 +11,7 @@
 //
 //   anthropic  ANTHROPIC_API_KEY (or LLM_API_KEY), ANTHROPIC_MODEL
 //   nvidia     NVIDIA_API_KEY,    NVIDIA_MODEL
+//   deepseek   DEEPSEEK_API_KEY,  DEEPSEEK_MODEL
 //
 // Any preset value can be overridden by the generic vars, which also cover
 // providers with no preset (OpenRouter, Groq, DeepSeek, Ollama, LiteLLM,
@@ -63,6 +65,15 @@ const PRESETS: Record<string, Preset> = {
     model: "z-ai/glm-5.2",
     keyVars: ["NVIDIA_API_KEY", "LLM_API_KEY"],
     modelVar: "NVIDIA_MODEL",
+  },
+  deepseek: {
+    format: "openai",
+    baseUrl: "https://api.deepseek.com/v1",
+    // deepseek-v4-flash (cheap, fast) or deepseek-v4-pro. The legacy names
+    // deepseek-chat and deepseek-reasoner were retired on 24 July 2026.
+    model: "deepseek-v4-flash",
+    keyVars: ["DEEPSEEK_API_KEY", "LLM_API_KEY"],
+    modelVar: "DEEPSEEK_MODEL",
   },
 };
 

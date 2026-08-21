@@ -144,7 +144,7 @@ and email-verification rules live in lib/accounts.ts.
 ## Assistant layer (Milestone 4)
 
 - LLM: open provider config in lib/assistant/config.ts. Named presets
-  (anthropic, nvidia) each carry a wire format, base URL, default model and
+  (anthropic, nvidia, deepseek) carry a wire format, base URL, default model and
   their own key var, so several providers' keys coexist and LLM_PROVIDER
   alone switches the live one. Generic LLM_API_FORMAT / LLM_BASE_URL /
   LLM_API_KEY / LLM_MODEL override a preset and cover unlisted hosts.
