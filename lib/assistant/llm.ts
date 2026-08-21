@@ -4,9 +4,9 @@
 //   anthropic  official SDK, cache_control on the stable system prefix,
 //              adaptive thinking, strict tools
 //   openai     hand-rolled Chat Completions SSE against any compatible host
-// The endpoint stays open: LLM_API_FORMAT + LLM_BASE_URL + LLM_API_KEY +
-// LLM_MODEL select the provider (see lib/assistant/config.ts). Server-side
-// only.
+// The endpoint stays open: LLM_PROVIDER picks a preset, and the generic
+// LLM_API_FORMAT / LLM_BASE_URL / LLM_API_KEY / LLM_MODEL vars override it
+// (see lib/assistant/config.ts). Server-side only.
 
 import Anthropic from "@anthropic-ai/sdk";
 import { llmConfig, type LlmConfig } from "./config";
@@ -19,6 +19,7 @@ import {
   newOpenAIStreamState,
   applyOpenAIChunk,
   finishOpenAIStream,
+  chatCompletionsUrl,
   type ConvMessage,
   type ToolCall,
 } from "./wire";
@@ -96,7 +97,8 @@ async function runAnthropicTurn(
 // ---------------------------------------------------------------------------
 async function runOpenAITurn(cfg: LlmConfig, req: LlmTurnRequest): Promise<LlmTurn> {
   const systemText = req.blocks.map((b) => b.text).join("\n\n");
-  const res = await fetch(`${cfg.baseUrl}/chat/completions`, {
+  const url = chatCompletionsUrl(cfg.baseUrl);
+  const res = await fetch(url, {
     method: "POST",
     headers: {
       authorization: `Bearer ${cfg.apiKey}`,
@@ -111,9 +113,12 @@ async function runOpenAITurn(cfg: LlmConfig, req: LlmTurnRequest): Promise<LlmTu
     }),
   });
   if (!res.ok || !res.body) {
-    const detail = await res.text().catch(() => "");
+    const detail = (await res.text().catch(() => "")).trim();
+    // Name the endpoint and model: a 404 here is almost always a wrong base
+    // URL or model id, and the provider's own message rarely says which.
     throw new Error(
-      `LLM request failed (${res.status}). ${detail.slice(0, 300)}`
+      `LLM request failed (${res.status}) calling ${url} with model "${cfg.model}" ` +
+        `[provider ${cfg.provider}]. ${detail.slice(0, 300)}`
     );
   }
 

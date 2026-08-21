@@ -492,3 +492,20 @@ test("generic vars still override a preset, for providers with no preset", async
   assert.equal(cfg.model, "some/model");
   assert.equal(cfg.strictTools, false);
 });
+
+test("the chat-completions URL tolerates a base URL with or without /v1", async () => {
+  const { chatCompletionsUrl } = await import("../lib/assistant/wire.ts");
+  const want = "https://integrate.api.nvidia.com/v1/chat/completions";
+  assert.equal(chatCompletionsUrl("https://integrate.api.nvidia.com/v1"), want);
+  assert.equal(chatCompletionsUrl("https://integrate.api.nvidia.com"), want);
+  assert.equal(chatCompletionsUrl("https://integrate.api.nvidia.com/v1/"), want);
+  assert.equal(chatCompletionsUrl(want), want, "a full URL is left alone");
+  assert.equal(
+    chatCompletionsUrl("https://openrouter.ai/api"),
+    "https://openrouter.ai/api/v1/chat/completions"
+  );
+  assert.equal(
+    chatCompletionsUrl("http://localhost:11434"),
+    "http://localhost:11434/v1/chat/completions"
+  );
+});

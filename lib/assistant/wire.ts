@@ -194,3 +194,20 @@ export function finishOpenAIStream(state: OpenAIStreamState): {
       : ("end" as const);
   return { text: state.text, calls, stop };
 }
+
+// Build the chat-completions URL from a configured base. Hosts differ in how
+// much of the path they expect in the base (NVIDIA and OpenRouter want the
+// /v1, Ollama's compatibility layer does not), and a base missing its version
+// segment returns a bare 404 that reads like a broken key. Normalising here
+// makes every reasonable spelling work:
+//   .../v1                 -> .../v1/chat/completions
+//   ...(no version)        -> .../v1/chat/completions
+//   .../chat/completions   -> used as given
+export function chatCompletionsUrl(baseUrl: string): string {
+  const base = baseUrl.replace(/\/+$/, "");
+  if (/\/chat\/completions$/.test(base)) return base;
+  const lastSegment = base.split("/").pop() ?? "";
+  return /^v\d+([a-z-]*)?$/i.test(lastSegment)
+    ? `${base}/chat/completions`
+    : `${base}/v1/chat/completions`;
+}
