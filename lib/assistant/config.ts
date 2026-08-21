@@ -58,7 +58,9 @@ const PRESETS: Record<string, Preset> = {
   nvidia: {
     format: "openai",
     baseUrl: "https://integrate.api.nvidia.com/v1",
-    model: "zai/glm-4.6",
+    // Catalog ids match the build.nvidia.com path, e.g. z-ai/glm-5.2 or
+    // deepseek-ai/deepseek-v4-flash-0731. Override with NVIDIA_MODEL.
+    model: "z-ai/glm-5.2",
     keyVars: ["NVIDIA_API_KEY", "LLM_API_KEY"],
     modelVar: "NVIDIA_MODEL",
   },

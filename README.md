@@ -287,8 +287,11 @@ ever overwritten.
   `ANTHROPIC_MODEL` (optional, defaults to claude-opus-5). Uses the
   Anthropic Messages API, so prompt caching and adaptive thinking stay on.
 - NVIDIA preset: `NVIDIA_API_KEY`, `NVIDIA_MODEL` (optional, defaults to
-  zai/glm-4.6, use the exact id from the model page). Uses OpenAI-style
-  Chat Completions.
+  z-ai/glm-5.2). A model id is the same string as its build.nvidia.com
+  path, for example z-ai/glm-5.2 or deepseek-ai/deepseek-v4-flash-0731.
+  Uses OpenAI-style Chat Completions. Note that NVIDIA Build logs usage
+  and its own banner says not to send confidential data, so treat it as a
+  trial endpoint only.
 - Any other host (OpenRouter, Groq, DeepSeek, Ollama, LiteLLM, Z.ai): set
   the generic vars, which override the preset. `LLM_API_FORMAT`
   (`anthropic` or `openai`), `LLM_BASE_URL` (include the version path for
