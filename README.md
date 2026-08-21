@@ -278,22 +278,27 @@ capped at 20 per account per day.
 Server-side env vars (Vercel: plain vars, never NEXT_PUBLIC_):
 
 - `LLM_API_KEY` (or `ANTHROPIC_API_KEY`): the API key. Required.
-- `LLM_API_FORMAT`: optional. `anthropic` (default) speaks the Anthropic
-  Messages API; `openai` speaks OpenAI-style Chat Completions, which covers
-  NVIDIA Build, OpenRouter, Groq, DeepSeek, Ollama and most other hosts.
-- `LLM_BASE_URL`: optional, defaults to https://api.anthropic.com. For the
-  openai format include the version path, e.g.
-  https://integrate.api.nvidia.com/v1
-- `LLM_MODEL`: optional, defaults to claude-opus-5.
-- `LLM_THINKING=off`: optional, for anthropic-format hosts that reject the
-  adaptive thinking parameter. `LLM_STRICT=off`: optional, for
-  openai-format hosts that reject strict tool schemas.
+Keys for several providers can be stored at once. `LLM_PROVIDER` decides
+which one is live, so switching model is a one-variable edit and no key is
+ever overwritten.
 
-  Example (free NVIDIA Build key with GLM): LLM_API_FORMAT=openai,
-  LLM_BASE_URL=https://integrate.api.nvidia.com/v1, LLM_API_KEY=nvapi-...,
-  LLM_MODEL the exact id from the NVIDIA model page. Free evaluation keys
-  are fine for trying the app; use a paid endpoint with a no-training
-  policy for real client data.
+- `LLM_PROVIDER`: `anthropic` (default) or `nvidia`.
+- Anthropic preset: `ANTHROPIC_API_KEY` (required for this provider),
+  `ANTHROPIC_MODEL` (optional, defaults to claude-opus-5). Uses the
+  Anthropic Messages API, so prompt caching and adaptive thinking stay on.
+- NVIDIA preset: `NVIDIA_API_KEY`, `NVIDIA_MODEL` (optional, defaults to
+  zai/glm-4.6, use the exact id from the model page). Uses OpenAI-style
+  Chat Completions.
+- Any other host (OpenRouter, Groq, DeepSeek, Ollama, LiteLLM, Z.ai): set
+  the generic vars, which override the preset. `LLM_API_FORMAT`
+  (`anthropic` or `openai`), `LLM_BASE_URL` (include the version path for
+  the openai format), `LLM_API_KEY`, `LLM_MODEL`.
+- Degrade switches: `LLM_THINKING=off` for anthropic-format hosts that
+  reject the thinking parameter, `LLM_STRICT=off` for openai-format hosts
+  that reject strict tool schemas.
+
+Free evaluation keys (NVIDIA Build included) are fine for trying the app.
+Use a paid endpoint with a no-training policy for real client data.
 
 ### Security in one paragraph
 

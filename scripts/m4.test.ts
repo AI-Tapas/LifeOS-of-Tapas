@@ -203,7 +203,7 @@ test("a smuggled attendees key in a solo-event payload is refused", () => {
 test("propose_event_with_invites is confirm-bucket and requires attendees in schema", () => {
   const tool = toolByName("propose_event_with_invites")!;
   assert.equal(tool.bucket, "confirm");
-  const props = (tool.input_schema as { properties: Record<string, unknown> }).properties;
+  const props = tool.input_schema.properties as Record<string, unknown>;
   assert.ok(props.attendees, "the invite tool declares attendees explicitly");
 });
 
@@ -427,4 +427,68 @@ test("Anthropic mapping round-trips tool use and results", async () => {
   assert.equal(first[0].type, "tool_use");
   const second = msgs[1].content as Array<Record<string, unknown>>;
   assert.equal(second[0].tool_use_id, "a1");
+});
+
+// --- provider presets: several keys stored, one switch chooses -------------------
+
+test("the default provider is anthropic and reads its own key var", async () => {
+  const { llmConfig } = await import("../lib/assistant/config.ts");
+  const cfg = llmConfig({ ANTHROPIC_API_KEY: "sk-ant-x" });
+  assert.equal(cfg.provider, "anthropic");
+  assert.equal(cfg.format, "anthropic");
+  assert.equal(cfg.baseUrl, "https://api.anthropic.com");
+  assert.equal(cfg.model, "claude-opus-5");
+  assert.equal(cfg.apiKey, "sk-ant-x");
+});
+
+test("switching LLM_PROVIDER picks the other key without disturbing it", async () => {
+  const { llmConfig } = await import("../lib/assistant/config.ts");
+  // Both keys stored side by side, as they will be on Vercel.
+  const env = {
+    ANTHROPIC_API_KEY: "sk-ant-x",
+    NVIDIA_API_KEY: "nvapi-y",
+    NVIDIA_MODEL: "zai/glm-test",
+  };
+  const anthropic = llmConfig(env);
+  assert.equal(anthropic.apiKey, "sk-ant-x");
+
+  const nvidia = llmConfig({ ...env, LLM_PROVIDER: "nvidia" });
+  assert.equal(nvidia.provider, "nvidia");
+  assert.equal(nvidia.format, "openai");
+  assert.equal(nvidia.baseUrl, "https://integrate.api.nvidia.com/v1");
+  assert.equal(nvidia.apiKey, "nvapi-y", "the nvidia key is used, not the anthropic one");
+  assert.equal(nvidia.model, "zai/glm-test");
+  // The anthropic key is untouched and still resolves on switching back.
+  assert.equal(llmConfig(env).apiKey, "sk-ant-x");
+});
+
+test("a missing key for the chosen provider names the variable to set", async () => {
+  const { llmConfig } = await import("../lib/assistant/config.ts");
+  assert.throws(
+    () =>
+      llmConfig({
+        ANTHROPIC_API_KEY: "sk-ant-x",
+        LLM_PROVIDER: "nvidia",
+      }),
+    /NVIDIA_API_KEY is not set/
+  );
+  assert.throws(
+    () => llmConfig({ LLM_PROVIDER: "made_up" }),
+    /not a known provider/
+  );
+});
+
+test("generic vars still override a preset, for providers with no preset", async () => {
+  const { llmConfig } = await import("../lib/assistant/config.ts");
+  const cfg = llmConfig({
+    LLM_API_KEY: "or-key",
+    LLM_API_FORMAT: "openai",
+    LLM_BASE_URL: "https://openrouter.ai/api/v1/",
+    LLM_MODEL: "some/model",
+    LLM_STRICT: "off",
+  });
+  assert.equal(cfg.format, "openai");
+  assert.equal(cfg.baseUrl, "https://openrouter.ai/api/v1", "trailing slash trimmed");
+  assert.equal(cfg.model, "some/model");
+  assert.equal(cfg.strictTools, false);
 });

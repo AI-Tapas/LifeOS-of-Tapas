@@ -143,14 +143,17 @@ and email-verification rules live in lib/accounts.ts.
 
 ## Assistant layer (Milestone 4)
 
-- LLM: open provider config in lib/assistant/config.ts. Two wire formats
-  behind one runner (runLlmTurn in lib/assistant/llm.ts): LLM_API_FORMAT
-  'anthropic' (default; official SDK, adaptive thinking, cache_control on
-  the hard-rules block) or 'openai' (Chat Completions SSE, covers NVIDIA
-  Build, OpenRouter, Groq, DeepSeek, Ollama). LLM_BASE_URL / LLM_API_KEY /
-  LLM_MODEL select the provider; LLM_THINKING=off and LLM_STRICT=off are
-  the degrade switches. Dialect mapping is pure in lib/assistant/wire.ts
-  (offline-tested); buckets and gates are format-independent.
+- LLM: open provider config in lib/assistant/config.ts. Named presets
+  (anthropic, nvidia) each carry a wire format, base URL, default model and
+  their own key var, so several providers' keys coexist and LLM_PROVIDER
+  alone switches the live one. Generic LLM_API_FORMAT / LLM_BASE_URL /
+  LLM_API_KEY / LLM_MODEL override a preset and cover unlisted hosts.
+  Two wire formats sit behind one runner (runLlmTurn in
+  lib/assistant/llm.ts): 'anthropic' (official SDK, adaptive thinking,
+  cache_control on the hard-rules block) and 'openai' (Chat Completions
+  SSE). LLM_THINKING=off and LLM_STRICT=off are the degrade switches.
+  Dialect mapping is pure in lib/assistant/wire.ts (offline-tested);
+  buckets and gates are format-independent.
 - Tool registry: lib/assistant/tools.ts is the fixed tool list and the
   security boundary. Buckets enforced in lib/assistant/execute.ts:
   autonomous (tasks, reminders, notes, people, obligations, solo events,
