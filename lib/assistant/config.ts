@@ -35,6 +35,9 @@ export interface LlmConfig {
   // Some OpenAI-compatible hosts reject the strict flag on tool schemas;
   // LLM_STRICT=off drops it. OpenAI format only.
   strictTools: boolean;
+  // Hard stop on a stalled provider, so the chat shows a message instead of
+  // spinning forever. LLM_TIMEOUT_MS, default 90 seconds.
+  timeoutMs: number;
 }
 
 // Plain string map so callers (and the offline tests) can pass a literal
@@ -60,9 +63,10 @@ const PRESETS: Record<string, Preset> = {
   nvidia: {
     format: "openai",
     baseUrl: "https://integrate.api.nvidia.com/v1",
-    // Catalog ids match the build.nvidia.com path, e.g. z-ai/glm-5.2 or
-    // deepseek-ai/deepseek-v4-flash-0731. Override with NVIDIA_MODEL.
-    model: "z-ai/glm-5.2",
+    // Catalog ids match the build.nvidia.com path. NVIDIA retires models on
+    // published end-of-life dates (a 410 "Gone" says so plainly), so check
+    // the catalogue if this default ever stops working.
+    model: "deepseek-ai/deepseek-v4-flash-0731",
     keyVars: ["NVIDIA_API_KEY", "LLM_API_KEY"],
     modelVar: "NVIDIA_MODEL",
   },
@@ -120,5 +124,6 @@ export function llmConfig(env: LlmEnv = process.env): LlmConfig {
     maxTokens: Number(env.LLM_MAX_TOKENS || 4096),
     thinking: env.LLM_THINKING === "off" ? "off" : "adaptive",
     strictTools: env.LLM_STRICT !== "off",
+    timeoutMs: Number(env.LLM_TIMEOUT_MS || 90000),
   };
 }

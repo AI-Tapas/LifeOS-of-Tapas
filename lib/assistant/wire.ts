@@ -129,18 +129,24 @@ export function parseOpenAIToolArgs(raw: string): Record<string, unknown> {
 export interface OpenAIStreamState {
   text: string;
   refusal: string;
+  // Reasoning models (DeepSeek V4, GLM, o-series style) stream their thinking
+  // in reasoning_content and only later emit content. Tracked separately so a
+  // long think is not mistaken for a dead stream.
+  reasoning: string;
   calls: { id: string; name: string; args: string }[];
   finish: string | null;
 }
 
 export function newOpenAIStreamState(): OpenAIStreamState {
-  return { text: "", refusal: "", calls: [], finish: null };
+  return { text: "", refusal: "", reasoning: "", calls: [], finish: null };
 }
 
 export interface OpenAIChunkChoice {
   delta?: {
     content?: string | null;
     refusal?: string | null;
+    reasoning_content?: string | null;
+    reasoning?: string | null;
     tool_calls?: Array<{
       index: number;
       id?: string;
@@ -162,6 +168,8 @@ export function applyOpenAIChunk(
     textDelta = d.content;
   }
   if (d?.refusal) state.refusal += d.refusal;
+  const think = d?.reasoning_content ?? d?.reasoning;
+  if (think) state.reasoning += think;
   for (const tc of d?.tool_calls ?? []) {
     while (state.calls.length <= tc.index) {
       state.calls.push({ id: "", name: "", args: "" });
@@ -180,6 +188,10 @@ export function finishOpenAIStream(state: OpenAIStreamState): {
   calls: ToolCall[];
   stop: "end" | "tool_use" | "refusal";
 } {
+  // A turn that spent its whole budget thinking leaves no visible answer;
+  // say so rather than returning an empty bubble.
+  const spentOnThinking =
+    !state.text && !state.refusal && !state.calls.length && state.reasoning;
   const calls: ToolCall[] = state.calls
     .filter((c) => c.name)
     .map((c, i) => ({
@@ -192,7 +204,13 @@ export function finishOpenAIStream(state: OpenAIStreamState): {
     : state.finish === "tool_calls" || calls.length
       ? ("tool_use" as const)
       : ("end" as const);
-  return { text: state.text, calls, stop };
+  return {
+    text: spentOnThinking
+      ? "The model used its whole reply budget on internal reasoning and returned no answer. Try a shorter question, or raise LLM_MAX_TOKENS."
+      : state.text,
+    calls,
+    stop,
+  };
 }
 
 // Build the chat-completions URL from a configured base. Hosts differ in how

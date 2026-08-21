@@ -525,3 +525,19 @@ test("the deepseek preset resolves its own key, base URL and model", async () =>
   assert.equal(cfg.model, "deepseek-v4-flash");
   assert.equal(cfg.apiKey, "sk-ds-z", "the other two keys stay untouched");
 });
+
+test("a reasoning-only turn explains itself instead of returning an empty reply", async () => {
+  const wire = await import("../lib/assistant/wire.ts");
+  const s = wire.newOpenAIStreamState();
+  wire.applyOpenAIChunk(s, { delta: { reasoning_content: "thinking hard" } });
+  wire.applyOpenAIChunk(s, { delta: {}, finish_reason: "length" });
+  const done = wire.finishOpenAIStream(s);
+  assert.equal(done.stop, "end");
+  assert.match(done.text, /internal reasoning/);
+
+  // Reasoning followed by a real answer keeps the answer, not the notice.
+  const t = wire.newOpenAIStreamState();
+  wire.applyOpenAIChunk(t, { delta: { reasoning_content: "hmm" } });
+  wire.applyOpenAIChunk(t, { delta: { content: "Done." }, finish_reason: "stop" });
+  assert.equal(wire.finishOpenAIStream(t).text, "Done.");
+});
