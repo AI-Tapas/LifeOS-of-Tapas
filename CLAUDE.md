@@ -191,5 +191,18 @@ and email-verification rules live in lib/accounts.ts.
   recipient addresses, the sending account, the full body, and highlights
   unverified and first-time recipients. Approval is a two-tap button; there
   is no approve-all.
+- Per-activity model choice: Settings > Assistant models writes provider
+  and model names into assistant_settings (chat_* and scan_* columns);
+  loadLlmOverride feeds them to runLlmTurn, so the chat and the mail scan
+  can run on different providers. Only names are stored: keys stay in the
+  server environment. When Settings picks a provider other than
+  LLM_PROVIDER, the generic LLM_BASE_URL / LLM_API_FORMAT overrides are
+  ignored for that call, since they describe the env provider.
+- GET /api/assistant/health (owner session) pings the configured provider;
+  ?role=scan tests the scan model instead of the chat one. Settings has a
+  Test button per activity.
+- The chat transcript is kept in localStorage on the device (key
+  life_os_assistant_chat_v1, last 40 turns), cleared by the New chat
+  button. Deliberately not a table: no cross-device sync in M4.
 - Tests: npm run test:m4 (offline, the R6 red-team controls). rls.test.mjs
   adds audit_log append-only and payload-immutability trigger proofs.

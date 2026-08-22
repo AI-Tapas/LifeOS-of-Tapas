@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { btnPrimary, inputCls } from "@/components/ui";
 import { scanMailAction } from "@/app/(app)/assistant/actions";
@@ -11,14 +11,56 @@ interface Turn {
   tools?: { name: string; summary: string; error?: boolean }[];
 }
 
+// The conversation survives navigation and reloads on this device by living
+// in localStorage. ponytail: device-local on purpose, no table and no sync;
+// move it into the database if the same thread is ever needed on the phone
+// and the laptop at once. Only the last 40 turns are kept.
+const STORE_KEY = "life_os_assistant_chat_v1";
+const KEEP_TURNS = 40;
+
+function loadTurns(): Turn[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(STORE_KEY);
+    const parsed = raw ? (JSON.parse(raw) as Turn[]) : [];
+    return Array.isArray(parsed) ? parsed.slice(-KEEP_TURNS) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveTurns(turns: Turn[]): void {
+  try {
+    window.localStorage.setItem(
+      STORE_KEY,
+      JSON.stringify(turns.slice(-KEEP_TURNS))
+    );
+  } catch {
+    // storage full or blocked; the chat still works for this visit
+  }
+}
+
 export default function AssistantChat() {
   const [turns, setTurns] = useState<Turn[]>([]);
+  const [restored, setRestored] = useState(false);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [scanBusy, setScanBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
+
+  // Restore after mount (localStorage does not exist during server render),
+  // then persist every change once the restore has happened, so the initial
+  // empty state never overwrites a saved conversation.
+  useEffect(() => {
+    setTurns(loadTurns());
+    setRestored(true);
+  }, []);
+
+  useEffect(() => {
+    if (restored) saveTurns(turns);
+  }, [turns, restored]);
 
   async function send() {
     const text = input.trim();
@@ -121,14 +163,30 @@ export default function AssistantChat() {
           Tasks, reminders and drafts happen straight away; anything that reaches
           another person waits for your approval in the Queue.
         </p>
-        <button
-          type="button"
-          onClick={scanNow}
-          disabled={scanBusy}
-          className="shrink-0 rounded-xl border border-neutral-300 px-3 py-1.5 text-sm font-medium disabled:opacity-50 dark:border-neutral-700"
-        >
-          {scanBusy ? "Scanning..." : "Scan mail now"}
-        </button>
+        <div className="flex shrink-0 gap-2">
+          {turns.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                if (busy) return;
+                setTurns([]);
+                setNotice(null);
+              }}
+              className="rounded-xl border border-neutral-300 px-3 py-1.5 text-sm font-medium disabled:opacity-50 dark:border-neutral-700"
+              disabled={busy}
+            >
+              New chat
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={scanNow}
+            disabled={scanBusy}
+            className="rounded-xl border border-neutral-300 px-3 py-1.5 text-sm font-medium disabled:opacity-50 dark:border-neutral-700"
+          >
+            {scanBusy ? "Scanning..." : "Scan mail now"}
+          </button>
+        </div>
       </div>
 
       {notice && (
@@ -138,10 +196,11 @@ export default function AssistantChat() {
       )}
 
       <div className="min-h-[40vh] space-y-3">
-        {turns.length === 0 && (
+        {restored && turns.length === 0 && (
           <p className="rounded-xl border border-dashed border-neutral-300 p-6 text-center text-sm text-neutral-500 dark:border-neutral-700">
             Ask for anything: plan the week, draft a reply, set a reminder,
-            or tap Scan mail now.
+            or tap Scan mail now. This conversation is kept on this device
+            until you start a new chat.
           </p>
         )}
         {turns.map((t, i) => (

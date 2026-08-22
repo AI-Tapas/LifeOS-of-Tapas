@@ -164,6 +164,33 @@ export type Database = {
           },
         ]
       }
+      assistant_settings: {
+        Row: {
+          chat_model: string | null
+          chat_provider: string | null
+          scan_model: string | null
+          scan_provider: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          chat_model?: string | null
+          chat_provider?: string | null
+          scan_model?: string | null
+          scan_provider?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Update: {
+          chat_model?: string | null
+          chat_provider?: string | null
+          scan_model?: string | null
+          scan_provider?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       assistant_persona: {
         Row: {
           active: boolean

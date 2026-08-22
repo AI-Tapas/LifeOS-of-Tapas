@@ -5,17 +5,22 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { pingLlm } from "@/lib/assistant/llm";
+import { loadLlmOverride } from "@/lib/assistant/settings";
 
 export const runtime = "nodejs";
 
-export async function GET(): Promise<Response> {
+// GET /api/assistant/health           tests the chat model
+// GET /api/assistant/health?role=scan tests the mail-scan model
+export async function GET(req: Request): Promise<Response> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return new Response("not signed in", { status: 401 });
 
-  const result = await pingLlm();
+  const role =
+    new URL(req.url).searchParams.get("role") === "scan" ? "scan" : "chat";
+  const result = await pingLlm(await loadLlmOverride(supabase, role));
   return Response.json(result, {
     status: result.ok ? 200 : 502,
     headers: { "cache-control": "no-store" },

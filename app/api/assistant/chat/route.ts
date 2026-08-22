@@ -9,6 +9,7 @@ import { createClient } from "@/lib/supabase/server";
 import { runLlmTurn } from "@/lib/assistant/llm";
 import { buildSystemBlocks } from "@/lib/assistant/prompt";
 import { buildAppContext, loadActivePersona } from "@/lib/assistant/context";
+import { loadLlmOverride } from "@/lib/assistant/settings";
 import { TOOLS } from "@/lib/assistant/tools";
 import { executeToolCall } from "@/lib/assistant/execute";
 import type { ConvMessage } from "@/lib/assistant/wire";
@@ -48,9 +49,10 @@ export async function POST(req: Request): Promise<Response> {
     return new Response("the last message must be from the user", { status: 400 });
   }
 
-  const [appContext, personaMd] = await Promise.all([
+  const [appContext, personaMd, override] = await Promise.all([
     buildAppContext(supabase),
     loadActivePersona(supabase),
+    loadLlmOverride(supabase, "chat"),
   ]);
   const blocks = buildSystemBlocks(appContext, personaMd);
 
@@ -72,6 +74,7 @@ export async function POST(req: Request): Promise<Response> {
             blocks,
             conv,
             tools: TOOLS,
+            override,
             onText: (d) => emit({ t: "text", d }),
           });
 

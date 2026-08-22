@@ -9,7 +9,7 @@
 // (see lib/assistant/config.ts). Server-side only.
 
 import Anthropic from "@anthropic-ai/sdk";
-import { llmConfig, type LlmConfig } from "./config";
+import { llmConfig, type LlmConfig, type LlmOverride } from "./config";
 import type { SystemBlock } from "./prompt";
 import { anthropicTools, type ToolDef } from "./tools";
 import {
@@ -36,10 +36,12 @@ export interface LlmTurnRequest {
   tools: ToolDef[];
   maxTokens?: number;
   onText?: (delta: string) => void;
+  // Per-activity model choice from Settings; falls back to the environment.
+  override?: LlmOverride;
 }
 
 export async function runLlmTurn(req: LlmTurnRequest): Promise<LlmTurn> {
-  const cfg = llmConfig();
+  const cfg = llmConfig(process.env, req.override);
   return cfg.format === "openai"
     ? runOpenAITurn(cfg, req)
     : runAnthropicTurn(cfg, req);
@@ -183,11 +185,11 @@ export interface LlmPing {
   error?: string;
 }
 
-export async function pingLlm(): Promise<LlmPing> {
+export async function pingLlm(override?: LlmOverride): Promise<LlmPing> {
   const started = Date.now();
   let cfg: LlmConfig;
   try {
-    cfg = llmConfig();
+    cfg = llmConfig(process.env, override);
   } catch (e) {
     return {
       ok: false,

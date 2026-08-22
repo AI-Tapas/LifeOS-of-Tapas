@@ -278,6 +278,12 @@ capped at 20 per account per day.
 Server-side env vars (Vercel: plain vars, never NEXT_PUBLIC_):
 
 - `LLM_API_KEY` (or `ANTHROPIC_API_KEY`): the API key. Required.
+Settings > Assistant models lets you pick a provider and model separately
+for the chat and for the mail scan (a fast paid model for the chat you wait
+on, a slower free one for the background scan, for instance). Each row has a
+Test button that pings that model and reports the latency. Leaving a row on
+"Server default" follows `LLM_PROVIDER`.
+
 Keys for several providers can be stored at once. `LLM_PROVIDER` decides
 which one is live, so switching model is a one-variable edit and no key is
 ever overwritten.

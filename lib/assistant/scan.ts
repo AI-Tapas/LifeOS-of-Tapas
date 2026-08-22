@@ -15,6 +15,7 @@ import {
   type ScanMail,
 } from "@/lib/assistant/prompt";
 import { validateScanProposals, type RawToolCall } from "@/lib/assistant/core";
+import { loadLlmOverride } from "@/lib/assistant/settings";
 import { listRecentGmail, listRecentGraph } from "@/lib/assistant/mail";
 import { createTaskAction } from "@/app/(app)/tasks/actions";
 import { istInstant } from "@/lib/datetime";
@@ -53,6 +54,7 @@ export async function runMailScan(): Promise<ScanSummary> {
     .eq("connect_mode", "direct");
 
   const summary: ScanSummary = { scanned: 0, created: 0, skipped: 0, notes: [] };
+  const override = await loadLlmOverride(supabase, "scan");
 
   for (const account of accounts ?? []) {
     if (!account.slot) continue;
@@ -119,6 +121,7 @@ export async function runMailScan(): Promise<ScanSummary> {
       conv: [{ kind: "text", role: "user", text: buildScanUserMessage(scanMails) }],
       tools: [SCAN_TOOL],
       maxTokens: 2048,
+      override,
     });
     if (turn.stop === "refusal") {
       summary.notes.push(`${account.slot}: the model declined the scan`);

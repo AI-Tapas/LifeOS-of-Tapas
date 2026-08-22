@@ -6,6 +6,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { slotByKey } from "@/lib/accounts";
 import { syncCalendars } from "@/lib/calendars";
 import { TokenRevokedError } from "@/lib/oauth/core";
+import { providerOptions } from "@/lib/assistant/config";
 
 async function requireUser() {
   const supabase = await createClient();
@@ -257,5 +258,53 @@ export async function activatePersonaVersionAction(
     meta: { version: data[0].version },
   });
   revalidatePath("/settings");
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// M4: which model runs which activity. Names only; API keys stay in the
+// server environment and are never written to, or read from, the database.
+// ---------------------------------------------------------------------------
+export async function saveAssistantModelsAction(input: {
+  chat_provider: string;
+  chat_model: string;
+  scan_provider: string;
+  scan_model: string;
+}): Promise<{ ok: boolean; message?: string }> {
+  const { supabase, user } = await requireUser();
+  const known = new Set(providerOptions().map((o) => o.name));
+  const clean = (v: string) => {
+    const t = v.trim();
+    return t ? t : null;
+  };
+  for (const p of [input.chat_provider, input.scan_provider]) {
+    if (p.trim() && !known.has(p.trim())) {
+      return { ok: false, message: `Unknown provider: ${p}` };
+    }
+  }
+  const { error } = await supabase.from("assistant_settings").upsert(
+    {
+      user_id: user.id,
+      chat_provider: clean(input.chat_provider),
+      chat_model: clean(input.chat_model),
+      scan_provider: clean(input.scan_provider),
+      scan_model: clean(input.scan_model),
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "user_id" }
+  );
+  if (error) return { ok: false, message: error.message };
+  await supabase.from("audit_log").insert({
+    user_id: user.id,
+    actor: "user",
+    action: "assistant_models_changed",
+    entity: "assistant_settings",
+    meta: {
+      chat: clean(input.chat_provider),
+      scan: clean(input.scan_provider),
+    },
+  });
+  revalidatePath("/settings");
+  revalidatePath("/assistant");
   return { ok: true };
 }

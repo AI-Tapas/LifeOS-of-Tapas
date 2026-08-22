@@ -9,6 +9,8 @@ import AccountsPanel, {
 import PersonaPanel, {
   type PersonaVersionView,
 } from "@/components/settings/persona-panel";
+import ModelsPanel from "@/components/settings/models-panel";
+import { providerOptions } from "@/lib/assistant/config";
 import { slotByKey } from "@/lib/accounts";
 import { formatDateIST } from "@/lib/datetime";
 
@@ -66,7 +68,13 @@ export default async function SettingsPage({
   const status = statusMessage(sp);
   const supabase = await createClient();
 
-  const [{ data: accounts }, { data: calendars }, { data: streams, error }, { data: personas }] =
+  const [
+    { data: accounts },
+    { data: calendars },
+    { data: streams, error },
+    { data: personas },
+    { data: modelSettings },
+  ] =
     await Promise.all([
       supabase
         .from("accounts")
@@ -86,6 +94,10 @@ export default async function SettingsPage({
         .from("assistant_persona")
         .select("id, version, source, active, created_at, sections_md")
         .order("version", { ascending: false }),
+      supabase
+        .from("assistant_settings")
+        .select("chat_provider, chat_model, scan_provider, scan_model")
+        .maybeSingle(),
     ]);
 
   const personaVersions: PersonaVersionView[] = (personas ?? []).map((p) => ({
@@ -146,6 +158,22 @@ export default async function SettingsPage({
             </li>
           ))}
         </ul>
+      </div>
+
+      <h2 className="mt-10 text-lg font-medium">Assistant models</h2>
+      <div className="mt-2">
+        <ModelsPanel
+          options={providerOptions()}
+          envProvider={process.env.LLM_PROVIDER || "anthropic"}
+          chat={{
+            provider: modelSettings?.chat_provider ?? null,
+            model: modelSettings?.chat_model ?? null,
+          }}
+          scan={{
+            provider: modelSettings?.scan_provider ?? null,
+            model: modelSettings?.scan_model ?? null,
+          }}
+        />
       </div>
 
       <h2 className="mt-10 text-lg font-medium">Assistant persona</h2>

@@ -89,8 +89,32 @@ function firstSet(names: string[], env: LlmEnv): string | undefined {
   return undefined;
 }
 
-export function llmConfig(env: LlmEnv = process.env): LlmConfig {
-  const name = (env.LLM_PROVIDER || "anthropic").trim().toLowerCase();
+// A per-activity choice made in Settings (chat and mail scan can differ).
+// Only the provider NAME and model id travel from the database; keys never
+// leave the server environment.
+export interface LlmOverride {
+  provider?: string | null;
+  model?: string | null;
+}
+
+// Which presets exist, and whether each has a usable key in this environment.
+// Used by the Settings screen; returns booleans only, never key material.
+export function providerOptions(
+  env: LlmEnv = process.env
+): { name: string; hasKey: boolean; defaultModel: string }[] {
+  return Object.entries(PRESETS).map(([name, p]) => ({
+    name,
+    hasKey: !!firstSet(p.keyVars, env),
+    defaultModel: p.model,
+  }));
+}
+
+export function llmConfig(
+  env: LlmEnv = process.env,
+  override?: LlmOverride
+): LlmConfig {
+  const envProvider = (env.LLM_PROVIDER || "anthropic").trim().toLowerCase();
+  const name = (override?.provider || envProvider).trim().toLowerCase();
   const preset = PRESETS[name];
   if (!preset) {
     throw new Error(
@@ -108,8 +132,13 @@ export function llmConfig(env: LlmEnv = process.env): LlmConfig {
         `Set it, or point LLM_PROVIDER at a provider whose key is set.`
     );
   }
-  const format =
-    env.LLM_API_FORMAT === "openai"
+  // The generic LLM_API_FORMAT and LLM_BASE_URL vars describe whatever
+  // LLM_PROVIDER points at. When Settings selects a DIFFERENT provider those
+  // values would be wrong for it, so the preset supplies them instead.
+  const settingsPicked = name !== envProvider;
+  const format = settingsPicked
+    ? preset.format
+    : env.LLM_API_FORMAT === "openai"
       ? "openai"
       : env.LLM_API_FORMAT === "anthropic"
         ? "anthropic"
@@ -118,9 +147,17 @@ export function llmConfig(env: LlmEnv = process.env): LlmConfig {
   return {
     provider: name,
     format,
-    baseUrl: (env.LLM_BASE_URL || preset.baseUrl).replace(/\/+$/, ""),
+    baseUrl: (settingsPicked
+      ? preset.baseUrl
+      : env.LLM_BASE_URL || preset.baseUrl
+    ).replace(/\/+$/, ""),
     apiKey,
-    model: firstSet([preset.modelVar, "LLM_MODEL"], env) || preset.model,
+    // Settings choice wins over the environment default, which in turn wins
+    // over the preset built-in default.
+    model:
+      (override?.model || "").trim() ||
+      firstSet([preset.modelVar, "LLM_MODEL"], env) ||
+      preset.model,
     maxTokens: Number(env.LLM_MAX_TOKENS || 4096),
     thinking: env.LLM_THINKING === "off" ? "off" : "adaptive",
     strictTools: env.LLM_STRICT !== "off",
