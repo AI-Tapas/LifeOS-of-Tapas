@@ -628,7 +628,7 @@ test("tool schemas use plain types with a required subset, not nullable unions",
 
 test("required lists name real properties, and truly optional fields are absent", () => {
   for (const t of [...TOOLS, SCAN_TOOL]) {
-    const s = t.input_schema as {
+    const s = t.input_schema as unknown as {
       properties: Record<string, unknown>;
       required: string[];
     };
@@ -637,9 +637,11 @@ test("required lists name real properties, and truly optional fields are absent"
     }
   }
   // Spot checks: the identifying fields stay required, the conveniences do not.
-  const task = toolByName("create_task")!.input_schema as { required: string[] };
+  const task = toolByName("create_task")!.input_schema as unknown as {
+    required: string[];
+  };
   assert.deepEqual(task.required, ["title"]);
-  const invite = toolByName("propose_event_with_invites")!.input_schema as {
+  const invite = toolByName("propose_event_with_invites")!.input_schema as unknown as {
     required: string[];
   };
   assert.ok(invite.required.includes("attendees"), "an invite needs its attendees");
