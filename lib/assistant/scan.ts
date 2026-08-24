@@ -14,7 +14,11 @@ import {
   buildScanUserMessage,
   type ScanMail,
 } from "@/lib/assistant/prompt";
-import { validateScanProposals, type RawToolCall } from "@/lib/assistant/core";
+import {
+  validateScanProposals,
+  isCalendarInvite,
+  type RawToolCall,
+} from "@/lib/assistant/core";
 import { loadLlmOverride } from "@/lib/assistant/settings";
 import { listRecentGmail, listRecentGraph } from "@/lib/assistant/mail";
 import { createTaskAction } from "@/app/(app)/tasks/actions";
@@ -72,6 +76,21 @@ export async function runMailScan(): Promise<ScanSummary> {
     }
     if (!mails.length) continue;
     summary.scanned += mails.length;
+
+    // Calendar invitations are the calendar's business, not the task list's:
+    // the event already syncs into the app, so a task would duplicate it.
+    // Dropped here rather than left to the model, which treated them as
+    // actionable.
+    const invites = mails.filter(isCalendarInvite).length;
+    if (invites) {
+      mails = mails.filter((m) => !isCalendarInvite(m));
+      summary.notes.push(
+        `${account.slot}: skipped ${invites} calendar ${
+          invites === 1 ? "invitation" : "invitations"
+        }`
+      );
+    }
+    if (!mails.length) continue;
 
     const refOf = (id: string) => `${account.provider === "google" ? "gmail" : "graph"}:${account.slot}:${id}`;
     const scanMails: ScanMail[] = mails.map((m) => ({

@@ -105,6 +105,22 @@ export async function runApprovedExecution(
   }
 }
 
+// Calendar invitations, their replies and cancellations are already handled by
+// the calendar itself, so they must never become tasks. Gmail marks them with
+// a text/calendar part, which is decisive; the subject prefixes catch the
+// Microsoft side and any forwarded copies. Pure, so scripts/m4.test.ts can
+// prove it offline.
+const INVITE_SUBJECT =
+  /^\s*(re:\s*)?(invitation|updated invitation|invite|accepted|declined|tentative|cancelled event|canceled event|cancelled|canceled|new time proposed|meeting forward notification)\s*:/i;
+
+export function isCalendarInvite(mail: {
+  subject?: string;
+  contentType?: string;
+}): boolean {
+  if (mail.contentType && /text\/calendar/i.test(mail.contentType)) return true;
+  return INVITE_SUBJECT.test(mail.subject ?? "");
+}
+
 // ---------------------------------------------------------------------------
 // Mail-scan proposal validation (pure). The scanner's LLM context holds ONE
 // tool; everything else it might emit is discarded here, so an injected

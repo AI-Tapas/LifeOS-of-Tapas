@@ -661,3 +661,34 @@ test("required lists name real properties, and truly optional fields are absent"
   assert.ok(invite.required.includes("attendees"), "an invite needs its attendees");
   assert.ok(invite.required.includes("account"));
 });
+
+test("calendar invitations are dropped before the scanner sees them", async () => {
+  const { isCalendarInvite } = await import("../lib/assistant/core.ts");
+  // Gmail marks the real thing structurally, whatever the subject says.
+  assert.equal(
+    isCalendarInvite({
+      subject: "Quarterly review",
+      contentType: 'multipart/mixed; boundary="x"; text/calendar; method=REQUEST',
+    }),
+    true
+  );
+  // Subject prefixes cover Microsoft and forwarded copies.
+  for (const subject of [
+    "Invitation: AICA session @ Mon 24 Aug",
+    "Updated invitation: Board call",
+    "Accepted: Hearing prep",
+    "Declined: Coffee",
+    "Cancelled: Site visit",
+    "Re: Invitation: AICA session",
+  ]) {
+    assert.equal(isCalendarInvite({ subject }), true, subject);
+  }
+  // Ordinary mail is untouched, including mail that merely mentions a meeting.
+  for (const subject of [
+    "GST notice for Meridian Textiles",
+    "Can we meet on Thursday to discuss the invitation process?",
+    "Fee note for August",
+  ]) {
+    assert.equal(isCalendarInvite({ subject }), false, subject);
+  }
+});

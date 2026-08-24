@@ -13,6 +13,8 @@ export interface MailMeta {
   subject: string;
   date: string;
   snippet: string;
+  // Gmail only: used to spot calendar invitations structurally.
+  contentType?: string;
 }
 
 const LOOKBACK_DAYS = 3;
@@ -40,7 +42,7 @@ export async function listRecentGmail(accountId: string): Promise<MailMeta[]> {
             format: "metadata",
             metadataHeaders: "From",
           }) +
-          "&metadataHeaders=Subject&metadataHeaders=Date",
+          "&metadataHeaders=Subject&metadataHeaders=Date&metadataHeaders=Content-Type",
         { headers: { authorization: `Bearer ${token}` } }
       )
     );
@@ -59,6 +61,7 @@ export async function listRecentGmail(accountId: string): Promise<MailMeta[]> {
       subject: header("Subject"),
       date: header("Date"),
       snippet: j.snippet ?? "",
+      contentType: header("Content-Type"),
     });
   }
   return out;
