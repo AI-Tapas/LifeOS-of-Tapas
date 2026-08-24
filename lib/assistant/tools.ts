@@ -59,9 +59,11 @@ const enumOf = (values: string[], desc: string) => ({
   enum: values,
   description: desc,
 });
+// A nullable enum must be expressed as anyOf, not as a type array carrying a
+// null member alongside enum values: strict validators reject the latter
+// ("Enum value 'low' does not match declared type ['string','null']").
 const enumOrNull = (values: string[], desc: string) => ({
-  type: ["string", "null"],
-  enum: [...values, null],
+  anyOf: [{ type: "string", enum: values }, { type: "null" }],
   description: desc,
 });
 

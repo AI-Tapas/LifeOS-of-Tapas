@@ -566,3 +566,25 @@ test("a Settings-picked provider never borrows another provider's generic key", 
   assert.equal(withKey.baseUrl, "https://api.anthropic.com");
   assert.equal(withKey.format, "anthropic");
 });
+
+test("no tool schema mixes an enum with a nullable type array (strict validators reject it)", () => {
+  const walk = (node: unknown, path: string): void => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      node.forEach((n, i) => walk(n, `${path}[${i}]`));
+      return;
+    }
+    const obj = node as Record<string, unknown>;
+    if (obj.enum !== undefined && Array.isArray(obj.type)) {
+      assert.fail(`${path} declares an enum beside a type array; use anyOf instead`);
+    }
+    if (Array.isArray(obj.enum)) {
+      assert.ok(
+        obj.enum.every((v) => typeof v === "string"),
+        `${path} enum must hold strings only`
+      );
+    }
+    for (const [k, v] of Object.entries(obj)) walk(v, `${path}.${k}`);
+  };
+  for (const t of [...TOOLS, SCAN_TOOL]) walk(t.input_schema, t.name);
+});
