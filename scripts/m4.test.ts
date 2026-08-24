@@ -692,3 +692,39 @@ test("calendar invitations are dropped before the scanner sees them", async () =
     assert.equal(isCalendarInvite({ subject }), false, subject);
   }
 });
+
+// --- MCP connector surface ---------------------------------------------------
+//
+// The connector lets an outside model (Claude, ChatGPT) drive the assistant.
+// It must inherit the buckets exactly, and must NOT be able to approve.
+
+test("the MCP write surface exposes no approval, execution or stub tools", async () => {
+  const { mcpWriteTools, MCP_READ_TOOLS } = await import("../lib/assistant/tools.ts");
+  const names = mcpWriteTools().map((t) => t.name);
+  for (const forbidden of ["approve", "reject", "execute", "undo", "persona", "token"]) {
+    assert.equal(
+      names.some((n) => n.includes(forbidden)),
+      false,
+      `the connector must not expose anything matching "${forbidden}"`
+    );
+  }
+  // Stubs would only waste a round trip.
+  assert.equal(names.includes("lookup_gst_wiki"), false);
+  // Everything the in-app assistant can do to the owner's own data is here.
+  for (const expected of ["create_task", "draft_email", "send_email"]) {
+    assert.ok(names.includes(expected), `${expected} should be callable`);
+  }
+  // Read tools are all prefixed and read-only by name.
+  for (const n of MCP_READ_TOOLS) {
+    assert.match(n, /^lifeos_(get|list)_/, `${n} should read, not write`);
+  }
+});
+
+test("send-class tools stay confirm-bucket on the connector surface", async () => {
+  const { mcpWriteTools } = await import("../lib/assistant/tools.ts");
+  for (const t of mcpWriteTools()) {
+    if (SEND_CLASS.has(t.name)) {
+      assert.equal(t.bucket, "confirm", `${t.name} must queue, never execute`);
+    }
+  }
+});

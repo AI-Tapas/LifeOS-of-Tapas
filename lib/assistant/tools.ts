@@ -407,6 +407,24 @@ export function schemaStats(defs: ToolDef[] = TOOLS): {
 }
 
 // ---------------------------------------------------------------------------
+// MCP connector surface. The write tools are the assistant's own registry
+// minus the stubs, so an outside model (Claude, ChatGPT) inherits the exact
+// same buckets: autonomous runs and is undoable, confirm only ever queues.
+// Approving, rejecting, executing and undoing are deliberately NOT here;
+// those stay owner-session acts inside the app.
+// ---------------------------------------------------------------------------
+export const MCP_READ_TOOLS = [
+  "lifeos_get_context",
+  "lifeos_list_tasks",
+  "lifeos_list_events",
+  "lifeos_list_pending_actions",
+] as const;
+
+export function mcpWriteTools(): ToolDef[] {
+  return TOOLS.filter((t) => t.bucket !== "stub");
+}
+
+// ---------------------------------------------------------------------------
 // Mail-scan tool set: the scan pipeline's ONLY tool (attack A1). A separate,
 // single-tool registry so the scanner context is structurally incapable of
 // drafting, sending or touching the calendar.

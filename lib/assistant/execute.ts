@@ -8,16 +8,16 @@
 // apply; only the provider calls use the service-role path inside
 // withResourceAuth.
 
-import { createClient } from "@/lib/supabase/server";
+import { cookieActor, type Actor } from "@/lib/assistant/actor";
 import { withResourceAuth } from "@/lib/oauth/tokens";
 import { createEvent, deleteAppEvent } from "@/lib/events/write";
 import { istInstant, formatDateIST } from "@/lib/datetime";
 import {
-  createTaskAction,
-  updateTaskAction,
-  deleteTaskAction,
+  createTask,
+  updateTask,
+  deleteTask,
   type TaskInput,
-} from "@/app/(app)/tasks/actions";
+} from "@/lib/tasks/write";
 import {
   AUTONOMOUS_KINDS,
   CONFIRM_KINDS,
@@ -32,13 +32,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 type Db = SupabaseClient<Database>;
 
-async function ownerClient(): Promise<{ supabase: Db; userId: string }> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("not signed in");
-  return { supabase, userId: user.id };
+// Every entry point takes an optional actor: the browser passes none and gets
+// its cookie session, the MCP route passes a token-authenticated service
+// actor. The gates below behave identically either way.
+async function ownerClient(actor?: Actor): Promise<Actor> {
+  return actor ?? cookieActor();
 }
 
 async function audit(
@@ -141,12 +139,13 @@ export interface ToolOutcome {
 
 export async function executeToolCall(
   name: string,
-  input: Record<string, unknown>
+  input: Record<string, unknown>,
+  actor?: Actor
 ): Promise<ToolOutcome> {
   if (STUB_KINDS.has(name)) {
     return { reply: STUB_REPLIES[name] ?? "Not available yet." };
   }
-  const { supabase, userId } = await ownerClient();
+  const { supabase, userId } = await ownerClient(actor);
 
   if (CONFIRM_KINDS.has(name) || name === "draft_email") {
     return proposeAction(supabase, userId, name, input);
@@ -291,12 +290,13 @@ type Performer = (
 
 const performers: Record<string, Performer> = {
   async create_task(supabase, _userId, input) {
+    // _userId is the acting owner; see lib/assistant/actor.ts.
     const title = s(input.title);
     if (!title) throw new Error("A task title is required.");
     const workStreamId = await resolveWorkStream(supabase, s(input.work_stream));
     const due = s(input.due_date);
     const priority = s(input.priority) as TaskInput["priority"] | null;
-    const r = await createTaskAction({
+    const r = await createTask(supabase, _userId, {
       title,
       notes: s(input.note),
       status: "todo",
@@ -328,7 +328,7 @@ const performers: Record<string, Performer> = {
     if (s(input.status)) patch.status = s(input.status) as TaskInput["status"];
     if (s(input.priority)) patch.priority = s(input.priority) as TaskInput["priority"];
     if (s(input.due_date)) patch.due_ts = dueIso(s(input.due_date)!);
-    const r = await updateTaskAction(taskId, patch);
+    const r = await updateTask(supabase, _userId, taskId, patch);
     if (!r.ok) throw new Error(r.message);
     return {
       summary: `Task updated: ${patch.title ?? prev.title}.`,
@@ -349,7 +349,7 @@ const performers: Record<string, Performer> = {
     const offsets = Array.isArray(input.remind_days)
       ? (input.remind_days as number[]).filter((n) => Number.isInteger(n) && n >= 0)
       : undefined;
-    const r = await updateTaskAction(taskId, {
+    const r = await updateTask(supabase, _userId, taskId, {
       due_ts: dueIso(due),
       ...(offsets ? { remind_offsets: offsets } : {}),
     });
@@ -480,11 +480,14 @@ const performers: Record<string, Performer> = {
 // ---------------------------------------------------------------------------
 // Approval lifecycle (owner-session server actions call these)
 // ---------------------------------------------------------------------------
-export async function approveAndExecute(actionId: string): Promise<{
+export async function approveAndExecute(
+  actionId: string,
+  actor?: Actor
+): Promise<{
   ok: boolean;
   message?: string;
 }> {
-  const { supabase, userId } = await ownerClient();
+  const { supabase, userId } = await ownerClient(actor);
   const { data: action } = await supabase
     .from("assistant_actions")
     .select("id, kind, status, payload")
@@ -508,14 +511,17 @@ export async function approveAndExecute(actionId: string): Promise<{
     .select("id");
   if (!approved?.length) return { ok: false, message: "The action changed state." };
   await audit(supabase, userId, "approve", actionId, { kind: action.kind });
-  return executeApprovedAction(actionId);
+  return executeApprovedAction(actionId, { supabase, userId });
 }
 
-export async function executeApprovedAction(actionId: string): Promise<{
+export async function executeApprovedAction(
+  actionId: string,
+  actor?: Actor
+): Promise<{
   ok: boolean;
   message?: string;
 }> {
-  const { supabase, userId } = await ownerClient();
+  const { supabase, userId } = await ownerClient(actor);
   return runApprovedExecution({
     loadAction: async () => {
       const { data } = await supabase
@@ -537,7 +543,7 @@ export async function executeApprovedAction(actionId: string): Promise<{
       return (data?.length ?? 0) > 0;
     },
     perform: (kind, payload) =>
-      performSendClass(userId, kind, payload as Record<string, unknown>),
+      performSendClass({ supabase, userId }, kind, payload as Record<string, unknown>),
     markExecuted: async (result) => {
       await supabase
         .from("assistant_actions")
@@ -557,15 +563,16 @@ export async function executeApprovedAction(actionId: string): Promise<{
 // The ONLY function in the codebase that sends mail or writes an
 // attendee-bearing event, reachable solely through runApprovedExecution.
 async function performSendClass(
-  userId: string,
+  actor: Actor,
   kind: string,
   payload: Record<string, unknown>
 ): Promise<unknown> {
+  const { userId } = actor;
   const accountId = s(payload.account_id);
   if (!accountId) throw new Error("The action has no account bound to it.");
 
   if (kind === "send_email") {
-    return sendEmail(accountId, payload);
+    return sendEmail(actor, accountId, payload);
   }
   if (kind === "propose_event_with_invites") {
     const c = civil(s(payload.date) ?? "");
@@ -594,10 +601,11 @@ async function performSendClass(
 }
 
 async function sendEmail(
+  actor: Actor,
   accountId: string,
   payload: Record<string, unknown>
 ): Promise<unknown> {
-  const { supabase } = await ownerClient();
+  const { supabase } = actor;
   const { data: account } = await supabase
     .from("accounts")
     .select("id, email, provider, slot")
@@ -662,11 +670,14 @@ async function sendEmail(
 // ---------------------------------------------------------------------------
 // Reject and undo
 // ---------------------------------------------------------------------------
-export async function rejectProposedAction(actionId: string): Promise<{
+export async function rejectProposedAction(
+  actionId: string,
+  actor?: Actor
+): Promise<{
   ok: boolean;
   message?: string;
 }> {
-  const { supabase, userId } = await ownerClient();
+  const { supabase, userId } = await ownerClient(actor);
   const { data } = await supabase
     .from("assistant_actions")
     .update({ status: "rejected", rejected_at: new Date().toISOString() })
@@ -690,11 +701,14 @@ const UNDOABLE = new Set([
   "add_event_solo",
 ]);
 
-export async function undoExecutedAction(actionId: string): Promise<{
+export async function undoExecutedAction(
+  actionId: string,
+  actor?: Actor
+): Promise<{
   ok: boolean;
   message?: string;
 }> {
-  const { supabase, userId } = await ownerClient();
+  const { supabase, userId } = await ownerClient(actor);
   const { data: action } = await supabase
     .from("assistant_actions")
     .select("id, kind, status, result")
@@ -741,14 +755,14 @@ async function performUndo(
 ): Promise<void> {
   switch (kind) {
     case "create_task": {
-      const r = await deleteTaskAction(String(undo.task_id));
+      const r = await deleteTask(supabase, userId, String(undo.task_id));
       if (!r.ok) throw new Error(r.message ?? "Could not delete the task.");
       return;
     }
     case "update_task":
     case "set_reminder": {
       const prev = (undo.prev ?? {}) as Record<string, unknown>;
-      const r = await updateTaskAction(String(undo.task_id), {
+      const r = await updateTask(supabase, userId, String(undo.task_id), {
         title: prev.title as string | undefined,
         notes: (prev.notes as string | null | undefined) ?? null,
         status: prev.status as TaskInput["status"],

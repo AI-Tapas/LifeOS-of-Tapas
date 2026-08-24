@@ -217,5 +217,15 @@ and email-verification rules live in lib/accounts.ts.
 - The chat transcript is kept in localStorage on the device (key
   life_os_assistant_chat_v1, last 40 turns), cleared by the New chat
   button. Deliberately not a table: no cross-device sync in M4.
+- MCP connector: POST /api/mcp (bearer LIFEOS_MCP_TOKEN, timing-safe compare,
+  exempted from the cookie gate in proxy.ts because it authenticates itself)
+  serves a manifest plus read and write ops. Write ops route through the same
+  executeToolCall, so buckets, hashes and the queue behave identically for an
+  outside model. Approve, reject, execute and undo are deliberately NOT on
+  that surface. lib/assistant/actor.ts supplies the identity: cookieActor for
+  the browser, serviceActor for token-authenticated callers. Task writes moved
+  to lib/tasks/write.ts so all three callers share one implementation. The
+  server itself lives in ../mcp-server (stdio, fetches its tool list from the
+  app so it cannot drift).
 - Tests: npm run test:m4 (offline, the R6 red-team controls). rls.test.mjs
   adds audit_log append-only and payload-immutability trigger proofs.

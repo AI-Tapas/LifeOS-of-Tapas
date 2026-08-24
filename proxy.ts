@@ -34,7 +34,12 @@ export default async function proxy(request: NextRequest) {
     request.nextUrl.pathname.startsWith("/login") ||
     request.nextUrl.pathname.startsWith("/auth") ||
     // local-only visual harness; the page itself 404s in production
-    request.nextUrl.pathname.startsWith("/dev-preview");
+    request.nextUrl.pathname.startsWith("/dev-preview") ||
+    // The MCP connector authenticates itself with a bearer token and answers
+    // 401 without one, so the cookie gate must not intercept it. Redirecting
+    // an API call to /login would also hand the caller an HTML page instead
+    // of a usable error.
+    request.nextUrl.pathname.startsWith("/api/mcp");
 
   if (!user && !isAuthRoute) {
     const url = request.nextUrl.clone();
