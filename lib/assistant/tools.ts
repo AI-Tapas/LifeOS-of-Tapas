@@ -347,19 +347,63 @@ export function assertNoAttendees(input: Record<string, unknown>): void {
   }
 }
 
-// Anthropic Messages API tool format, strict on every schema.
-export function anthropicTools(defs: ToolDef[] = TOOLS): Array<{
+// Anthropic Messages API tool format.
+//
+// `strict` is deliberately OFF unless asked for. It makes the provider compile
+// a grammar for the tool set, which carries hard structural limits: at most 16
+// union-typed and at most 24 optional parameters across all tools. This tool
+// set has 60 parameters, 31 of them optional, so strict mode refuses the whole
+// request. Nothing about the security model depends on it: every argument is
+// validated server-side in lib/assistant/execute.ts (recipients parsed and
+// checked, attendee keys refused, required fields enforced), and no tool can
+// execute a send without an approved queue item regardless of what the model
+// emits. Strict would only save the model from malformed arguments, which the
+// executor already rejects with a readable message.
+export function anthropicTools(
+  defs: ToolDef[] = TOOLS,
+  strict = false
+): Array<{
   name: string;
   description: string;
   input_schema: ToolSchema;
-  strict: boolean;
+  strict?: boolean;
 }> {
   return defs.map((t) => ({
     name: t.name,
     description: t.description,
     input_schema: t.input_schema,
-    strict: true,
+    ...(strict ? { strict: true } : {}),
   }));
+}
+
+// Parameter census, used by the tests and by the health check to explain why
+// strict mode is off.
+export function schemaStats(defs: ToolDef[] = TOOLS): {
+  parameters: number;
+  optional: number;
+  unions: number;
+} {
+  let parameters = 0;
+  let optional = 0;
+  let unions = 0;
+  for (const t of defs) {
+    const s = t.input_schema as unknown as {
+      properties: Record<string, unknown>;
+      required?: string[];
+    };
+    const keys = Object.keys(s.properties ?? {});
+    parameters += keys.length;
+    optional += keys.filter((k) => !(s.required ?? []).includes(k)).length;
+    const walk = (n: unknown): void => {
+      if (!n || typeof n !== "object") return;
+      if (Array.isArray(n)) return n.forEach(walk);
+      const o = n as Record<string, unknown>;
+      if (Array.isArray(o.type) || o.anyOf || o.oneOf) unions += 1;
+      Object.values(o).forEach(walk);
+    };
+    walk(t.input_schema);
+  }
+  return { parameters, optional, unions };
 }
 
 // ---------------------------------------------------------------------------

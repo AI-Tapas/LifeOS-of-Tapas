@@ -68,7 +68,7 @@ async function runAnthropicTurn(
     max_tokens: req.maxTokens ?? cfg.maxTokens,
     system: systemParam(req.blocks),
     messages: toAnthropicMessages(req.conv) as Anthropic.Messages.MessageParam[],
-    tools: anthropicTools(req.tools),
+    tools: anthropicTools(req.tools, cfg.strictTools),
     ...(cfg.thinking === "adaptive" ? { thinking: { type: "adaptive" as const } } : {}),
   });
   if (req.onText) stream.on("text", req.onText);

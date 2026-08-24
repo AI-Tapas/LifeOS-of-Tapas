@@ -26,6 +26,7 @@ import {
   toolByName,
   assertNoAttendees,
   anthropicTools,
+  schemaStats,
 } from "../lib/assistant/tools.ts";
 import {
   canonicalJson,
@@ -207,15 +208,28 @@ test("propose_event_with_invites is confirm-bucket and requires attendees in sch
   assert.ok(props.attendees, "the invite tool declares attendees explicitly");
 });
 
-test("every tool schema is strict and closed", () => {
+test("every tool schema is closed, and strict mode is opt-in", () => {
   for (const t of anthropicTools()) {
-    assert.equal(t.strict, true, `${t.name} must be strict`);
     assert.equal(
       (t.input_schema as { additionalProperties?: boolean }).additionalProperties,
       false,
       `${t.name} must close its schema`
     );
+    assert.equal(t.strict, undefined, "strict must be off by default");
   }
+  assert.equal(anthropicTools(TOOLS, true)[0].strict, true, "and available on request");
+});
+
+test("the tool set is larger than strict mode allows, which is why it is off", () => {
+  const { parameters, optional, unions } = schemaStats();
+  // Anthropic strict limits: 16 union-typed, 24 optional. Zero unions is a
+  // hard requirement either way; the optional count merely rules strict out.
+  assert.equal(unions, 0, "unions must stay at zero regardless of strict mode");
+  assert.ok(parameters > 0);
+  assert.ok(
+    optional > 24,
+    "if this ever drops below 25, strict mode could be switched back on"
+  );
 });
 
 // --- 4. injection isolation (mail scan) ------------------------------------------

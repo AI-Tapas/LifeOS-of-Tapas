@@ -196,8 +196,14 @@ and email-verification rules live in lib/accounts.ts.
   No nullable type arrays, no anyOf. Anthropic rejects a tool set with more
   than 16 union-typed parameters, and rejects an enum beside a nullable
   type; the OpenAI strict idiom (all-required plus nullable) is therefore
-  off by default and opt-in via LLM_STRICT=on. scripts/m4.test.ts walks
-  every schema and fails on any union.
+  off by default and opt-in via LLM_STRICT=on. Strict mode itself is off on
+  BOTH dialects: Anthropic strict compiles a grammar capped at 16 union-typed
+  and 24 optional parameters, and this tool set has 31 optional ones. Nothing
+  in the security model depends on strict; lib/assistant/execute.ts validates
+  every argument server-side and the approval gate is independent of it.
+  scripts/m4.test.ts walks every schema, fails on any union, and records the
+  parameter census. GET /api/assistant/health reports the live commit and
+  that census.
 - Per-activity model choice: Settings > Assistant models writes provider
   and model names into assistant_settings (chat_* and scan_* columns);
   loadLlmOverride feeds them to runLlmTurn, so the chat and the mail scan

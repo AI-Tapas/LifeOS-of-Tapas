@@ -32,10 +32,11 @@ export interface LlmConfig {
   // LLM_THINKING=off for hosts that reject the parameter. Anthropic format
   // only.
   thinking: "adaptive" | "off";
-  // OpenAI strict function calling requires EVERY property to be listed as
-  // required, which conflicts with the plain optional properties the tool
-  // schemas use. Off unless LLM_STRICT=on. OpenAI format only; Anthropic
-  // strict mode has no such requirement and stays on.
+  // Strict tool calling is off unless LLM_STRICT=on, on both dialects.
+  // Anthropic strict compiles a grammar limited to 16 union-typed and 24
+  // optional parameters; OpenAI strict requires every property to be
+  // required. This tool set satisfies neither, and server-side validation
+  // does not depend on either.
   strictTools: boolean;
   // Hard stop on a stalled provider, so the chat shows a message instead of
   // spinning forever. LLM_TIMEOUT_MS, default 90 seconds.
