@@ -225,6 +225,10 @@ export async function pingLlm(override?: LlmOverride): Promise<LlmPing> {
   }
 }
 
+// A health check must answer quickly even when the provider will not: the
+// point is to report the problem, not to wait out the full chat timeout.
+const PING_TIMEOUT_MS = 25000;
+
 async function pingOnce(cfg: LlmConfig, endpoint: string): Promise<string> {
   const prompt = "Reply with the single word: ready";
   if (cfg.format === "anthropic") {
@@ -235,7 +239,7 @@ async function pingOnce(cfg: LlmConfig, endpoint: string): Promise<string> {
         max_tokens: 16,
         messages: [{ role: "user", content: prompt }],
       },
-      { timeout: cfg.timeoutMs }
+      { timeout: PING_TIMEOUT_MS, maxRetries: 0 }
     );
     return msg.content
       .filter((b): b is Anthropic.Messages.TextBlock => b.type === "text")
@@ -245,19 +249,31 @@ async function pingOnce(cfg: LlmConfig, endpoint: string): Promise<string> {
       .slice(0, 100);
   }
 
-  const res = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${cfg.apiKey}`,
-      "content-type": "application/json",
-    },
-    body: JSON.stringify({
-      model: cfg.model,
-      max_tokens: 16,
-      messages: [{ role: "user", content: prompt }],
-    }),
-    signal: AbortSignal.timeout(cfg.timeoutMs),
-  });
+  let res: Response;
+  try {
+    res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${cfg.apiKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: cfg.model,
+        max_tokens: 16,
+        messages: [{ role: "user", content: prompt }],
+      }),
+      signal: AbortSignal.timeout(PING_TIMEOUT_MS),
+    });
+  } catch (e) {
+    const name = e instanceof Error ? e.name : "";
+    throw new Error(
+      name === "TimeoutError" || name === "AbortError"
+        ? `No reply within ${PING_TIMEOUT_MS / 1000} seconds. This model is too slow to answer even a one-word test.`
+        : `Could not reach the endpoint: ${
+            e instanceof Error ? e.message : "network error"
+          }`
+    );
+  }
   const body = await res.text();
   if (!res.ok) throw new Error(`${res.status} ${body.slice(0, 300)}`);
   try {

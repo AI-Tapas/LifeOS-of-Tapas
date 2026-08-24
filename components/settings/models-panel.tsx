@@ -57,10 +57,17 @@ export default function ModelsPanel({
   const set = (k: keyof typeof values, v: string) =>
     setValues((prev) => ({ ...prev, [k]: v }));
 
+  // Tests the choice currently on screen, saved or not, so the dropdown and
+  // the result always agree.
   async function test(role: "chat" | "scan") {
     setTested((t) => ({ ...t, [role]: "Testing..." }));
+    const query = new URLSearchParams({
+      role,
+      provider: values[`${role}_provider` as keyof typeof values],
+      model: values[`${role}_model` as keyof typeof values],
+    });
     try {
-      const res = await fetch(`/api/assistant/health?role=${role}`, {
+      const res = await fetch(`/api/assistant/health?${query}`, {
         cache: "no-store",
       });
       const j = (await res.json()) as {
@@ -74,7 +81,7 @@ export default function ModelsPanel({
         ...t,
         [role]: j.ok
           ? `Working: ${j.provider}, ${j.model}, replied in ${(j.ms / 1000).toFixed(1)}s.`
-          : `Failed: ${j.error ?? "unknown error"}`,
+          : `Failed on ${j.provider}, ${j.model}: ${j.error ?? "unknown error"}`,
       }));
     } catch {
       setTested((t) => ({ ...t, [role]: "Could not reach the health check." }));
