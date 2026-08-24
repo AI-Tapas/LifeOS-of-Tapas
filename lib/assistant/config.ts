@@ -32,8 +32,10 @@ export interface LlmConfig {
   // LLM_THINKING=off for hosts that reject the parameter. Anthropic format
   // only.
   thinking: "adaptive" | "off";
-  // Some OpenAI-compatible hosts reject the strict flag on tool schemas;
-  // LLM_STRICT=off drops it. OpenAI format only.
+  // OpenAI strict function calling requires EVERY property to be listed as
+  // required, which conflicts with the plain optional properties the tool
+  // schemas use. Off unless LLM_STRICT=on. OpenAI format only; Anthropic
+  // strict mode has no such requirement and stays on.
   strictTools: boolean;
   // Hard stop on a stalled provider, so the chat shows a message instead of
   // spinning forever. LLM_TIMEOUT_MS, default 90 seconds.
@@ -174,7 +176,7 @@ export function llmConfig(
       preset.model,
     maxTokens: Number(env.LLM_MAX_TOKENS || 4096),
     thinking: env.LLM_THINKING === "off" ? "off" : "adaptive",
-    strictTools: env.LLM_STRICT !== "off",
+    strictTools: env.LLM_STRICT === "on",
     timeoutMs: Number(env.LLM_TIMEOUT_MS || 90000),
     keySource: key.name,
   };

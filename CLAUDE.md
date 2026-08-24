@@ -191,6 +191,13 @@ and email-verification rules live in lib/accounts.ts.
   recipient addresses, the sending account, the full body, and highlights
   unverified and first-time recipients. Approval is a two-tap button; there
   is no approve-all.
+- Tool schema convention (do not regress): every parameter carries ONE
+  concrete type and optional parameters are simply left out of `required`.
+  No nullable type arrays, no anyOf. Anthropic rejects a tool set with more
+  than 16 union-typed parameters, and rejects an enum beside a nullable
+  type; the OpenAI strict idiom (all-required plus nullable) is therefore
+  off by default and opt-in via LLM_STRICT=on. scripts/m4.test.ts walks
+  every schema and fails on any union.
 - Per-activity model choice: Settings > Assistant models writes provider
   and model names into assistant_settings (chat_* and scan_* columns);
   loadLlmOverride feeds them to runLlmTurn, so the chat and the mail scan

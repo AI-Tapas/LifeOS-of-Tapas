@@ -27,48 +27,56 @@ export interface ToolDef {
   bucket: ToolBucket;
 }
 
-// Strict-mode friendly schema helper: every property required, optionality
-// expressed as nullable types, additionalProperties always false.
-function schema(
-  props: Record<string, unknown>,
-  required?: string[]
-): ToolSchema {
+// Schema helpers. Optionality is expressed the plain JSON Schema way: the
+// property carries a single concrete type and simply stays out of `required`.
+//
+// It is tempting to mark every property required and make the optional ones
+// nullable unions instead, which is the OpenAI strict-mode idiom. Do not:
+// Anthropic caps a tool set at 16 union-typed parameters and refuses the whole
+// request beyond that ("too many parameters with union types"), and a nullable
+// enum is invalid there as well. One plain type per parameter keeps every
+// provider happy, and the executor treats a missing key and a null key alike.
+
+// Marker stripped by schema(); it never reaches the provider.
+const OPTIONAL = "__optional";
+
+type Frag = Record<string, unknown>;
+
+// Marks a property as not required.
+const opt = (frag: Frag): Frag => ({ ...frag, [OPTIONAL]: true });
+
+function schema(props: Record<string, Frag>, required?: string[]): ToolSchema {
+  const properties: Record<string, unknown> = {};
+  const auto: string[] = [];
+  for (const [key, frag] of Object.entries(props)) {
+    const { [OPTIONAL]: isOptional, ...rest } = frag;
+    properties[key] = rest;
+    if (!isOptional) auto.push(key);
+  }
   return {
     type: "object" as const,
-    properties: props,
-    required: required ?? Object.keys(props),
+    properties,
+    required: required ?? auto,
     additionalProperties: false,
   };
 }
 
-const str = (desc: string) => ({ type: "string", description: desc });
-const strOrNull = (desc: string) => ({
-  type: ["string", "null"],
-  description: desc,
-});
-const boolOrNull = (desc: string) => ({
-  type: ["boolean", "null"],
-  description: desc,
-});
-const numOrNull = (desc: string) => ({
-  type: ["number", "null"],
-  description: desc,
-});
-const enumOf = (values: string[], desc: string) => ({
+const str = (desc: string): Frag => ({ type: "string", description: desc });
+const strOrNull = (desc: string): Frag => opt(str(desc));
+const boolOrNull = (desc: string): Frag =>
+  opt({ type: "boolean", description: desc });
+const numOrNull = (desc: string): Frag =>
+  opt({ type: "number", description: desc });
+const enumOf = (values: string[], desc: string): Frag => ({
   type: "string",
   enum: values,
   description: desc,
 });
-// A nullable enum must be expressed as anyOf, not as a type array carrying a
-// null member alongside enum values: strict validators reject the latter
-// ("Enum value 'low' does not match declared type ['string','null']").
-const enumOrNull = (values: string[], desc: string) => ({
-  anyOf: [{ type: "string", enum: values }, { type: "null" }],
-  description: desc,
-});
+const enumOrNull = (values: string[], desc: string): Frag =>
+  opt(enumOf(values, desc));
 
-const DATE_DESC = "Date as YYYY-MM-DD (IST calendar date), or null.";
-const TIME_DESC = "Time of day as HH:MM in 24 hour IST, or null.";
+const DATE_DESC = "Date as YYYY-MM-DD (IST calendar date). Omit if not applicable.";
+const TIME_DESC = "Time of day as HH:MM in 24 hour IST. Omit if not applicable.";
 
 // The four connected account slots the assistant may act through.
 const SLOT_KEYS = ["taxstrategia", "ca_tapasnr", "altechon", "icai"];
@@ -83,7 +91,7 @@ export const TOOLS: ToolDef[] = [
       title: str("Short task title."),
       note: strOrNull("Optional extra detail."),
       work_stream: strOrNull(
-        "Work stream name, e.g. ICAI, Tax Strategia, Altechon, Cygnet, Personal. Null defaults to Personal."
+        "Work stream name, e.g. ICAI, Tax Strategia, Altechon, Cygnet, Personal. Omit to file it under Personal."
       ),
       due_date: { ...strOrNull(DATE_DESC) },
       priority: enumOrNull(["low", "medium", "high"], "Task priority."),
@@ -97,14 +105,14 @@ export const TOOLS: ToolDef[] = [
       "Update an existing task (title, note, status, priority, due date). Undo restores the previous values.",
     input_schema: schema({
       task_id: str("The task id from context."),
-      title: strOrNull("New title, or null to keep."),
-      note: strOrNull("New note, or null to keep."),
+      title: strOrNull("New title. Omit to keep the current one."),
+      note: strOrNull("New note. Omit to keep the current one."),
       status: enumOrNull(
         ["inbox", "todo", "doing", "done", "dropped"],
-        "New status, or null to keep."
+        "New status. Omit to keep the current one."
       ),
-      priority: enumOrNull(["low", "medium", "high"], "New priority, or null to keep."),
-      due_date: { ...strOrNull(DATE_DESC + " Null keeps the current due date.") },
+      priority: enumOrNull(["low", "medium", "high"], "New priority. Omit to keep the current one."),
+      due_date: { ...strOrNull(DATE_DESC + " Omit to keep the current due date.") },
     }),
   },
   {
@@ -115,11 +123,11 @@ export const TOOLS: ToolDef[] = [
     input_schema: schema({
       task_id: str("The task id from context."),
       due_date: str("Due date as YYYY-MM-DD (IST)."),
-      remind_days: {
-        type: ["array", "null"],
+      remind_days: opt({
+        type: "array",
         items: { type: "integer" },
-        description: "Days before due to remind, e.g. [7,3,1,0]. Null keeps current.",
-      },
+        description: "Days before due to remind, e.g. [7,3,1,0]. Omit to keep the current ones.",
+      }),
     }),
   },
   {
@@ -129,7 +137,7 @@ export const TOOLS: ToolDef[] = [
     input_schema: schema({
       type: enumOf(["meeting", "decision", "idea", "reference"], "Note type."),
       title: str("Note title."),
-      body: strOrNull("Note body in Markdown, or null."),
+      body: strOrNull("Note body in Markdown. Omit if not applicable."),
     }),
   },
   {
@@ -139,11 +147,11 @@ export const TOOLS: ToolDef[] = [
       "Save a person record. Records created by the assistant are flagged unverified until Tapas confirms them; unverified recipients are highlighted at send time.",
     input_schema: schema({
       name: str("Full name."),
-      org: strOrNull("Organisation, or null."),
-      role: strOrNull("Role or designation, or null."),
-      email: strOrNull("Email address, or null."),
-      phone: strOrNull("Phone number, or null."),
-      context: strOrNull("How this person is known, or null."),
+      org: strOrNull("Organisation. Omit if not applicable."),
+      role: strOrNull("Role or designation. Omit if not applicable."),
+      email: strOrNull("Email address. Omit if not applicable."),
+      phone: strOrNull("Phone number. Omit if not applicable."),
+      context: strOrNull("How this person is known. Omit if not applicable."),
     }),
   },
   {
@@ -165,16 +173,16 @@ export const TOOLS: ToolDef[] = [
         ],
         "Category."
       ),
-      amount: numOrNull("Amount in rupees, or null if variable."),
+      amount: numOrNull("Amount in rupees. Omit when the amount varies."),
       frequency: enumOf(
         ["monthly", "bi_monthly", "quarterly", "half_yearly", "yearly"],
         "How often it falls due."
       ),
       due_day: { type: "integer", description: "Day of month it falls due (1-31)." },
-      due_month: {
-        type: ["integer", "null"],
-        description: "Month (1-12) for yearly obligations, else null.",
-      },
+      due_month: opt({
+        type: "integer",
+        description: "Month (1-12) for yearly obligations, omitted otherwise.",
+      }),
       autopay: boolOrNull("Whether it is on autopay."),
     }),
   },
@@ -194,10 +202,10 @@ export const TOOLS: ToolDef[] = [
       ),
       title: str("Event title."),
       date: str("Event date as YYYY-MM-DD (IST)."),
-      start_time: { ...strOrNull(TIME_DESC + " Null makes it an all-day event.") },
+      start_time: { ...strOrNull(TIME_DESC + " Omit for an all-day event.") },
       end_time: { ...strOrNull(TIME_DESC) },
-      description: strOrNull("Event description, or null."),
-      location: strOrNull("Location, or null."),
+      description: strOrNull("Event description. Omit if not applicable."),
+      location: strOrNull("Location. Omit if not applicable."),
     }),
   },
   {
@@ -215,11 +223,11 @@ export const TOOLS: ToolDef[] = [
         items: { type: "string" },
         description: "Recipient email addresses.",
       },
-      cc: {
-        type: ["array", "null"],
+      cc: opt({
+        type: "array",
         items: { type: "string" },
-        description: "Cc addresses, or null.",
-      },
+        description: "Cc addresses. Omit when there are none.",
+      }),
       subject: str("Subject line."),
       body: str("Plain-text body in Tapas's voice."),
     }),
@@ -239,11 +247,11 @@ export const TOOLS: ToolDef[] = [
         items: { type: "string" },
         description: "Recipient email addresses.",
       },
-      cc: {
-        type: ["array", "null"],
+      cc: opt({
+        type: "array",
         items: { type: "string" },
-        description: "Cc addresses, or null.",
-      },
+        description: "Cc addresses. Omit when there are none.",
+      }),
       subject: str("Subject line."),
       body: str("Plain-text body."),
     }),
@@ -262,13 +270,13 @@ export const TOOLS: ToolDef[] = [
       date: str("Event date as YYYY-MM-DD (IST)."),
       start_time: { ...strOrNull(TIME_DESC) },
       end_time: { ...strOrNull(TIME_DESC) },
-      description: strOrNull("Event description, or null."),
-      location: strOrNull("Location, or null."),
+      description: strOrNull("Event description. Omit if not applicable."),
+      location: strOrNull("Location. Omit if not applicable."),
       attendees: {
         type: "array",
         items: schema({
           email: str("Attendee email address."),
-          name: strOrNull("Attendee name, or null."),
+          name: strOrNull("Attendee name. Omit if not applicable."),
         }),
         description: "People to invite.",
       },
@@ -366,7 +374,7 @@ export const SCAN_TOOL: ToolDef = {
     "Propose one task derived from a scanned email. Short title, short note, and the message id as external_ref. Never copy full email bodies.",
   input_schema: schema({
     title: str("Task title, at most 140 characters."),
-    note: strOrNull("One or two lines of context, at most 500 characters, or null."),
+    note: strOrNull("One or two lines of context, at most 500 characters. Omit if not applicable."),
     external_ref: str("The exact message ref given in the email's data block."),
     due_date: { ...strOrNull(DATE_DESC) },
   }),

@@ -588,3 +588,60 @@ test("no tool schema mixes an enum with a nullable type array (strict validators
   };
   for (const t of [...TOOLS, SCAN_TOOL]) walk(t.input_schema, t.name);
 });
+
+test("tool schemas use plain types with a required subset, not nullable unions", () => {
+  // Anthropic refuses a tool set with more than 16 union-typed parameters, so
+  // optionality must live in `required`, never in a nullable type. This walks
+  // every schema and insists on zero unions.
+  let unions = 0;
+  const walk = (node: unknown, path: string): void => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      node.forEach((n, i) => walk(n, `${path}[${i}]`));
+      return;
+    }
+    const obj = node as Record<string, unknown>;
+    if (Array.isArray(obj.type) || obj.anyOf || obj.oneOf) {
+      unions += 1;
+      assert.fail(`${path} is union-typed; give it one concrete type instead`);
+    }
+    if (typeof obj.type === "string") {
+      assert.ok(
+        ["string", "number", "integer", "boolean", "array", "object"].includes(
+          obj.type
+        ),
+        `${path} has an unexpected type ${obj.type}`
+      );
+    }
+    for (const [k, v] of Object.entries(obj)) walk(v, `${path}.${k}`);
+  };
+  for (const t of [...TOOLS, SCAN_TOOL]) walk(t.input_schema, t.name);
+  assert.equal(unions, 0);
+
+  // The optional-marker helper must never leak into a published schema.
+  assert.equal(
+    JSON.stringify([...TOOLS, SCAN_TOOL]).includes("__optional"),
+    false,
+    "the internal optional marker must be stripped"
+  );
+});
+
+test("required lists name real properties, and truly optional fields are absent", () => {
+  for (const t of [...TOOLS, SCAN_TOOL]) {
+    const s = t.input_schema as {
+      properties: Record<string, unknown>;
+      required: string[];
+    };
+    for (const key of s.required) {
+      assert.ok(s.properties[key], `${t.name}.${key} is required but not declared`);
+    }
+  }
+  // Spot checks: the identifying fields stay required, the conveniences do not.
+  const task = toolByName("create_task")!.input_schema as { required: string[] };
+  assert.deepEqual(task.required, ["title"]);
+  const invite = toolByName("propose_event_with_invites")!.input_schema as {
+    required: string[];
+  };
+  assert.ok(invite.required.includes("attendees"), "an invite needs its attendees");
+  assert.ok(invite.required.includes("account"));
+});
