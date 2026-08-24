@@ -225,7 +225,8 @@ and email-verification rules live in lib/accounts.ts.
   that surface. lib/assistant/actor.ts supplies the identity: cookieActor for
   the browser, serviceActor for token-authenticated callers. Task writes moved
   to lib/tasks/write.ts so all three callers share one implementation. The
-  server itself lives in ../mcp-server (stdio, fetches its tool list from the
+  server itself lives in mcp-server/ (its own package, excluded from the Next
+  tsconfig and eslint; stdio transport, and it fetches its tool list from the
   app so it cannot drift).
 - Tests: npm run test:m4 (offline, the R6 red-team controls). rls.test.mjs
   adds audit_log append-only and payload-immutability trigger proofs.
