@@ -181,6 +181,8 @@ export interface LlmPing {
   endpoint: string;
   model: string;
   ms: number;
+  // Which env var the key came from, so a 401 points at the right variable.
+  keySource?: string;
   reply?: string;
   error?: string;
 }
@@ -210,6 +212,7 @@ export async function pingLlm(override?: LlmOverride): Promise<LlmPing> {
     format: cfg.format,
     endpoint,
     model: cfg.model,
+    keySource: cfg.keySource,
   };
 
   try {

@@ -541,3 +541,28 @@ test("a reasoning-only turn explains itself instead of returning an empty reply"
   wire.applyOpenAIChunk(t, { delta: { content: "Done." }, finish_reason: "stop" });
   assert.equal(wire.finishOpenAIStream(t).text, "Done.");
 });
+
+test("a Settings-picked provider never borrows another provider's generic key", async () => {
+  const { llmConfig } = await import("../lib/assistant/config.ts");
+  // Deployment runs on nvidia, whose key sits in the generic LLM_API_KEY.
+  const env = { LLM_PROVIDER: "nvidia", LLM_API_KEY: "nvapi-generic" };
+  assert.equal(llmConfig(env).apiKey, "nvapi-generic");
+  assert.equal(llmConfig(env).keySource, "LLM_API_KEY");
+
+  // Settings picks anthropic. Borrowing the NVIDIA key would earn a confusing
+  // 401, so the missing dedicated variable is named instead.
+  assert.throws(
+    () => llmConfig(env, { provider: "anthropic" }),
+    /ANTHROPIC_API_KEY is not set/
+  );
+
+  // With its own key present, the picked provider uses that one.
+  const withKey = llmConfig(
+    { ...env, ANTHROPIC_API_KEY: "sk-ant-real" },
+    { provider: "anthropic" }
+  );
+  assert.equal(withKey.apiKey, "sk-ant-real");
+  assert.equal(withKey.keySource, "ANTHROPIC_API_KEY");
+  assert.equal(withKey.baseUrl, "https://api.anthropic.com");
+  assert.equal(withKey.format, "anthropic");
+});

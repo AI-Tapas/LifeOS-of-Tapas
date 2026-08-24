@@ -75,13 +75,16 @@ export default function ModelsPanel({
         provider: string;
         model: string;
         ms: number;
+        keySource?: string;
         error?: string;
       };
       setTested((t) => ({
         ...t,
         [role]: j.ok
           ? `Working: ${j.provider}, ${j.model}, replied in ${(j.ms / 1000).toFixed(1)}s.`
-          : `Failed on ${j.provider}, ${j.model}: ${j.error ?? "unknown error"}`,
+          : `Failed on ${j.provider}, ${j.model}` +
+            (j.keySource ? ` using the key in ${j.keySource}` : "") +
+            `: ${j.error ?? "unknown error"}`,
       }));
     } catch {
       setTested((t) => ({ ...t, [role]: "Could not reach the health check." }));

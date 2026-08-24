@@ -38,6 +38,10 @@ export interface LlmConfig {
   // Hard stop on a stalled provider, so the chat shows a message instead of
   // spinning forever. LLM_TIMEOUT_MS, default 90 seconds.
   timeoutMs: number;
+  // NAME of the environment variable the key came from (never the key). A 401
+  // is nearly always the wrong variable being picked up, so the health check
+  // reports this.
+  keySource: string;
 }
 
 // Plain string map so callers (and the offline tests) can pass a literal
@@ -82,9 +86,16 @@ const PRESETS: Record<string, Preset> = {
 };
 
 function firstSet(names: string[], env: LlmEnv): string | undefined {
+  return firstSetNamed(names, env)?.value;
+}
+
+function firstSetNamed(
+  names: string[],
+  env: LlmEnv
+): { name: string; value: string } | undefined {
   for (const n of names) {
     const v = env[n];
-    if (v && v.trim()) return v.trim();
+    if (v && v.trim()) return { name: n, value: v.trim() };
   }
   return undefined;
 }
@@ -124,18 +135,21 @@ export function llmConfig(
     );
   }
 
-  // The generic vars override the preset, so an unlisted provider still works.
-  const apiKey = firstSet(preset.keyVars, env);
-  if (!apiKey) {
+  // The generic LLM_* vars describe whatever LLM_PROVIDER points at. When
+  // Settings selects a DIFFERENT provider they would be wrong for it, so the
+  // preset supplies the endpoint and only the provider's OWN key variable is
+  // consulted. Without this, picking anthropic while LLM_API_KEY holds an
+  // NVIDIA key sends that key to Anthropic and earns a confusing 401.
+  const settingsPicked = name !== envProvider;
+  const keyVars = settingsPicked ? [preset.keyVars[0]] : preset.keyVars;
+  const key = firstSetNamed(keyVars, env);
+  if (!key) {
     throw new Error(
       `${preset.keyVars[0]} is not set, so the ${name} provider cannot be used. ` +
-        `Set it, or point LLM_PROVIDER at a provider whose key is set.`
+        `Add that variable, or choose a provider whose key is set.`
     );
   }
-  // The generic LLM_API_FORMAT and LLM_BASE_URL vars describe whatever
-  // LLM_PROVIDER points at. When Settings selects a DIFFERENT provider those
-  // values would be wrong for it, so the preset supplies them instead.
-  const settingsPicked = name !== envProvider;
+  const apiKey = key.value;
   const format = settingsPicked
     ? preset.format
     : env.LLM_API_FORMAT === "openai"
@@ -162,5 +176,6 @@ export function llmConfig(
     thinking: env.LLM_THINKING === "off" ? "off" : "adaptive",
     strictTools: env.LLM_STRICT !== "off",
     timeoutMs: Number(env.LLM_TIMEOUT_MS || 90000),
+    keySource: key.name,
   };
 }
