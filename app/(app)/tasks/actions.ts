@@ -5,7 +5,6 @@
 // implementation; only the identity differs.
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
 import {
   createTask,
   updateTask,
@@ -15,22 +14,14 @@ import {
   type TaskResult,
 } from "@/lib/tasks/write";
 import type { Database } from "@/lib/database.types";
+import { requireUser } from "@/lib/auth/require-user";
 
 export type { TaskInput, TaskResult };
 
 type TaskStatus = Database["public"]["Enums"]["task_status"];
 
-async function requireUser() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("not signed in");
-  return { supabase, user };
-}
-
 export async function createTaskAction(input: TaskInput): Promise<TaskResult> {
-  const { supabase, user } = await requireUser();
+  const { supabase, user } = await requireUser("/tasks");
   const r = await createTask(supabase, user.id, input);
   if (r.ok) revalidatePath("/tasks");
   return r;
@@ -40,7 +31,7 @@ export async function updateTaskAction(
   id: string,
   patch: Partial<TaskInput>
 ): Promise<TaskResult> {
-  const { supabase, user } = await requireUser();
+  const { supabase, user } = await requireUser("/tasks");
   const r = await updateTask(supabase, user.id, id, patch);
   if (r.ok) revalidatePath("/tasks");
   return r;
@@ -50,7 +41,7 @@ export async function setTaskStatusAction(
   id: string,
   status: TaskStatus
 ): Promise<TaskResult> {
-  const { supabase, user } = await requireUser();
+  const { supabase, user } = await requireUser("/tasks");
   const t = await setTaskStatus(supabase, user.id, id, status);
   if (!t.ok) return { ok: false, message: t.message ?? "Could not update the task." };
   revalidatePath("/tasks");
@@ -60,7 +51,7 @@ export async function setTaskStatusAction(
 export async function deleteTaskAction(
   id: string
 ): Promise<{ ok: boolean; message?: string }> {
-  const { supabase, user } = await requireUser();
+  const { supabase, user } = await requireUser("/tasks");
   const r = await deleteTask(supabase, user.id, id);
   if (r.ok) revalidatePath("/tasks");
   return r;
@@ -88,7 +79,7 @@ export interface ProjectInput {
 export async function createProjectAction(
   input: ProjectInput
 ): Promise<{ ok: boolean; id?: string; message?: string }> {
-  const { supabase, user } = await requireUser();
+  const { supabase, user } = await requireUser("/tasks");
   if (!input.name.trim()) return { ok: false, message: "A name is required." };
   if (!input.work_stream_id) return { ok: false, message: "A work stream is required." };
   const { data, error } = await supabase
@@ -111,7 +102,7 @@ export async function updateProjectAction(
   id: string,
   patch: Partial<ProjectInput>
 ): Promise<{ ok: boolean; message?: string }> {
-  const { supabase } = await requireUser();
+  const { supabase } = await requireUser("/tasks");
   const { error } = await supabase
     .from("projects")
     .update({
@@ -129,7 +120,7 @@ export async function updateProjectAction(
 export async function deleteProjectAction(
   id: string
 ): Promise<{ ok: boolean; message?: string }> {
-  const { supabase } = await requireUser();
+  const { supabase } = await requireUser("/tasks");
   // tasks.project_id is ON DELETE SET NULL, so tasks survive as unfiled.
   const { error } = await supabase.from("projects").delete().eq("id", id);
   if (error) return { ok: false, message: error.message };

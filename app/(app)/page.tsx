@@ -31,7 +31,12 @@ export default async function DashboardPage() {
   const dayStart = istInstant(today, 0, 0).toISOString();
   const dayEnd = istInstant(today, 23, 59).toISOString();
 
-  const [{ data: events }, { data: tasks }, { count: pendingCount }] =
+  // Four independent reads in parallel. The stream name is fetched as its own
+  // small table and joined in memory rather than through an embedded
+  // work_streams(name) select: measured against the live database, the
+  // embedded join cost about 870ms where two plain queries cost about 390ms
+  // in total, and this runs on the first screen of every visit.
+  const [{ data: events }, { data: tasks }, { data: streams }, { count: pendingCount }] =
     await Promise.all([
       supabase
         .from("events")
@@ -41,8 +46,9 @@ export default async function DashboardPage() {
         .order("start_ts"),
       supabase
         .from("tasks")
-        .select("id, title, status, priority, due_ts, work_streams(name)")
+        .select("id, title, status, priority, due_ts, work_stream_id")
         .in("status", ["inbox", "todo", "doing"]),
+      supabase.from("work_streams").select("id, name"),
       supabase
         .from("assistant_actions")
         .select("id", { count: "exact", head: true })
@@ -51,11 +57,12 @@ export default async function DashboardPage() {
 
   type Row = NonNullable<typeof tasks>[number];
   const open = (tasks ?? []) as Row[];
+  const streamName = new Map((streams ?? []).map((s) => [s.id, s.name]));
   const bandsRaw = triage(open, nowMs);
   const toRow = (t: Row) => ({
     id: t.id,
     title: t.title,
-    stream: (t.work_streams as { name: string } | null)?.name ?? "No stream",
+    stream: streamName.get(t.work_stream_id) ?? "No stream",
     due_ts: t.due_ts,
     needs_deadline: needsDeadline(t),
   });

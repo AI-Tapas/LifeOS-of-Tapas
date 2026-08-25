@@ -1,24 +1,15 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
 import {
   syncObligationReminder,
   removeObligationReminder,
 } from "@/lib/reminders/writer";
 import type { Database } from "@/lib/database.types";
+import { requireUser } from "@/lib/auth/require-user";
 
 type Category = Database["public"]["Enums"]["obligation_category"];
 type Frequency = Database["public"]["Enums"]["obligation_frequency"];
-
-async function requireUser() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("not signed in");
-  return { supabase, user };
-}
 
 export interface ObligationInput {
   name: string;
@@ -65,7 +56,7 @@ function reminderNote(o: { created: boolean; reason?: string } | null): string |
 export async function createObligationAction(
   input: ObligationInput
 ): Promise<ObligationResult> {
-  const { supabase, user } = await requireUser();
+  const { supabase, user } = await requireUser("/money");
   if (!input.name.trim()) return { ok: false, message: "A name is required." };
   const invalid = validateDue({ ...input, active: input.active ?? true });
   if (invalid) return { ok: false, message: invalid };
@@ -107,7 +98,7 @@ export async function updateObligationAction(
   id: string,
   patch: ObligationInput
 ): Promise<ObligationResult> {
-  const { supabase, user } = await requireUser();
+  const { supabase, user } = await requireUser("/money");
   if (!patch.name.trim()) return { ok: false, message: "A name is required." };
   const invalid = validateDue({ ...patch, active: patch.active ?? true });
   if (invalid) return { ok: false, message: invalid };
@@ -146,7 +137,7 @@ export async function setObligationActiveAction(
   id: string,
   active: boolean
 ): Promise<ObligationResult> {
-  const { supabase, user } = await requireUser();
+  const { supabase, user } = await requireUser("/money");
   const { error } = await supabase
     .from("recurring_obligations")
     .update({ active })
@@ -165,7 +156,7 @@ export async function setObligationActiveAction(
 export async function deleteObligationAction(
   id: string
 ): Promise<{ ok: boolean; message?: string }> {
-  const { supabase, user } = await requireUser();
+  const { supabase, user } = await requireUser("/money");
   // Remove the Google reminder event first, then the row (reminders cascade).
   await removeObligationReminder(user.id, id);
   const { error } = await supabase.from("recurring_obligations").delete().eq("id", id);

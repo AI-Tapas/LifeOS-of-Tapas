@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
 import { syncAllEvents } from "@/lib/events/sync";
 import {
   createEvent,
@@ -11,15 +10,7 @@ import {
   ReadOnlyAccountError,
   type AppEventInput,
 } from "@/lib/events/write";
-
-async function requireUser() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("not signed in");
-  return { supabase, user };
-}
+import { requireUser } from "@/lib/auth/require-user";
 
 export type SyncResult = {
   ok: boolean;
@@ -31,7 +22,7 @@ export type SyncResult = {
 // On-demand sync of all connected accounts. Never throws to the render: each
 // account reports its own outcome and a revoked account is a graceful skip.
 export async function syncEventsAction(): Promise<SyncResult> {
-  const { user } = await requireUser();
+  const { user } = await requireUser("/calendar");
   try {
     const results = await syncAllEvents(user.id);
     revalidatePath("/calendar");
@@ -64,7 +55,7 @@ export async function createEventAction(
   input: AppEventInput,
   confirmed: boolean
 ): Promise<EventActionResult> {
-  const { user } = await requireUser();
+  const { user } = await requireUser("/calendar");
   try {
     const r = await createEvent(user.id, accountId, input, confirmed);
     revalidatePath("/calendar");
@@ -79,7 +70,7 @@ export async function updateEventAction(
   input: AppEventInput,
   confirmed: boolean
 ): Promise<EventActionResult> {
-  const { user } = await requireUser();
+  const { user } = await requireUser("/calendar");
   try {
     const r = await updateEvent(user.id, eventId, input, confirmed);
     revalidatePath("/calendar");
@@ -92,7 +83,7 @@ export async function updateEventAction(
 export async function deleteEventAction(
   eventId: string
 ): Promise<{ ok: boolean; message?: string }> {
-  const { user } = await requireUser();
+  const { user } = await requireUser("/calendar");
   try {
     await deleteAppEvent(user.id, eventId);
     revalidatePath("/calendar");

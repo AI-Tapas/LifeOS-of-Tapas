@@ -1,21 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { slotByKey } from "@/lib/accounts";
 import { syncCalendars } from "@/lib/calendars";
 import { TokenRevokedError } from "@/lib/oauth/core";
 import { providerOptions } from "@/lib/assistant/config";
-
-async function requireUser() {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("not signed in");
-  return { supabase, user };
-}
+import { requireUser } from "@/lib/auth/require-user";
 
 export type RefreshResult =
   | { ok: true; count: number }
@@ -28,7 +19,7 @@ export type RefreshResult =
 export async function refreshCalendarsAction(
   accountId: string
 ): Promise<RefreshResult> {
-  const { supabase, user } = await requireUser();
+  const { supabase, user } = await requireUser("/settings");
   const { data: acct } = await supabase
     .from("accounts")
     .select("id, provider, status")
@@ -58,7 +49,7 @@ export async function refreshCalendarsAction(
 }
 
 export async function disconnectAction(accountId: string): Promise<void> {
-  const { supabase, user } = await requireUser();
+  const { supabase, user } = await requireUser("/settings");
   const { data: acct } = await supabase
     .from("accounts")
     .select("id, provider, slot")
@@ -104,7 +95,7 @@ export async function disconnectAction(accountId: string): Promise<void> {
 // icai.org only: declare the account forwarded (mail arrives via a Gmail filter
 // into ca.tapasnr) instead of directly connected.
 export async function setForwardedAction(forwarded: boolean): Promise<void> {
-  const { user } = await requireUser();
+  const { user } = await requireUser("/settings");
   const slot = slotByKey("icai");
   if (!slot) throw new Error("unknown slot");
   const svc = createServiceClient();
@@ -145,7 +136,7 @@ export async function setPrimaryWriteAction(
   accountId: string,
   calendarId: string
 ): Promise<void> {
-  const { supabase } = await requireUser();
+  const { supabase } = await requireUser("/settings");
   // Clear the account's current write-back first so the partial unique index
   // (one is_primary_write per account) never trips, then set the chosen one.
   await supabase
@@ -161,7 +152,7 @@ export async function setPrimaryWriteAction(
 }
 
 export async function setReminderHomeAction(calendarId: string): Promise<void> {
-  const { supabase, user } = await requireUser();
+  const { supabase, user } = await requireUser("/settings");
   await supabase
     .from("calendars")
     .update({ is_reminder_home: false })
@@ -182,7 +173,7 @@ export async function setCalendarSyncAction(
   calendarId: string,
   enabled: boolean
 ): Promise<void> {
-  const { supabase } = await requireUser();
+  const { supabase } = await requireUser("/settings");
   await supabase
     .from("calendars")
     .update({ sync_enabled: enabled })
@@ -198,7 +189,7 @@ export async function setCalendarSyncAction(
 export async function savePersonaVersionAction(
   sectionsMd: string
 ): Promise<{ ok: boolean; message?: string; version?: number }> {
-  const { supabase, user } = await requireUser();
+  const { supabase, user } = await requireUser("/settings");
   const text = sectionsMd.trim();
   if (!text) return { ok: false, message: "The persona cannot be empty." };
 
@@ -236,7 +227,7 @@ export async function savePersonaVersionAction(
 export async function activatePersonaVersionAction(
   personaId: string
 ): Promise<{ ok: boolean; message?: string }> {
-  const { supabase, user } = await requireUser();
+  const { supabase, user } = await requireUser("/settings");
   await supabase
     .from("assistant_persona")
     .update({ active: false })
@@ -271,7 +262,7 @@ export async function saveAssistantModelsAction(input: {
   scan_provider: string;
   scan_model: string;
 }): Promise<{ ok: boolean; message?: string }> {
-  const { supabase, user } = await requireUser();
+  const { supabase, user } = await requireUser("/settings");
   const known = new Set(providerOptions().map((o) => o.name));
   const clean = (v: string) => {
     const t = v.trim();
