@@ -389,10 +389,17 @@ export async function syncAllEvents(userId: string): Promise<AccountSyncResult[]
     .eq("user_id", userId)
     .in("status", ["connected", "needs_reauth"]);
 
-  const results: AccountSyncResult[] = [];
-  for (const acct of (accounts ?? []) as AccountRow[]) {
-    results.push(await syncAccount(svc, acct, userId));
-  }
+  // One account per provider connection, so they are independent: each reads
+  // and writes only its own calendars and its own token row. Running them
+  // sequentially made the total wall time the sum of four round trips to
+  // Google and Microsoft, which is what pushed this past the platform's
+  // function time limit as more calendars were connected. Promise.all keeps
+  // the result order, so callers see no difference beyond the speed.
+  const results: AccountSyncResult[] = await Promise.all(
+    ((accounts ?? []) as AccountRow[]).map((acct) =>
+      syncAccount(svc, acct, userId)
+    )
+  );
 
   // Best-effort: create any reminder events that could not be written earlier
   // (for example while ca.tapasnr was in needs_reauth).

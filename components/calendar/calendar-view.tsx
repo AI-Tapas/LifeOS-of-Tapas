@@ -114,10 +114,22 @@ export default function CalendarView({
   );
 
   // On open: sync when the data is stale, then refresh the server data.
+  // The sync is a convenience, never a precondition for showing the calendar.
+  // A rejection here (the action hitting the platform's function time limit,
+  // for instance) used to escape the transition and take the whole page down
+  // with it, so the events already in the database became unreadable because
+  // fetching newer ones failed. It is caught and reported as a line of text
+  // instead.
   useEffect(() => {
     if (!stale) return;
     startTransition(async () => {
-      await syncEventsAction();
+      try {
+        await syncEventsAction();
+      } catch {
+        setNotice(
+          "Could not refresh from your calendars just now. Showing what was last synced. Use Refresh to try again."
+        );
+      }
       router.refresh();
     });
     // run once on mount for this view/anchor
@@ -135,11 +147,19 @@ export default function CalendarView({
   function manualRefresh() {
     setNotice(null);
     startTransition(async () => {
-      const r = await syncEventsAction();
-      if (r.ok && r.skipped.length) {
+      try {
+        const r = await syncEventsAction();
+        if (!r.ok) {
+          setNotice("The sync did not finish. Your existing events are unchanged.");
+        } else if (r.skipped.length) {
+          setNotice(
+            "Synced. Some accounts were skipped: " +
+              r.skipped.map((s) => `${s.slot ?? "account"} (${s.reason})`).join(", ")
+          );
+        }
+      } catch {
         setNotice(
-          "Synced. Some accounts were skipped: " +
-            r.skipped.map((s) => `${s.slot ?? "account"} (${s.reason})`).join(", ")
+          "Could not reach your calendars. Your existing events are unchanged."
         );
       }
       router.refresh();

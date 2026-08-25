@@ -18,6 +18,12 @@ import CalendarView, {
 
 export const dynamic = "force-dynamic";
 
+// The on-open sync runs as a server action inside this route, and it talks to
+// Google and Microsoft for every connected calendar. The platform default is
+// far too tight for that, and a sync that overruns it fails the whole request.
+// 60 seconds is the ceiling on every Vercel plan we might be on.
+export const maxDuration = 60;
+
 type Search = Record<string, string | string[] | undefined>;
 function one(v: string | string[] | undefined): string | undefined {
   return Array.isArray(v) ? v[0] : v;
