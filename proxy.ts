@@ -45,7 +45,12 @@ export default async function proxy(request: NextRequest) {
 
   if (!user && !isAuthRoute) {
     const url = request.nextUrl.clone();
+    const intended = `${request.nextUrl.pathname}${request.nextUrl.search}`;
     url.pathname = "/login";
+    url.search = "";
+    // Carry the destination so a connector's approval link survives a lapsed
+    // session instead of dumping the owner on the home screen.
+    if (intended !== "/") url.searchParams.set("next", intended);
     return NextResponse.redirect(url);
   }
   if (user && request.nextUrl.pathname.startsWith("/login")) {
