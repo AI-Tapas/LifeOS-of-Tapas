@@ -14,6 +14,10 @@ const TABLES = [
   "trips", "trip_expenses", "bills", "people", "notes", "finance_items",
   "recurring_obligations", "reminders", "assistant_actions",
   "assistant_persona", "audit_log",
+  // M4 and the connector: assistant_settings holds model choices, and the two
+  // mcp_ tables hold OAuth registrations and hashed token material, so anon
+  // must be shut out of them exactly as firmly.
+  "assistant_settings", "mcp_clients", "mcp_grants",
 ];
 
 function localEnv() {
