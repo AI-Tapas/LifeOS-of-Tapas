@@ -37,7 +37,8 @@ export interface ToolDef {
 // enum is invalid there as well. One plain type per parameter keeps every
 // provider happy, and the executor treats a missing key and a null key alike.
 
-// Marker stripped by schema(); it never reaches the provider.
+// Marker stripped by schema(); it never reaches the provider. Inline literals
+// may set __optional directly instead of wrapping with opt().
 const OPTIONAL = "__optional";
 
 type Frag = Record<string, unknown>;
@@ -283,6 +284,167 @@ export const TOOLS: ToolDef[] = [
     }),
   },
   {
+    name: "delete_task",
+    bucket: "autonomous",
+    description:
+      "Delete one of Tapas's own tasks, and its reminder. Use update_task with status dropped when the work was abandoned but worth remembering.",
+    input_schema: schema({ task_id: str("The task id from context.") }),
+  },
+  {
+    name: "add_project",
+    bucket: "autonomous",
+    description: "Create a project to group related tasks under a work stream.",
+    input_schema: schema({
+      name: str("Project name."),
+      work_stream: strOrNull(
+        "Work stream name. Omit to file it under Personal."
+      ),
+      notes: strOrNull("Optional detail."),
+    }),
+  },
+  {
+    name: "update_note",
+    bucket: "autonomous",
+    description: "Change a saved note's title or body.",
+    input_schema: schema({
+      note_id: str("The note id."),
+      title: strOrNull("New title. Omit to keep the current one."),
+      body: strOrNull("New body in Markdown. Omit to keep the current one."),
+    }),
+  },
+  {
+    name: "delete_note",
+    bucket: "autonomous",
+    description: "Delete a saved note.",
+    input_schema: schema({ note_id: str("The note id.") }),
+  },
+  {
+    name: "update_person",
+    bucket: "autonomous",
+    description:
+      "Update a person record. Set verified to true only when Tapas has confirmed the address himself; that clears the unverified flag shown at send time.",
+    input_schema: schema({
+      person_id: str("The person id."),
+      name: strOrNull("New name. Omit to keep."),
+      org: strOrNull("New organisation. Omit to keep."),
+      role: strOrNull("New role. Omit to keep."),
+      email: strOrNull("Replace the email addresses with this one. Omit to keep."),
+      phone: strOrNull("Replace the phone numbers with this one. Omit to keep."),
+      context: strOrNull("How this person is known. Omit to keep."),
+      verified: boolOrNull("True marks the record confirmed by Tapas."),
+    }),
+  },
+  {
+    name: "delete_person",
+    bucket: "autonomous",
+    description: "Delete a person record.",
+    input_schema: schema({ person_id: str("The person id.") }),
+  },
+  {
+    name: "update_obligation",
+    bucket: "autonomous",
+    description: "Update a recurring obligation, or switch it off with active false.",
+    input_schema: schema({
+      obligation_id: str("The obligation id."),
+      name: strOrNull("New name. Omit to keep."),
+      amount: numOrNull("New amount in rupees. Omit to keep."),
+      due_day: {
+        type: "integer",
+        description: "New day of month it falls due (1-31).",
+        __optional: true,
+      },
+      due_month: {
+        type: "integer",
+        description: "New month (1-12) for yearly obligations.",
+        __optional: true,
+      },
+      autopay: boolOrNull("Whether it is on autopay."),
+      active: boolOrNull("False retires it without deleting the history."),
+    }),
+  },
+  {
+    name: "delete_obligation",
+    bucket: "autonomous",
+    description: "Delete a recurring obligation and its reminder.",
+    input_schema: schema({ obligation_id: str("The obligation id.") }),
+  },
+  {
+    name: "add_finance_item",
+    bucket: "autonomous",
+    description:
+      "Record an investment or deposit: a fixed deposit, mutual fund, stock, NCD or other holding.",
+    input_schema: schema({
+      kind: enumOf(["fd", "mf", "stock", "ncd", "other"], "What kind of holding."),
+      name: str("What it is called."),
+      institution: strOrNull("Bank, fund house or broker."),
+      value: numOrNull("Current value in rupees."),
+      key_date: { ...strOrNull("Maturity or review date as YYYY-MM-DD.") },
+      key_date_type: enumOrNull(["maturity", "review"], "What that date means."),
+      notes: strOrNull("Anything worth remembering."),
+    }),
+  },
+  {
+    name: "update_finance_item",
+    bucket: "autonomous",
+    description: "Update a recorded holding: its value, key date or notes.",
+    input_schema: schema({
+      finance_item_id: str("The holding id."),
+      name: strOrNull("New name. Omit to keep."),
+      value: numOrNull("New value in rupees. Omit to keep."),
+      key_date: { ...strOrNull("New maturity or review date as YYYY-MM-DD.") },
+      notes: strOrNull("New notes. Omit to keep."),
+    }),
+  },
+  {
+    name: "delete_finance_item",
+    bucket: "autonomous",
+    description: "Delete a recorded holding.",
+    input_schema: schema({ finance_item_id: str("The holding id.") }),
+  },
+  {
+    name: "update_event_solo",
+    bucket: "autonomous",
+    description:
+      "Edit an event the app created, keeping it attendee-free. Events synced from a calendar Tapas does not own cannot be edited here.",
+    input_schema: schema({
+      event_id: str("The event id from lifeos_list_events."),
+      title: strOrNull("New title. Omit to keep."),
+      date: { ...strOrNull("New date as YYYY-MM-DD (IST). Omit to keep.") },
+      start_time: { ...strOrNull(TIME_DESC + " Omit to keep.") },
+      end_time: { ...strOrNull(TIME_DESC + " Omit to keep.") },
+      description: strOrNull("New description. Omit to keep."),
+      location: strOrNull("New location. Omit to keep."),
+    }),
+  },
+  {
+    name: "delete_event",
+    bucket: "autonomous",
+    description:
+      "Delete an event the app created. Refuses anything synced from an external calendar, since that is not the app's to remove.",
+    input_schema: schema({ event_id: str("The event id.") }),
+  },
+  {
+    name: "scan_mail",
+    bucket: "autonomous",
+    description:
+      "Read recent inbox metadata across the connected accounts and propose tasks from anything needing action. Never stores message bodies.",
+    input_schema: schema({}),
+  },
+  {
+    name: "undo_action",
+    bucket: "autonomous",
+    description:
+      "Undo an assistant action that already ran, reversing what it created. Sent email cannot be undone.",
+    input_schema: schema({ action_id: str("The action id from the queue history.") }),
+  },
+  {
+    name: "reject_queued_action",
+    bucket: "autonomous",
+    description:
+      "Discard something waiting in the approval queue, so it can never be sent. Approving remains impossible outside the app.",
+    input_schema: schema({ action_id: str("The action id from the pending list.") }),
+  },
+  {
     name: "lookup_gst_wiki",
     bucket: "stub",
     description:
@@ -417,7 +579,13 @@ export const MCP_READ_TOOLS = [
   "lifeos_get_context",
   "lifeos_list_tasks",
   "lifeos_list_events",
+  "lifeos_list_notes",
+  "lifeos_list_people",
+  "lifeos_list_obligations",
+  "lifeos_list_finance_items",
+  "lifeos_list_projects",
   "lifeos_list_pending_actions",
+  "lifeos_list_action_history",
 ] as const;
 
 export function mcpWriteTools(): ToolDef[] {

@@ -238,7 +238,7 @@ export default function AssistantChat() {
           e.preventDefault();
           send();
         }}
-        className="sticky bottom-20 flex gap-2"
+        className="sticky bottom-32 flex gap-2 sm:bottom-20"
       >
         <input
           className={inputCls}

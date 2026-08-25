@@ -228,6 +228,14 @@ and email-verification rules live in lib/accounts.ts.
   server itself lives in mcp-server/ (its own package, excluded from the Next
   tsconfig and eslint; stdio transport, and it fetches its tool list from the
   app so it cannot drift).
+- Tool surface (31 registry tools, shared by the in-app assistant and both
+  connectors): create/update/delete for tasks, notes, people, obligations,
+  finance items and projects; solo calendar events including edit and delete
+  (delete_event refuses anything with source other than 'app', so a synced
+  event is never removed); draft_email; scan_mail; undo_action;
+  reject_queued_action. Ten read tools mirror them, so nothing writable is
+  invisible. send_email and propose_event_with_invites stay confirm-bucket,
+  and NO tool approves: approval is owner-session only, in the app.
 - Remote MCP connector (ChatGPT, Claude web and mobile): POST /api/mcp/http
   speaks Streamable HTTP with stateless JSON replies, handling initialize,
   tools/list, tools/call and ping directly rather than pulling the MCP SDK

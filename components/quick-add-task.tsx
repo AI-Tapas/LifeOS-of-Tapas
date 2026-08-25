@@ -36,7 +36,7 @@ export default function QuickAddTask({
   }
 
   return (
-    <div className="fixed bottom-16 right-4 z-30">
+    <div className="fixed bottom-28 right-4 z-30 sm:bottom-16">
       {open ? (
         <div className="w-72 rounded-xl border border-neutral-200 bg-white p-3 shadow-lg dark:border-neutral-800 dark:bg-neutral-950">
           <div className="mb-2 flex items-center justify-between">

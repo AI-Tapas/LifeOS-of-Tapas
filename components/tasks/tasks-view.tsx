@@ -52,6 +52,15 @@ export interface WorkStreamRow {
 
 type Tab = "overview" | "inbox" | "board" | "projects";
 
+// Inbox is a status, Board holds the remaining statuses, and Projects is a
+// grouping that cuts across both. Saying so beats guessing from four nouns.
+const TAB_HINTS: Record<Tab, string> = {
+  overview: "Where things stand today, and what is overdue or due soon.",
+  inbox: "Newly captured, not yet sorted. Move each one to To do, or edit it.",
+  board: "Everything you are working through: unsorted, to do, doing, done.",
+  projects: "Related tasks grouped together. A task can sit in any status.",
+};
+
 const PRIORITY_DOT: Record<TaskRow["priority"], string> = {
   low: "#94a3b8",
   medium: "#eab308",
@@ -105,6 +114,8 @@ export default function TasksView({
           </button>
         ))}
       </div>
+
+      <p className="mt-2 text-xs text-neutral-500">{TAB_HINTS[tab]}</p>
 
       {notice && (
         <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
@@ -443,7 +454,12 @@ function BoardTab({
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const columns: { key: TaskRow["status"]; label: string }[] = [
+  const columns: { key: TaskRow["status"]; label: string; note?: string }[] = [
+    {
+      key: "inbox",
+      label: "Unsorted",
+      note: "Captured but not triaged. These are easy to forget, so they lead.",
+    },
     { key: "todo", label: "To do" },
     { key: "doing", label: "Doing" },
     { key: "done", label: "Done" },
@@ -462,9 +478,13 @@ function BoardTab({
         const items = tasks.filter((t) => t.status === col.key);
         return (
           <section key={col.key}>
-            <h3 className="mb-2 text-sm font-medium text-neutral-500">
+            <h3 className="text-sm font-medium text-neutral-500">
               {col.label} ({items.length})
             </h3>
+            {col.note && items.length > 0 && (
+              <p className="mb-2 text-xs text-neutral-400">{col.note}</p>
+            )}
+            {(!col.note || items.length === 0) && <div className="mb-2" />}
             {items.length === 0 ? (
               <p className="text-xs text-neutral-400">Nothing here.</p>
             ) : (
@@ -479,7 +499,7 @@ function BoardTab({
                     onNotice={onNotice}
                     extraActions={
                       <div className="flex shrink-0 flex-col gap-1">
-                        {col.key !== "todo" && (
+                        {col.key !== "todo" && col.key !== "inbox" && (
                           <button
                             onClick={() => move(t, col.key === "done" ? "doing" : "todo")}
                             disabled={pending}
@@ -490,11 +510,20 @@ function BoardTab({
                         )}
                         {col.key !== "done" && (
                           <button
-                            onClick={() => move(t, col.key === "todo" ? "doing" : "done")}
+                            onClick={() =>
+                              move(
+                                t,
+                                col.key === "inbox"
+                                  ? "todo"
+                                  : col.key === "todo"
+                                    ? "doing"
+                                    : "done"
+                              )
+                            }
                             disabled={pending}
                             className="min-h-9 rounded-lg border border-neutral-300 px-2.5 text-xs font-medium disabled:opacity-50 dark:border-neutral-700"
                           >
-                            {col.key === "todo" ? "Start" : "Done"}
+                            {col.key === "inbox" ? "To do" : col.key === "todo" ? "Start" : "Done"}
                           </button>
                         )}
                       </div>

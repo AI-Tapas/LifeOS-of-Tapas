@@ -54,14 +54,31 @@ test("no send-class kind is autonomous; both send-class kinds are confirm", () =
   }
 });
 
-test("the registry holds no status-mutation, deletion, fetch or SQL tool", () => {
+test("no tool can approve, execute or reach outside the app's own data", () => {
+  // Deleting Tapas's OWN records is allowed: the boundary is approval of a
+  // send, external data the app did not create, and anything that would let
+  // the model reach past the fixed tool set.
   for (const t of TOOLS) {
     assert.doesNotMatch(
       t.name,
-      /approve|reject|status|delete|remove|sql|query|fetch|http|browse/i,
+      /approve|execute|grant|token|credential|password|persona|sql|query|fetch|http|browse/i,
       `tool ${t.name} looks like a forbidden capability`
     );
   }
+  // Rejecting a queued item is allowed (it destroys a draft, it cannot send).
+  // Approving one is not, at any spelling.
+  const names = TOOLS.map((t) => t.name);
+  assert.equal(names.includes("reject_queued_action"), true);
+  assert.equal(
+    names.some((n) => /approve/i.test(n)),
+    false,
+    "approval must remain impossible outside the app"
+  );
+  // Calendar deletion exists, but only for events the app itself created;
+  // the executor proves that by routing through deleteAppEvent, which
+  // refuses anything with source other than 'app'.
+  const del = toolByName("delete_event")!;
+  assert.match(del.description, /app created/i);
 });
 
 test("the approved executor refuses kinds outside the send class", async () => {
@@ -701,7 +718,7 @@ test("calendar invitations are dropped before the scanner sees them", async () =
 test("the MCP write surface exposes no approval, execution or stub tools", async () => {
   const { mcpWriteTools, MCP_READ_TOOLS } = await import("../lib/assistant/tools.ts");
   const names = mcpWriteTools().map((t) => t.name);
-  for (const forbidden of ["approve", "reject", "execute", "undo", "persona", "token"]) {
+  for (const forbidden of ["approve", "execute", "persona", "token", "credential"]) {
     assert.equal(
       names.some((n) => n.includes(forbidden)),
       false,
@@ -710,8 +727,27 @@ test("the MCP write surface exposes no approval, execution or stub tools", async
   }
   // Stubs would only waste a round trip.
   assert.equal(names.includes("lookup_gst_wiki"), false);
-  // Everything the in-app assistant can do to the owner's own data is here.
-  for (const expected of ["create_task", "draft_email", "send_email"]) {
+  // Everything the in-app assistant can do to the owner's own data is here,
+  // including the housekeeping a connected assistant needs to be useful.
+  for (const expected of [
+    "create_task",
+    "update_task",
+    "delete_task",
+    "add_note",
+    "update_note",
+    "delete_note",
+    "add_person",
+    "update_person",
+    "add_obligation",
+    "add_finance_item",
+    "update_event_solo",
+    "delete_event",
+    "scan_mail",
+    "undo_action",
+    "reject_queued_action",
+    "draft_email",
+    "send_email",
+  ]) {
     assert.ok(names.includes(expected), `${expected} should be callable`);
   }
   // Read tools are all prefixed and read-only by name.

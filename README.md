@@ -274,6 +274,11 @@ existing subscription instead of API credits. Two ways in:
   token. In ChatGPT this lives under Settings, Security and login, Developer
   mode, then Create custom connector.
 
+The connected assistant can read and change everything in your own records:
+tasks, notes, people, obligations, investments, projects and your own
+calendar events, plus running a mail scan, undoing an earlier action and
+discarding something from the queue.
+
 Either way the connected assistant inherits the same rules as the in-app one:
 it can read your data and act on your own lists, but sending an email or
 inviting anyone only queues the request for your approval here. No connector

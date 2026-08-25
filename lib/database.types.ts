@@ -647,6 +647,7 @@ export type Database = {
           org?: string | null
           phones?: string[]
           role?: string | null
+          unverified?: boolean
           user_id?: string
         }
         Relationships: []

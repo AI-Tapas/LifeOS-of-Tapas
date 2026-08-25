@@ -10,8 +10,14 @@
 
 import { cookieActor, type Actor } from "@/lib/assistant/actor";
 import { withResourceAuth } from "@/lib/oauth/tokens";
-import { createEvent, deleteAppEvent } from "@/lib/events/write";
-import { istInstant, formatDateIST } from "@/lib/datetime";
+import { createEvent, updateEvent, deleteAppEvent } from "@/lib/events/write";
+import {
+  istInstant,
+  istCivil,
+  istHour,
+  istMinute,
+  formatDateIST,
+} from "@/lib/datetime";
 import {
   createTask,
   updateTask,
@@ -27,6 +33,7 @@ import {
   assertNoAttendees,
 } from "./tools";
 import { hashPayload, runApprovedExecution } from "./core";
+import { removeObligationReminder, syncObligationReminder } from "@/lib/reminders/writer";
 import type { Database, Json } from "@/lib/database.types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -73,6 +80,21 @@ function hm(time: string): { h: number; m: number } {
   const m = /^(\d{1,2}):(\d{2})$/.exec(time);
   if (!m) throw new Error(`Invalid time: ${time}`);
   return { h: Number(m[1]), m: Number(m[2]) };
+}
+
+// The IST wall clock of a stored instant, for edits that change only part of
+// an event.
+function istCivilOf(iso: string): { y: number; m: number; d: number } {
+  const c = istCivil(iso);
+  return { y: c.y, m: c.m, d: c.d };
+}
+
+function istHourOf(iso: string): number {
+  return istHour(iso);
+}
+
+function istMinuteOf(iso: string): number {
+  return istMinute(iso);
 }
 
 // Task due dates land at 9:30 am IST on the given day, matching when the
@@ -435,6 +457,338 @@ const performers: Record<string, Performer> = {
     return { summary: `Obligation added: ${name}.`, undo: { obligation_id: data.id } };
   },
 
+
+  // --- housekeeping on Tapas's own records ---------------------------------
+  // Deleting his own rows is his business; nothing here touches data the app
+  // did not create. The calendar case is the exception that proves it:
+  // delete_event routes through deleteAppEvent, which refuses a synced event.
+
+  async delete_task(supabase, userId, input) {
+    const taskId = s(input.task_id);
+    if (!taskId) throw new Error("task_id is required.");
+    const { data: prev } = await supabase
+      .from("tasks")
+      .select("title")
+      .eq("id", taskId)
+      .single();
+    if (!prev) throw new Error("Task not found.");
+    const r = await deleteTask(supabase, userId, taskId);
+    if (!r.ok) throw new Error(r.message ?? "Could not delete the task.");
+    // Deletion is not reversible from a recorded id, so no undo is offered.
+    return { summary: `Task deleted: ${prev.title}.`, undo: null };
+  },
+
+  async add_project(supabase, userId, input) {
+    const name = s(input.name);
+    if (!name) throw new Error("A project name is required.");
+    const workStreamId = await resolveWorkStream(supabase, s(input.work_stream));
+    const { data, error } = await supabase
+      .from("projects")
+      .insert({
+        user_id: userId,
+        name,
+        work_stream_id: workStreamId,
+        notes: s(input.notes),
+      })
+      .select("id")
+      .single();
+    if (error || !data) throw new Error(error?.message ?? "Could not save the project.");
+    return { summary: `Project created: ${name}.`, undo: { project_id: data.id } };
+  },
+
+  async update_note(supabase, _userId, input) {
+    const noteId = s(input.note_id);
+    if (!noteId) throw new Error("note_id is required.");
+    const { data: prev } = await supabase
+      .from("notes")
+      .select("title, body_md")
+      .eq("id", noteId)
+      .single();
+    if (!prev) throw new Error("Note not found.");
+    const patchRow = {
+      ...(s(input.title) ? { title: s(input.title)! } : {}),
+      ...(input.body !== undefined ? { body_md: s(input.body) } : {}),
+    };
+    const { error } = await supabase.from("notes").update(patchRow).eq("id", noteId);
+    if (error) throw new Error(error.message);
+    return {
+      summary: `Note updated: ${s(input.title) ?? prev.title}.`,
+      undo: { note_id: noteId, prev },
+    };
+  },
+
+  async delete_note(supabase, _userId, input) {
+    const noteId = s(input.note_id);
+    if (!noteId) throw new Error("note_id is required.");
+    const { data: prev } = await supabase
+      .from("notes")
+      .select("title")
+      .eq("id", noteId)
+      .single();
+    if (!prev) throw new Error("Note not found.");
+    const { error } = await supabase.from("notes").delete().eq("id", noteId);
+    if (error) throw new Error(error.message);
+    return { summary: `Note deleted: ${prev.title}.`, undo: null };
+  },
+
+  async update_person(supabase, _userId, input) {
+    const personId = s(input.person_id);
+    if (!personId) throw new Error("person_id is required.");
+    const { data: prev } = await supabase
+      .from("people")
+      .select("name, org, role, emails, phones, context_md, unverified")
+      .eq("id", personId)
+      .single();
+    if (!prev) throw new Error("Person not found.");
+    const email = s(input.email);
+    const phone = s(input.phone);
+    const { error } = await supabase
+      .from("people")
+      .update({
+        ...(s(input.name) ? { name: s(input.name)! } : {}),
+        ...(input.org !== undefined ? { org: s(input.org) } : {}),
+        ...(input.role !== undefined ? { role: s(input.role) } : {}),
+        ...(email ? { emails: [email.toLowerCase()] } : {}),
+        ...(phone ? { phones: [phone] } : {}),
+        ...(input.context !== undefined ? { context_md: s(input.context) } : {}),
+        // Only Tapas's own confirmation clears the flag; a model asserting it
+        // still shows up in the audit trail with this action.
+        ...(input.verified === true ? { unverified: false } : {}),
+        ...(input.verified === false ? { unverified: true } : {}),
+      })
+      .eq("id", personId);
+    if (error) throw new Error(error.message);
+    return {
+      summary: `Person updated: ${s(input.name) ?? prev.name}.`,
+      undo: { person_id: personId, prev },
+    };
+  },
+
+  async delete_person(supabase, _userId, input) {
+    const personId = s(input.person_id);
+    if (!personId) throw new Error("person_id is required.");
+    const { data: prev } = await supabase
+      .from("people")
+      .select("name")
+      .eq("id", personId)
+      .single();
+    if (!prev) throw new Error("Person not found.");
+    const { error } = await supabase.from("people").delete().eq("id", personId);
+    if (error) throw new Error(error.message);
+    return { summary: `Person deleted: ${prev.name}.`, undo: null };
+  },
+
+  async update_obligation(supabase, userId, input) {
+    const obligationId = s(input.obligation_id);
+    if (!obligationId) throw new Error("obligation_id is required.");
+    const { data: prev } = await supabase
+      .from("recurring_obligations")
+      .select("name, amount, due_day, due_month, autopay, active")
+      .eq("id", obligationId)
+      .single();
+    if (!prev) throw new Error("Obligation not found.");
+    const { error } = await supabase
+      .from("recurring_obligations")
+      .update({
+        ...(s(input.name) ? { name: s(input.name)! } : {}),
+        ...(typeof input.amount === "number"
+          ? { amount: input.amount, variable_amount: false }
+          : {}),
+        ...(Number.isInteger(input.due_day) ? { due_day: input.due_day as number } : {}),
+        ...(Number.isInteger(input.due_month)
+          ? { due_month: input.due_month as number }
+          : {}),
+        ...(typeof input.autopay === "boolean" ? { autopay: input.autopay } : {}),
+        ...(typeof input.active === "boolean" ? { active: input.active } : {}),
+      })
+      .eq("id", obligationId);
+    if (error) throw new Error(error.message);
+    // The reminder follows the obligation: retiring one removes its event.
+    await syncObligationReminder(userId, obligationId);
+    return {
+      summary: `Obligation updated: ${s(input.name) ?? prev.name}.`,
+      undo: { obligation_id: obligationId, prev },
+    };
+  },
+
+  async delete_obligation(supabase, userId, input) {
+    const obligationId = s(input.obligation_id);
+    if (!obligationId) throw new Error("obligation_id is required.");
+    const { data: prev } = await supabase
+      .from("recurring_obligations")
+      .select("name")
+      .eq("id", obligationId)
+      .single();
+    if (!prev) throw new Error("Obligation not found.");
+    await removeObligationReminder(userId, obligationId);
+    const { error } = await supabase
+      .from("recurring_obligations")
+      .delete()
+      .eq("id", obligationId);
+    if (error) throw new Error(error.message);
+    return { summary: `Obligation deleted: ${prev.name}.`, undo: null };
+  },
+
+  async add_finance_item(supabase, userId, input) {
+    const name = s(input.name);
+    const kind = s(input.kind);
+    if (!name || !kind) throw new Error("A kind and name are required.");
+    const keyDate = s(input.key_date);
+    const { data, error } = await supabase
+      .from("finance_items")
+      .insert({
+        user_id: userId,
+        kind: kind as Database["public"]["Enums"]["finance_item_kind"],
+        name,
+        institution: s(input.institution),
+        value: typeof input.value === "number" ? input.value : null,
+        key_date: keyDate,
+        key_date_type: s(input.key_date_type) as
+          | Database["public"]["Enums"]["finance_key_date_type"]
+          | null,
+        notes: s(input.notes),
+      })
+      .select("id")
+      .single();
+    if (error || !data) throw new Error(error?.message ?? "Could not save it.");
+    return { summary: `Holding recorded: ${name}.`, undo: { finance_item_id: data.id } };
+  },
+
+  async update_finance_item(supabase, _userId, input) {
+    const itemId = s(input.finance_item_id);
+    if (!itemId) throw new Error("finance_item_id is required.");
+    const { data: prev } = await supabase
+      .from("finance_items")
+      .select("name, value, key_date, notes")
+      .eq("id", itemId)
+      .single();
+    if (!prev) throw new Error("Holding not found.");
+    const { error } = await supabase
+      .from("finance_items")
+      .update({
+        ...(s(input.name) ? { name: s(input.name)! } : {}),
+        ...(typeof input.value === "number" ? { value: input.value } : {}),
+        ...(s(input.key_date) ? { key_date: s(input.key_date) } : {}),
+        ...(input.notes !== undefined ? { notes: s(input.notes) } : {}),
+      })
+      .eq("id", itemId);
+    if (error) throw new Error(error.message);
+    return {
+      summary: `Holding updated: ${s(input.name) ?? prev.name}.`,
+      undo: { finance_item_id: itemId, prev },
+    };
+  },
+
+  async delete_finance_item(supabase, _userId, input) {
+    const itemId = s(input.finance_item_id);
+    if (!itemId) throw new Error("finance_item_id is required.");
+    const { data: prev } = await supabase
+      .from("finance_items")
+      .select("name")
+      .eq("id", itemId)
+      .single();
+    if (!prev) throw new Error("Holding not found.");
+    const { error } = await supabase.from("finance_items").delete().eq("id", itemId);
+    if (error) throw new Error(error.message);
+    return { summary: `Holding deleted: ${prev.name}.`, undo: null };
+  },
+
+  async update_event_solo(supabase, userId, input) {
+    // Same attendee rule as creation: this path can never carry invitees.
+    assertNoAttendees(input);
+    const eventId = s(input.event_id);
+    if (!eventId) throw new Error("event_id is required.");
+    const { data: ev } = await supabase
+      .from("events")
+      .select("id, title, description, location, start_ts, end_ts, all_day, source")
+      .eq("id", eventId)
+      .single();
+    if (!ev) throw new Error("Event not found.");
+    if (ev.source !== "app") {
+      throw new Error(
+        "That event came from a synced calendar, so the app will not edit it."
+      );
+    }
+    const date = s(input.date);
+    const start = s(input.start_time);
+    const end = s(input.end_time);
+    const baseCivil = date ? civil(date) : istCivilOf(ev.start_ts);
+    const allDay = start ? false : date ? !!ev.all_day : !!ev.all_day;
+    const startIso = start
+      ? istInstant(baseCivil, hm(start).h, hm(start).m).toISOString()
+      : date
+        ? istInstant(baseCivil, istHourOf(ev.start_ts), istMinuteOf(ev.start_ts)).toISOString()
+        : ev.start_ts;
+    const endIso = end
+      ? istInstant(baseCivil, hm(end).h, hm(end).m).toISOString()
+      : (ev.end_ts ?? undefined);
+    const r = await updateEvent(
+      userId,
+      eventId,
+      {
+        title: s(input.title) ?? ev.title,
+        description: (s(input.description) ?? ev.description) ?? undefined,
+        location: (s(input.location) ?? ev.location) ?? undefined,
+        startIso,
+        endIso,
+        allDay,
+      },
+      false
+    );
+    return {
+      summary: `Event updated: ${s(input.title) ?? ev.title}.`,
+      undo: { event_update: { id: r.id, prev: ev } },
+    };
+  },
+
+  async delete_event(supabase, userId, input) {
+    const eventId = s(input.event_id);
+    if (!eventId) throw new Error("event_id is required.");
+    const { data: ev } = await supabase
+      .from("events")
+      .select("title, source")
+      .eq("id", eventId)
+      .single();
+    if (!ev) throw new Error("Event not found.");
+    // deleteAppEvent refuses anything not created by the app; checking here
+    // too means the model gets a readable reason instead of a raw throw.
+    if (ev.source !== "app") {
+      throw new Error(
+        "That event came from a synced calendar. Only events the app created can be deleted."
+      );
+    }
+    await deleteAppEvent(userId, eventId);
+    return { summary: `Event deleted: ${ev.title}.`, undo: null };
+  },
+
+  async scan_mail() {
+    const { runMailScan } = await import("@/lib/assistant/scan");
+    const summary = await runMailScan();
+    return {
+      summary:
+        `Mail scan: ${summary.scanned} emails read, ${summary.created} task` +
+        `${summary.created === 1 ? "" : "s"} proposed.` +
+        (summary.notes.length ? ` ${summary.notes.join(" ")}` : ""),
+      undo: null,
+    };
+  },
+
+  async undo_action(supabase, userId, input) {
+    const actionId = s(input.action_id);
+    if (!actionId) throw new Error("action_id is required.");
+    const r = await undoExecutedAction(actionId, { supabase, userId });
+    if (!r.ok) throw new Error(r.message ?? "That action could not be undone.");
+    return { summary: "The earlier action was undone.", undo: null };
+  },
+
+  async reject_queued_action(supabase, userId, input) {
+    const actionId = s(input.action_id);
+    if (!actionId) throw new Error("action_id is required.");
+    const r = await rejectProposedAction(actionId, { supabase, userId });
+    if (!r.ok) throw new Error(r.message ?? "That action could not be rejected.");
+    return { summary: "The queued action was discarded; it can never be sent.", undo: null };
+  },
+
   async add_event_solo(supabase, userId, input) {
     // Structural gates for attack A3: the schema has no attendees field,
     // smuggled attendee keys are refused here, and confirmed=false below
@@ -696,8 +1050,14 @@ const UNDOABLE = new Set([
   "update_task",
   "set_reminder",
   "add_note",
+  "update_note",
   "add_person",
+  "update_person",
   "add_obligation",
+  "update_obligation",
+  "add_project",
+  "add_finance_item",
+  "update_finance_item",
   "add_event_solo",
 ]);
 
@@ -775,6 +1135,70 @@ async function performUndo(
     }
     case "add_note": {
       await supabase.from("notes").delete().eq("id", String(undo.note_id));
+      return;
+    }
+    case "update_note": {
+      const prev = (undo.prev ?? {}) as Record<string, unknown>;
+      await supabase
+        .from("notes")
+        .update({ title: prev.title as string, body_md: prev.body_md as string | null })
+        .eq("id", String(undo.note_id));
+      return;
+    }
+    case "update_person": {
+      const prev = (undo.prev ?? {}) as Record<string, unknown>;
+      await supabase
+        .from("people")
+        .update({
+          name: prev.name as string,
+          org: prev.org as string | null,
+          role: prev.role as string | null,
+          emails: prev.emails as string[],
+          phones: prev.phones as string[],
+          context_md: prev.context_md as string | null,
+          unverified: prev.unverified as boolean,
+        })
+        .eq("id", String(undo.person_id));
+      return;
+    }
+    case "update_obligation": {
+      const prev = (undo.prev ?? {}) as Record<string, unknown>;
+      await supabase
+        .from("recurring_obligations")
+        .update({
+          name: prev.name as string,
+          amount: prev.amount as number | null,
+          due_day: prev.due_day as number | null,
+          due_month: prev.due_month as number | null,
+          autopay: prev.autopay as boolean,
+          active: prev.active as boolean,
+        })
+        .eq("id", String(undo.obligation_id));
+      await syncObligationReminder(userId, String(undo.obligation_id));
+      return;
+    }
+    case "add_project": {
+      await supabase.from("projects").delete().eq("id", String(undo.project_id));
+      return;
+    }
+    case "add_finance_item": {
+      await supabase
+        .from("finance_items")
+        .delete()
+        .eq("id", String(undo.finance_item_id));
+      return;
+    }
+    case "update_finance_item": {
+      const prev = (undo.prev ?? {}) as Record<string, unknown>;
+      await supabase
+        .from("finance_items")
+        .update({
+          name: prev.name as string,
+          value: prev.value as number | null,
+          key_date: prev.key_date as string | null,
+          notes: prev.notes as string | null,
+        })
+        .eq("id", String(undo.finance_item_id));
       return;
     }
     case "add_person": {
