@@ -83,11 +83,12 @@ export function PendingCard({ item }: { item: PendingView }) {
     });
 
   return (
-    <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
-      <p className="text-xs font-medium uppercase tracking-wide text-neutral-400">
+    <div className="rounded-2xl border border-waiting/30 bg-white p-4 shadow-sm dark:bg-neutral-900">
+      <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-waiting">
+        <span className="pulse-dot inline-block h-2 w-2 rounded-full bg-waiting" aria-hidden />
         {item.kind === "send_email" ? "Email awaiting your approval" : "Invite awaiting your approval"}
       </p>
-      <p className="mt-1 text-sm">
+      <p className="mt-2 text-sm">
         <span className="text-neutral-500">From account:</span>{" "}
         <span className="font-medium">{item.account_label}</span>
       </p>
@@ -136,13 +137,13 @@ export function PendingCard({ item }: { item: PendingView }) {
 
       {message && <p className="mt-2 text-sm text-red-600">{message}</p>}
 
-      <div className="mt-3 flex gap-2">
+      <div className="mt-3 flex flex-wrap gap-2">
         {!armed ? (
           <button
             type="button"
             onClick={() => setArmed(true)}
             disabled={pending}
-            className="rounded-xl border border-indigo-600 px-4 py-2 text-sm font-medium text-indigo-600 disabled:opacity-50"
+            className="press min-h-11 rounded-xl border border-accent px-4 py-2 text-sm font-medium text-accent disabled:opacity-50"
           >
             {item.kind === "send_email" ? "Approve send" : "Approve invite"}
           </button>
@@ -151,16 +152,20 @@ export function PendingCard({ item }: { item: PendingView }) {
             type="button"
             onClick={() => act(approveActionAction)}
             disabled={pending}
-            className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            className="press min-h-11 rounded-xl bg-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-50 dark:text-neutral-950"
           >
-            {pending ? "Sending..." : "Tap again to confirm"}
+            {pending
+              ? "Sending..."
+              : `Tap again: ${
+                  item.kind === "send_email" ? "this sends the email" : "this sends the invites"
+                }`}
           </button>
         )}
         <button
           type="button"
           onClick={() => act(rejectActionAction)}
           disabled={pending}
-          className="rounded-xl border border-neutral-300 px-4 py-2 text-sm font-medium disabled:opacity-50 dark:border-neutral-700"
+          className="press min-h-11 rounded-xl border border-neutral-300 px-4 py-2 text-sm font-medium disabled:opacity-50 dark:border-neutral-700"
         >
           Reject
         </button>
@@ -168,7 +173,7 @@ export function PendingCard({ item }: { item: PendingView }) {
           <button
             type="button"
             onClick={() => setArmed(false)}
-            className="px-2 text-sm text-neutral-500"
+            className="press min-h-11 px-2 text-sm text-neutral-500"
           >
             Cancel
           </button>
@@ -185,9 +190,9 @@ export function HistoryRow({ item }: { item: HistoryView }) {
 
   const statusColor =
     item.status === "executed"
-      ? "text-green-700 dark:text-green-400"
+      ? "text-ok"
       : item.status === "failed"
-        ? "text-red-600"
+        ? "text-overdue"
         : "text-neutral-500";
 
   return (
@@ -212,7 +217,7 @@ export function HistoryRow({ item }: { item: HistoryView }) {
               else setMessage(r.message ?? "Undo failed.");
             })
           }
-          className="shrink-0 rounded-lg border border-neutral-300 px-3 py-1 text-xs font-medium disabled:opacity-50 dark:border-neutral-700"
+          className="press min-h-11 shrink-0 rounded-lg border border-neutral-300 px-3 text-xs font-medium disabled:opacity-50 dark:border-neutral-700"
         >
           {pending ? "Undoing..." : "Undo"}
         </button>

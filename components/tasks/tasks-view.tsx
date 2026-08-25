@@ -1,18 +1,21 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { createContext, useContext, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   Drawer,
+  DueBadge,
   Empty,
   Field,
   PageHeader,
   RemindChips,
+  SectionLabel,
   btnPrimary,
   drawerFooterCls,
   inputCls,
 } from "@/components/ui";
 import { formatDateIST, formatTimeIST, istInstant, istDayKey } from "@/lib/datetime";
+import { triage, needsDeadline } from "@/lib/tasks/triage";
 import {
   createTaskAction,
   updateTaskAction,
@@ -55,11 +58,17 @@ type Tab = "overview" | "inbox" | "board" | "projects";
 // Inbox is a status, Board holds the remaining statuses, and Projects is a
 // grouping that cuts across both. Saying so beats guessing from four nouns.
 const TAB_HINTS: Record<Tab, string> = {
-  overview: "Where things stand today, and what is overdue or due soon.",
+  overview: "Ranked the way you asked: urgent and important, then important, then urgent.",
   inbox: "Newly captured, not yet sorted. Move each one to To do, or edit it.",
   board: "Everything you are working through: unsorted, to do, doing, done.",
   projects: "Related tasks grouped together. A task can sit in any status.",
 };
+
+// "Now" is fixed by the server render and handed down, never read from the
+// clock while rendering. Urgency (triage) and the due badge both move with the
+// clock, so a client that reads its own Date.now() during hydration disagrees
+// with the HTML it is hydrating and React throws the whole tree away.
+const NowContext = createContext("");
 
 const PRIORITY_DOT: Record<TaskRow["priority"], string> = {
   low: "#94a3b8",
@@ -67,15 +76,24 @@ const PRIORITY_DOT: Record<TaskRow["priority"], string> = {
   high: "#dc2626",
 };
 
-export default function TasksView({
-  tasks,
-  projects,
-  workStreams,
-}: {
+interface TasksViewProps {
   tasks: TaskRow[];
   projects: ProjectRow[];
   workStreams: WorkStreamRow[];
-}) {
+}
+
+export default function TasksView({
+  nowIso,
+  ...props
+}: TasksViewProps & { nowIso: string }) {
+  return (
+    <NowContext value={nowIso}>
+      <TasksBody {...props} />
+    </NowContext>
+  );
+}
+
+function TasksBody({ tasks, projects, workStreams }: TasksViewProps) {
   const [tab, setTab] = useState<Tab>("overview");
   const [editing, setEditing] = useState<TaskRow | "new" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -104,9 +122,9 @@ export default function TasksView({
             onClick={() => setTab(t)}
             aria-pressed={t === tab}
             className={
-              "rounded-full px-3.5 py-1.5 text-sm capitalize " +
+              "press min-h-11 rounded-full px-3.5 text-sm capitalize " +
               (t === tab
-                ? "bg-indigo-600 text-white"
+                ? "bg-accent text-white dark:text-neutral-950"
                 : "border border-neutral-300 text-neutral-600 dark:border-neutral-700 dark:text-neutral-300")
             }
           >
@@ -196,6 +214,7 @@ function TaskItem({
   extraActions?: React.ReactNode;
 }) {
   const router = useRouter();
+  const nowIso = useContext(NowContext);
   const [pending, startTransition] = useTransition();
 
   function complete() {
@@ -207,24 +226,42 @@ function TaskItem({
     });
   }
 
+  const done = task.status === "done";
   return (
-    <div className="flex items-start gap-2 rounded-lg border border-neutral-200 bg-white p-2 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+    <div className="flex items-center gap-1 rounded-lg border border-neutral-200 bg-white p-1.5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
       <button
         onClick={complete}
-        disabled={pending || task.status === "done"}
-        className="mt-0.5 h-5 w-5 shrink-0 rounded-full border-2 border-neutral-400 disabled:opacity-40"
+        disabled={pending || done}
+        className={
+          "press flex h-11 w-11 shrink-0 items-center justify-center rounded-full disabled:opacity-60 " +
+          (done ? "pop-done" : "")
+        }
         aria-label="Mark done"
         title="Mark done"
-        style={task.status === "done" ? { backgroundColor: "#059669", borderColor: "#059669" } : {}}
-      />
-      <button onClick={() => onEdit(task)} className="min-w-0 flex-1 text-left">
+      >
+        <span
+          className={
+            "h-5 w-5 rounded-full border-2 " +
+            (done ? "border-ok bg-ok" : "border-neutral-400")
+          }
+        />
+      </button>
+      <button onClick={() => onEdit(task)} className="min-w-0 flex-1 py-1.5 text-left">
         <div className="flex items-center gap-2">
           <span
             className="inline-block h-2 w-2 shrink-0 rounded-full"
             style={{ backgroundColor: PRIORITY_DOT[task.priority] }}
+            title={`${task.priority} priority`}
           />
-          <span className={"truncate text-sm " + (task.status === "done" ? "line-through text-neutral-400" : "")}>
+          <span className={"truncate text-sm " + (done ? "line-through text-neutral-400" : "")}>
             {task.title}
+          </span>
+          <span className="ml-auto pl-1">
+            <DueBadge
+              dueTs={task.due_ts}
+              nowIso={nowIso}
+              flagMissing={task.priority === "high" && !done}
+            />
           </span>
         </div>
         <div className="mt-0.5 flex flex-wrap gap-x-2 text-[11px] text-neutral-500">
@@ -261,39 +298,20 @@ function OverviewTab({
   onNotice: (s: string | null) => void;
   onGoTo: (t: Tab) => void;
 }) {
-  const [now] = useState(() => Date.now());
-  const todayKey = istDayKey(new Date(now).toISOString());
-  const weekKey = istDayKey(new Date(now + 7 * 86400000).toISOString());
+  const now = Date.parse(useContext(NowContext));
 
   const open = tasks.filter(
     (t) => t.status === "inbox" || t.status === "todo" || t.status === "doing"
   );
-  const byDue = (a: TaskRow, b: TaskRow) =>
-    (a.due_ts ?? "9999").localeCompare(b.due_ts ?? "9999");
-
-  const overdue = open
-    .filter((t) => t.due_ts && Date.parse(t.due_ts) < now)
-    .sort(byDue);
-  const today = open
-    .filter(
-      (t) => t.due_ts && Date.parse(t.due_ts) >= now && istDayKey(t.due_ts) === todayKey
-    )
-    .sort(byDue);
-  const week = open
-    .filter((t) => {
-      if (!t.due_ts) return false;
-      const k = istDayKey(t.due_ts);
-      return k > todayKey && k <= weekKey;
-    })
-    .sort(byDue);
+  const bands = triage(open, now);
+  const starved = bands.important.filter((t) => needsDeadline(t));
   const inboxCount = tasks.filter((t) => t.status === "inbox").length;
-  const noDue = open.filter((t) => !t.due_ts).length;
 
   const stats: { label: string; value: number; tone: string; go: Tab }[] = [
-    { label: "Overdue", value: overdue.length, tone: overdue.length ? "text-red-600" : "", go: "board" },
-    { label: "Due today", value: today.length, tone: "", go: "board" },
-    { label: "Next 7 days", value: week.length, tone: "", go: "board" },
-    { label: "Inbox", value: inboxCount, tone: inboxCount ? "text-indigo-600 dark:text-indigo-400" : "", go: "inbox" },
+    { label: "Do first", value: bands.do_first.length, tone: bands.do_first.length ? "text-overdue" : "", go: "board" },
+    { label: "Important", value: bands.important.length, tone: bands.important.length ? "text-accent" : "", go: "board" },
+    { label: "Urgent", value: bands.urgent.length, tone: bands.urgent.length ? "text-today" : "", go: "board" },
+    { label: "Inbox", value: inboxCount, tone: inboxCount ? "text-accent" : "", go: "inbox" },
   ];
 
   const perStream = workStreams
@@ -303,6 +321,18 @@ function OverviewTab({
     }))
     .filter((s) => s.count > 0);
 
+  const sections: { title: string; tone: string; hint?: string; items: TaskRow[] }[] = [
+    { title: "Do first", tone: "text-overdue", hint: "Urgent and important.", items: bands.do_first },
+    {
+      title: "Important, not urgent",
+      tone: "text-accent",
+      hint: "Starves first when the week gets loud. A missing deadline is the warning sign.",
+      items: bands.important,
+    },
+    { title: "Urgent, less important", tone: "text-today", items: bands.urgent },
+    { title: "Everything else", tone: "", items: bands.later },
+  ];
+
   return (
     <div>
       <div className="grid grid-cols-2 gap-2">
@@ -310,7 +340,7 @@ function OverviewTab({
           <button
             key={s.label}
             onClick={() => onGoTo(s.go)}
-            className="rounded-xl border border-neutral-200 bg-white p-3 text-left shadow-sm active:bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900 dark:active:bg-neutral-900"
+            className="press rounded-xl border border-neutral-200 bg-white p-3 text-left shadow-sm active:bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900 dark:active:bg-neutral-900"
           >
             <p className={"text-2xl font-semibold " + s.tone}>{s.value}</p>
             <div className="flex items-baseline justify-between gap-2">
@@ -321,18 +351,26 @@ function OverviewTab({
         ))}
       </div>
 
-      {(
-        [
-          ["Overdue", overdue],
-          ["Due today", today],
-          ["Next 7 days", week],
-        ] as [string, TaskRow[]][]
-      ).map(([sectionTitle, items]) =>
-        items.length === 0 ? null : (
-          <section key={sectionTitle} className="mt-5">
-            <h3 className="mb-2 text-sm font-medium text-neutral-500">{sectionTitle}</h3>
+      {starved.length > 0 && (
+        <p className="mt-3 rounded-xl border border-accent/30 bg-accent-soft p-3 text-xs text-accent">
+          {starved.length === 1
+            ? "1 important task has no deadline."
+            : `${starved.length} important tasks have no deadline.`}{" "}
+          Nothing will chase {starved.length === 1 ? "it" : "them"}: open{" "}
+          {starved.length === 1 ? "it" : "each one"} and set a date, and the
+          reminder machinery treats it like a real one.
+        </p>
+      )}
+
+      {sections.map((s) =>
+        s.items.length === 0 ? null : (
+          <section key={s.title} className="mt-5">
+            <div className="mb-2">
+              <SectionLabel tone={s.tone}>{s.title}</SectionLabel>
+              {s.hint && <p className="mt-0.5 text-[11px] text-neutral-400">{s.hint}</p>}
+            </div>
             <div className="space-y-2">
-              {items.map((t) => (
+              {s.items.map((t) => (
                 <TaskItem
                   key={t.id}
                   task={t}
@@ -347,22 +385,18 @@ function OverviewTab({
         )
       )}
 
-      {overdue.length + today.length + week.length === 0 && (
+      {open.length === 0 && (
         <div className="mt-5">
-          <Empty>
-            Nothing due in the next 7 days.
-            {noDue > 0
-              ? ` ${noDue} open ${noDue === 1 ? "task has" : "tasks have"} no due date (see Board).`
-              : " Tasks with a due date will show up here."}
+          <Empty title="No open tasks.">
+            Capture work with + Task, or ask the assistant to scan your mail.
+            New tasks rank themselves here: urgent and important first.
           </Empty>
         </div>
       )}
 
       {perStream.length > 0 && (
         <section className="mt-6">
-          <h3 className="mb-2 text-sm font-medium text-neutral-500">
-            Open tasks by work stream
-          </h3>
+          <SectionLabel className="mb-2">Open tasks by work stream</SectionLabel>
           <div className="flex flex-wrap gap-2">
             {perStream.map((s) => (
               <span
@@ -398,7 +432,7 @@ function InboxTab({
   const [pending, startTransition] = useTransition();
   const inbox = tasks.filter((t) => t.status === "inbox");
 
-  function triage(task: TaskRow, status: TaskRow["status"]) {
+  function moveTo(task: TaskRow, status: TaskRow["status"]) {
     startTransition(async () => {
       await setTaskStatusAction(task.id, status);
       router.refresh();
@@ -410,7 +444,10 @@ function InboxTab({
       <QuickAdd workStreams={workStreams} onNotice={onNotice} />
       {inbox.length === 0 ? (
         <div className="mt-4">
-          <Empty>Inbox is empty. Quick-add tasks land here first.</Empty>
+          <Empty title="Inbox clear.">
+            Quick-added tasks and mail-scan proposals land here first, so
+            nothing captured can hide. Sort each one to To do when you see it.
+          </Empty>
         </div>
       ) : (
         <div className="mt-3 space-y-2">
@@ -424,9 +461,9 @@ function InboxTab({
               onNotice={onNotice}
               extraActions={
                 <button
-                  onClick={() => triage(t, "todo")}
+                  onClick={() => moveTo(t, "todo")}
                   disabled={pending}
-                  className="shrink-0 rounded-lg border border-neutral-300 px-2 py-1 text-xs disabled:opacity-50 dark:border-neutral-700"
+                  className="press min-h-11 shrink-0 rounded-lg border border-neutral-300 px-2.5 text-xs font-medium disabled:opacity-50 dark:border-neutral-700"
                 >
                   To do
                 </button>
@@ -503,7 +540,7 @@ function BoardTab({
                           <button
                             onClick={() => move(t, col.key === "done" ? "doing" : "todo")}
                             disabled={pending}
-                            className="min-h-9 rounded-lg border border-neutral-300 px-2.5 text-xs font-medium disabled:opacity-50 dark:border-neutral-700"
+                            className="press min-h-11 rounded-lg border border-neutral-300 px-2.5 text-xs font-medium disabled:opacity-50 dark:border-neutral-700"
                           >
                             Back
                           </button>
@@ -521,7 +558,7 @@ function BoardTab({
                               )
                             }
                             disabled={pending}
-                            className="min-h-9 rounded-lg border border-neutral-300 px-2.5 text-xs font-medium disabled:opacity-50 dark:border-neutral-700"
+                            className="press min-h-11 rounded-lg border border-neutral-300 px-2.5 text-xs font-medium disabled:opacity-50 dark:border-neutral-700"
                           >
                             {col.key === "inbox" ? "To do" : col.key === "todo" ? "Start" : "Done"}
                           </button>
@@ -653,7 +690,7 @@ function ProjectsTab({
           <button
             onClick={addProject}
             disabled={pending}
-            className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+            className="press min-h-11 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50 dark:text-neutral-950"
           >
             Add
           </button>
@@ -757,7 +794,7 @@ function QuickAdd({
       <button
         onClick={add}
         disabled={pending}
-        className="shrink-0 rounded-lg bg-indigo-600 px-3 text-sm font-medium text-white disabled:opacity-50"
+        className="press min-h-11 shrink-0 rounded-lg bg-accent px-3 text-sm font-medium text-white disabled:opacity-50 dark:text-neutral-950"
       >
         Add
       </button>
@@ -939,7 +976,7 @@ function TaskForm({
                       ? "border-green-600 bg-green-600 text-white"
                       : value === "dropped"
                         ? "border-neutral-500 bg-neutral-500 text-white"
-                        : "border-indigo-600 bg-indigo-600 text-white"
+                        : "border-accent bg-accent text-white dark:text-neutral-950"
                     : "border-neutral-300 text-neutral-600 dark:border-neutral-700 dark:text-neutral-300")
                 }
               >
@@ -1051,7 +1088,7 @@ function TaskForm({
           <button
             onClick={submit}
             disabled={pending}
-            className="flex-1 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+            className="press min-h-11 flex-1 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white disabled:opacity-50 dark:text-neutral-950"
           >
             {pending ? "Saving" : isEdit ? "Save" : "Create"}
           </button>

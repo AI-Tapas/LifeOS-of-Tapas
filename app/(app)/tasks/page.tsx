@@ -34,6 +34,7 @@ export default async function TasksPage() {
         tasks={(tasks ?? []) as TaskRow[]}
         projects={(projects ?? []) as ProjectRow[]}
         workStreams={(streams ?? []) as WorkStreamRow[]}
+        nowIso={new Date().toISOString()}
       />
     </main>
   );

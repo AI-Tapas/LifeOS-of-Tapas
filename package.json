@@ -13,7 +13,8 @@
     "test:oauth": "node --test scripts/oauth.test.ts",
     "test:m3": "node --test scripts/m3.test.ts",
     "icons": "node scripts/gen-icons.mjs",
-    "test:m4": "node --test scripts/m4.test.ts"
+    "test:m4": "node --test scripts/m4.test.ts",
+    "test:triage": "node --test scripts/triage.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",

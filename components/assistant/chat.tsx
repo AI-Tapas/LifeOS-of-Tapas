@@ -146,9 +146,12 @@ export default function AssistantChat() {
     if (r.ok) {
       const s = r.summary;
       setNotice(
-        `Mail scan: ${s.scanned} emails read, ${s.created} task${
-          s.created === 1 ? "" : "s"
-        } proposed into the Tasks inbox.` + (s.notes.length ? ` ${s.notes.join(" ")}` : "")
+        s.created === 0
+          ? `Scan finished: ${s.scanned} emails read, nothing needs action from you.` +
+              (s.notes.length ? ` ${s.notes.join(" ")}` : "")
+          : `Mail scan: ${s.scanned} emails read, ${s.created} task${
+              s.created === 1 ? "" : "s"
+            } proposed into the Tasks inbox.` + (s.notes.length ? ` ${s.notes.join(" ")}` : "")
       );
       router.refresh();
     } else {
@@ -172,7 +175,7 @@ export default function AssistantChat() {
                 setTurns([]);
                 setNotice(null);
               }}
-              className="rounded-xl border border-neutral-300 px-3 py-1.5 text-sm font-medium disabled:opacity-50 dark:border-neutral-700"
+              className="press min-h-11 rounded-xl border border-neutral-300 px-3 text-sm font-medium disabled:opacity-50 dark:border-neutral-700"
               disabled={busy}
             >
               New chat
@@ -182,7 +185,7 @@ export default function AssistantChat() {
             type="button"
             onClick={scanNow}
             disabled={scanBusy}
-            className="rounded-xl border border-neutral-300 px-3 py-1.5 text-sm font-medium disabled:opacity-50 dark:border-neutral-700"
+            className="press min-h-11 rounded-xl border border-neutral-300 px-3 text-sm font-medium disabled:opacity-50 dark:border-neutral-700"
           >
             {scanBusy ? "Scanning..." : "Scan mail now"}
           </button>
@@ -190,25 +193,38 @@ export default function AssistantChat() {
       </div>
 
       {notice && (
-        <p className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-900 dark:border-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-200">
+        <p
+          role="status"
+          className="rise-in rounded-xl border border-waiting/30 bg-waiting-soft p-3 text-sm text-waiting"
+        >
           {notice}
         </p>
       )}
 
+      {/* One polite announcement per reply, instead of live-announcing every
+          streamed chunk, which shreds a screen reader's reading order. */}
+      <p aria-live="polite" className="sr-only">
+        {busy ? "The assistant is replying." : ""}
+      </p>
+
       <div className="min-h-[40vh] space-y-3">
         {restored && turns.length === 0 && (
-          <p className="rounded-xl border border-dashed border-neutral-300 p-6 text-center text-sm text-neutral-500 dark:border-neutral-700">
-            Ask for anything: plan the week, draft a reply, set a reminder,
-            or tap Scan mail now. This conversation is kept on this device
-            until you start a new chat.
-          </p>
+          <div className="rounded-xl border border-dashed border-neutral-300 p-6 text-center dark:border-neutral-700">
+            <p className="text-sm font-semibold">Your desk, in one conversation.</p>
+            <p className="mt-1 text-sm text-neutral-500">
+              Plan the week, draft a reply, set a reminder, or tap Scan mail
+              now. Private lists change straight away and stay undoable;
+              anything that reaches another person waits in the Queue for your
+              approval. This conversation stays on this device.
+            </p>
+          </div>
         )}
         {turns.map((t, i) => (
           <div
             key={i}
             className={
               t.role === "user"
-                ? "ml-8 rounded-2xl bg-indigo-600 p-3 text-sm text-white"
+                ? "ml-8 rounded-2xl bg-accent p-3 text-sm text-white dark:text-neutral-950"
                 : "mr-4 rounded-2xl border border-neutral-200 bg-white p-3 text-sm dark:border-neutral-800 dark:bg-neutral-900"
             }
           >
@@ -218,16 +234,22 @@ export default function AssistantChat() {
                 className={
                   "mb-2 rounded-lg px-2 py-1 text-xs " +
                   (tool.error
-                    ? "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300"
+                    ? "bg-overdue-soft text-overdue"
                     : "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300")
                 }
               >
                 {tool.name}: {tool.summary}
               </p>
             ))}
-            <p className="whitespace-pre-wrap">
-              {t.content || (t.role === "assistant" && busy && i === turns.length - 1 ? "..." : t.content)}
-            </p>
+            {t.role === "assistant" && !t.content && busy && i === turns.length - 1 ? (
+              <span className="flex gap-1 py-1" aria-hidden>
+                <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-neutral-400" />
+                <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-neutral-400 [animation-delay:0.2s]" />
+                <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-neutral-400 [animation-delay:0.4s]" />
+              </span>
+            ) : (
+              <p className="whitespace-pre-wrap">{t.content}</p>
+            )}
           </div>
         ))}
         <div ref={bottomRef} />

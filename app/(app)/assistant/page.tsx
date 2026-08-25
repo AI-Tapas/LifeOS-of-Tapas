@@ -181,15 +181,27 @@ export default async function AssistantPage({
           <Link
             key={t.key}
             href={t.key === "chat" ? "/assistant" : `/assistant?tab=${t.key}`}
+            aria-current={tab === t.key ? "page" : undefined}
             className={
-              "flex-1 rounded-lg py-1.5 text-center text-sm font-medium " +
+              "flex min-h-11 flex-1 items-center justify-center rounded-lg text-center text-sm font-medium " +
               (tab === t.key
-                ? "bg-indigo-600 text-white"
+                ? "bg-accent text-white dark:text-neutral-950"
                 : "text-neutral-600 dark:text-neutral-300")
             }
           >
             {t.label}
-            {t.key === "queue" && pending.length > 0 ? ` (${pending.length})` : ""}
+            {t.key === "queue" && pending.length > 0 && (
+              <span
+                className={
+                  "ml-1.5 rounded-full px-1.5 text-[11px] font-semibold " +
+                  (tab === t.key
+                    ? "bg-white/25"
+                    : "bg-waiting-soft text-waiting")
+                }
+              >
+                {pending.length}
+              </span>
+            )}
           </Link>
         ))}
       </div>
@@ -199,9 +211,14 @@ export default async function AssistantPage({
       {tab === "queue" && (
         <div className="space-y-3">
           {pending.length === 0 && (
-            <p className="rounded-xl border border-dashed border-neutral-300 p-6 text-center text-sm text-neutral-500 dark:border-neutral-700">
-              Nothing waiting for approval.
-            </p>
+            <div className="rounded-xl border border-dashed border-neutral-300 p-6 text-center dark:border-neutral-700">
+              <p className="text-sm font-semibold">Nothing waiting for approval.</p>
+              <p className="mt-1 text-sm text-neutral-500">
+                When the assistant drafts an email or an invite, it lands here
+                first. Nothing leaves this app until you approve it on this
+                screen.
+              </p>
+            </div>
           )}
           {pending.map((item) => (
             <PendingCard key={item.id} item={item} />
