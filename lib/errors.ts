@@ -53,6 +53,10 @@ export function describeError(e: unknown): string {
 //
 // Deliberately best effort: a logging failure must never mask the original
 // fault, and must never become a second error on top of the first.
+export async function recordEvent(kind: string, detail: string): Promise<void> {
+  return recordFailure(kind, detail);
+}
+
 async function recordFailure(kind: string, detail: string): Promise<void> {
   try {
     const { createServiceClient } = await import("@/lib/supabase/service");

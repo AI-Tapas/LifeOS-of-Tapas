@@ -16,6 +16,7 @@ import ConnectionsPanel, {
 import { providerOptions } from "@/lib/assistant/config";
 import { slotByKey } from "@/lib/accounts";
 import { formatDateIST } from "@/lib/datetime";
+import { describeError, recordEvent } from "@/lib/errors";
 
 export const dynamic = "force-dynamic";
 
@@ -128,22 +129,33 @@ export default async function SettingsPage({
         .is("revoked_at", null),
     ]);
 
-  const personaVersions: PersonaVersionView[] = (personas ?? []).map((p) => ({
-    id: p.id,
-    version: p.version,
-    source: p.source,
-    active: p.active,
-    created_label: formatDateIST(p.created_at),
-  }));
-  const activePersonaMd = (personas ?? []).find((p) => p.active)?.sections_md ?? "";
-
-  const connections: ConnectionView[] = (mcpClients ?? []).map((c) => ({
-    client_id: c.client_id,
-    client_name: c.client_name,
-    created_label: formatDateIST(c.created_at),
-    last_used_label: c.last_used_at ? formatDateIST(c.last_used_at) : null,
-    active_tokens: countLiveTokens(mcpGrants ?? [], c.client_id),
-  }));
+  // Shaping the rows for display is where a render throws if any value is not
+  // what its type promises, and in production that becomes a bare digest with
+  // no message. Naming the step that failed, and recording it, beats a number.
+  let personaVersions: PersonaVersionView[] = [];
+  let activePersonaMd = "";
+  let connections: ConnectionView[] = [];
+  let renderFault: string | null = null;
+  try {
+    personaVersions = (personas ?? []).map((p) => ({
+      id: p.id,
+      version: p.version,
+      source: p.source,
+      active: p.active,
+      created_label: formatDateIST(p.created_at),
+    }));
+    activePersonaMd = (personas ?? []).find((p) => p.active)?.sections_md ?? "";
+    connections = (mcpClients ?? []).map((c) => ({
+      client_id: c.client_id,
+      client_name: c.client_name,
+      created_label: formatDateIST(c.created_at),
+      last_used_label: c.last_used_at ? formatDateIST(c.last_used_at) : null,
+      active_tokens: countLiveTokens(mcpGrants ?? [], c.client_id),
+    }));
+  } catch (e) {
+    renderFault = describeError(e);
+    await recordEvent("settings_render_failed", renderFault);
+  }
 
   const toneClass =
     status?.tone === "ok"
@@ -158,6 +170,12 @@ export default async function SettingsPage({
 
       {status && (
         <p className={"mt-4 rounded-xl border p-3 text-sm " + toneClass}>{status.text}</p>
+      )}
+
+      {renderFault && (
+        <p className="mt-4 rounded-xl border border-overdue/30 bg-overdue-soft p-3 text-sm text-overdue">
+          Part of this page could not be prepared: {renderFault}
+        </p>
       )}
 
       <h2 className="mt-6 text-base font-semibold tracking-tight">Accounts</h2>

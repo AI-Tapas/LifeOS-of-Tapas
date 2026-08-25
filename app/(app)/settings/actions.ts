@@ -7,7 +7,7 @@ import { syncCalendars } from "@/lib/calendars";
 import { TokenRevokedError } from "@/lib/oauth/core";
 import { providerOptions } from "@/lib/assistant/config";
 import { requireUser } from "@/lib/auth/require-user";
-import { reportable, describeError } from "@/lib/errors";
+import { reportable, describeError, recordEvent } from "@/lib/errors";
 
 export type RefreshResult =
   | { ok: true; count: number }
@@ -229,7 +229,12 @@ export async function activatePersonaVersionAction(
   personaId: string
 ): Promise<{ ok: boolean; message?: string }> {
   return reportable(async () => {
+    // Marks that the action was reached at all. Three fixes have been aimed at
+    // this path while the audit log stayed empty, which could mean the action
+    // fails silently or that it never runs. This distinguishes the two.
+    await recordEvent("persona_activate_entered", `id ${personaId}`);
     const { supabase, user } = await requireUser("/settings");
+    await recordEvent("persona_activate_session_ok", `user ${user.id}`);
 
     // Every step reports its own outcome. This used to swallow the result of
     // the first update and ignore whether the row was actually found, so a
