@@ -33,7 +33,7 @@ export default function ConnectionsPanel({ items }: { items: ConnectionView[] })
 
   return (
     <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
-      {message && <p className="mb-2 text-sm text-indigo-700 dark:text-indigo-300">{message}</p>}
+      {message && <p className="mb-2 text-sm text-accent">{message}</p>}
       <ul className="divide-y divide-neutral-200 dark:divide-neutral-800">
         {items.map((c) => (
           <li

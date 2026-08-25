@@ -163,7 +163,7 @@ export default function ModelsPanel({
       })}
 
       {message && (
-        <p className="mt-3 text-sm text-indigo-700 dark:text-indigo-300">{message}</p>
+        <p className="mt-3 text-sm text-accent">{message}</p>
       )}
 
       <div className="mt-4 flex gap-2">

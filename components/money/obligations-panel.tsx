@@ -118,7 +118,7 @@ export default function ObligationsPanel({
         </div>
         <button
           onClick={() => setEditing("new")}
-          className="shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white"
+          className="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white dark:text-neutral-950"
         >
           + Add
         </button>
@@ -402,7 +402,7 @@ function ObligationForm({
           <button
             onClick={submit}
             disabled={pending}
-            className="flex-1 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+            className="flex-1 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white dark:text-neutral-950 disabled:opacity-50"
           >
             {pending ? "Saving" : isEdit ? "Save" : "Create"}
           </button>

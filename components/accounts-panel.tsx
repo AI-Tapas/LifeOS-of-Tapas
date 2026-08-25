@@ -297,7 +297,7 @@ export default function AccountsPanel({
               <div className="mt-3">
                 <a
                   href={startHref}
-                  className="inline-block rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white"
+                  className="inline-block rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white dark:text-neutral-950"
                 >
                   Connect
                 </a>

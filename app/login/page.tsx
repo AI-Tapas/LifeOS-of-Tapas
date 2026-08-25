@@ -106,7 +106,7 @@ function LoginForm() {
             <button
               type="submit"
               disabled={busy}
-              className="w-full rounded-lg bg-indigo-600 px-3 py-2 font-medium text-white disabled:opacity-50"
+              className="w-full rounded-lg bg-accent px-3 py-2 font-medium text-white dark:text-neutral-950 disabled:opacity-50"
             >
               {busy ? "Sending" : "Send sign-in code"}
             </button>
@@ -139,7 +139,7 @@ function LoginForm() {
             <button
               type="submit"
               disabled={busy}
-              className="w-full rounded-lg bg-indigo-600 px-3 py-2 font-medium text-white disabled:opacity-50"
+              className="w-full rounded-lg bg-accent px-3 py-2 font-medium text-white dark:text-neutral-950 disabled:opacity-50"
             >
               {busy ? "Verifying" : "Verify"}
             </button>

@@ -160,7 +160,7 @@ export default async function SettingsPage({
         <p className={"mt-4 rounded-xl border p-3 text-sm " + toneClass}>{status.text}</p>
       )}
 
-      <h2 className="mt-6 text-lg font-medium">Accounts</h2>
+      <h2 className="mt-6 text-base font-semibold tracking-tight">Accounts</h2>
       <p className="mt-1 text-sm text-neutral-500">
         External calendar and mail accounts. These are separate from your sign-in.
       </p>
@@ -171,7 +171,7 @@ export default async function SettingsPage({
         />
       </div>
 
-      <h2 className="mt-10 text-lg font-medium">Work streams</h2>
+      <h2 className="mt-8 text-base font-semibold tracking-tight">Work streams</h2>
       {error && (
         <p className="mt-2 text-sm text-red-600">
           Could not load work streams: {error.message}
@@ -196,7 +196,7 @@ export default async function SettingsPage({
         </ul>
       </div>
 
-      <h2 className="mt-10 text-lg font-medium">Assistant models</h2>
+      <h2 className="mt-8 text-base font-semibold tracking-tight">Assistant models</h2>
       <div className="mt-2">
         <ModelsPanel
           options={providerOptions()}
@@ -212,7 +212,7 @@ export default async function SettingsPage({
         />
       </div>
 
-      <h2 className="mt-10 text-lg font-medium">Connected applications</h2>
+      <h2 className="mt-8 text-base font-semibold tracking-tight">Connected applications</h2>
       <p className="mt-1 text-sm text-neutral-500">
         ChatGPT, Claude and other assistants you have allowed to use Life OS.
         They can read and act on your own lists; sending anything to another
@@ -222,7 +222,7 @@ export default async function SettingsPage({
         <ConnectionsPanel items={connections} />
       </div>
 
-      <h2 className="mt-10 text-lg font-medium">Assistant persona</h2>
+      <h2 className="mt-8 text-base font-semibold tracking-tight">Assistant persona</h2>
       <p className="mt-1 text-sm text-neutral-500">
         How the assistant sounds and judges. Kept private to your session.
       </p>
@@ -230,7 +230,7 @@ export default async function SettingsPage({
         <PersonaPanel versions={personaVersions} activeMd={activePersonaMd} />
       </div>
 
-      <h2 className="mt-10 text-lg font-medium">Security</h2>
+      <h2 className="mt-8 text-base font-semibold tracking-tight">Security</h2>
       <div className="mt-2 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
         <div className="space-y-4">
           <PasskeyButton />

@@ -102,7 +102,7 @@ export default async function ConnectPage({
           <input type="hidden" name="code_challenge" value={codeChallenge} />
           <button
             type="submit"
-            className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white active:bg-indigo-700"
+            className="rounded-xl bg-accent px-4 py-2 text-sm font-medium text-white dark:text-neutral-950 "
           >
             Approve and connect
           </button>

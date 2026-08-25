@@ -1,13 +1,46 @@
 @import "tailwindcss";
 
+/* ---------------------------------------------------------------------------
+   Design tokens. One small set with real semantic meaning, light and dark both
+   first class. Status colours are for STATE, never decoration:
+     overdue  - past its date, act now
+     today    - due today, the day's real work
+     waiting  - sitting with someone else or awaiting Tapas's approval
+     ok       - done, confirmed, healthy
+     accent   - interactive brand colour (indigo, matches the app icon)
+   Soft variants are chip/backdrop fills for the same states.
+--------------------------------------------------------------------------- */
 :root {
-  --background: #ffffff;
+  --background: #fafaf9;
   --foreground: #171717;
+
+  --accent: #4f46e5;
+  --accent-soft: #eef2ff;
+  /* red-700, not red-600: the badge text runs at 11px, and 600 lands at 4.41
+     against its own soft fill, just under the AA floor. */
+  --overdue: #b91c1c;
+  --overdue-soft: #fef2f2;
+  --today: #b45309;
+  --today-soft: #fffbeb;
+  --waiting: #0369a1;
+  --waiting-soft: #f0f9ff;
+  --ok: #047857;
+  --ok-soft: #ecfdf5;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-overdue: var(--overdue);
+  --color-overdue-soft: var(--overdue-soft);
+  --color-today: var(--today);
+  --color-today-soft: var(--today-soft);
+  --color-waiting: var(--waiting);
+  --color-waiting-soft: var(--waiting-soft);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -16,6 +49,17 @@
   :root {
     --background: #0a0a0a;
     --foreground: #ededed;
+
+    --accent: #818cf8;
+    --accent-soft: rgba(99, 102, 241, 0.16);
+    --overdue: #f87171;
+    --overdue-soft: rgba(248, 113, 113, 0.12);
+    --today: #fbbf24;
+    --today-soft: rgba(251, 191, 36, 0.1);
+    --waiting: #38bdf8;
+    --waiting-soft: rgba(56, 189, 248, 0.1);
+    --ok: #34d399;
+    --ok-soft: rgba(52, 211, 153, 0.1);
   }
 }
 
@@ -33,4 +77,85 @@ html,
 body {
   max-width: 100%;
   overflow-x: hidden;
+}
+
+/* Muted text has two levels across the app: text-neutral-500 for secondary
+   lines and text-neutral-400 for hints. Tailwind's stock values fail the 4.5
+   AA floor for body text on exactly one surface each, so each theme lifts the
+   one that fails: 400 is too pale on the light surfaces (2.5:1), 500 too dark
+   on the dark ones (3.8:1). Both land around 5:1 after this.
+   Scoped to elements that carry no explicit per-theme text colour of their
+   own, so a deliberate override is never overridden back.
+   ponytail: two rules instead of editing ~100 call sites; if a muted token is
+   ever introduced, replace these and the call sites together. */
+.text-neutral-400:not([class*="dark:text-"]) {
+  color: #6f6f6f;
+}
+
+@media (prefers-color-scheme: dark) {
+  .text-neutral-400:not([class*="dark:text-"]) {
+    color: #a3a3a3;
+  }
+  .text-neutral-500:not([class*="dark:text-"]) {
+    color: #8a8a8a;
+  }
+}
+
+/* Accessibility floor: every focusable control shows the same visible ring
+   when reached by keyboard, in both themes. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Feedback that earns its place, and none of it for users who asked the OS
+   for less motion. */
+@media (prefers-reduced-motion: no-preference) {
+  .press {
+    transition: transform 0.1s ease, background-color 0.15s ease,
+      border-color 0.15s ease, opacity 0.15s ease;
+  }
+  .press:active {
+    transform: scale(0.97);
+  }
+  @keyframes pop-done {
+    0% {
+      transform: scale(1);
+    }
+    45% {
+      transform: scale(1.25);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+  .pop-done {
+    animation: pop-done 0.25s ease;
+  }
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  .rise-in {
+    animation: rise-in 0.18s ease;
+  }
+  @keyframes pulse-dot {
+    0%,
+    100% {
+      opacity: 0.35;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+  .pulse-dot {
+    animation: pulse-dot 1.2s ease-in-out infinite;
+  }
 }

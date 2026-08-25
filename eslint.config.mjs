@@ -14,6 +14,9 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Separate package with its own toolchain and dependencies.
     "mcp-server/**",
+    // Agent scratch space: git worktrees land here and carry their own copy of
+    // the repo plus build output, which would otherwise be linted twice.
+    ".claude/**",
   ]),
 ]);
 

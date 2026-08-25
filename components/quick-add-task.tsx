@@ -68,7 +68,7 @@ export default function QuickAddTask({
           <button
             onClick={add}
             disabled={pending}
-            className="mt-2 w-full rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+            className="mt-2 w-full rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white dark:text-neutral-950 disabled:opacity-50"
           >
             {pending ? "Adding" : "Add to inbox"}
           </button>
@@ -76,7 +76,7 @@ export default function QuickAddTask({
       ) : (
         <button
           onClick={() => setOpen(true)}
-          className="h-12 w-12 rounded-full bg-indigo-600 text-2xl leading-none text-white shadow-lg"
+          className="h-12 w-12 rounded-full bg-accent text-2xl leading-none text-white dark:text-neutral-950 shadow-lg"
           aria-label="Quick add task"
         >
           +

@@ -1,15 +1,22 @@
 "use client";
 
-// Small shared UI primitives used by the tasks and money screens. Mobile-first:
-// forms open as a bottom sheet on a phone and a centred card on wider screens.
+// Small shared UI primitives used across screens. Mobile-first: forms open as
+// a bottom sheet on a phone and a centred card on wider screens. Interactive
+// controls keep a minimum 44px hit target, and .press gives them uniform
+// touch feedback that respects reduced-motion.
+
+import { formatDateShortIST, istDayKey } from "@/lib/datetime";
 
 export const inputCls =
   "w-full rounded-lg border border-neutral-300 bg-white px-3 py-2.5 text-base dark:border-neutral-700 dark:bg-neutral-900";
 
 export const btnPrimary =
-  "rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white active:bg-indigo-700 disabled:opacity-50";
+  "press min-h-11 rounded-xl bg-accent px-4 py-2 text-sm font-medium text-white active:opacity-90 disabled:opacity-50 dark:text-neutral-950";
 export const btnGhost =
-  "rounded-xl border border-neutral-300 px-4 py-2 text-sm font-medium active:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:active:bg-neutral-900";
+  "press min-h-11 rounded-xl border border-neutral-300 px-4 py-2 text-sm font-medium active:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:active:bg-neutral-900";
+// Small in-card action, still a 44px target.
+export const btnSmall =
+  "press min-h-11 rounded-lg border border-neutral-300 px-3 text-xs font-medium disabled:opacity-50 dark:border-neutral-700";
 
 export function Card({
   children,
@@ -50,6 +57,74 @@ export function PageHeader({
   );
 }
 
+// Uppercase section eyebrow: one consistent voice for every list heading.
+export function SectionLabel({
+  children,
+  tone = "",
+  className = "",
+}: {
+  children: React.ReactNode;
+  tone?: string; // e.g. "text-overdue"; default neutral
+  className?: string;
+}) {
+  return (
+    <h3
+      className={
+        "text-[11px] font-semibold uppercase tracking-wider " +
+        (tone || "text-neutral-500") +
+        " " +
+        className
+      }
+    >
+      {children}
+    </h3>
+  );
+}
+
+// Due-state chip: colour is the meaning. Overdue red, due today amber,
+// everything else a quiet date. A missing date is called out (the starved
+// state) only when flagMissing says it matters, so low-priority undated tasks
+// stay quiet.
+export function DueBadge({
+  dueTs,
+  nowIso,
+  flagMissing = true,
+}: {
+  dueTs: string | null;
+  nowIso: string;
+  flagMissing?: boolean;
+}) {
+  if (!dueTs) {
+    if (!flagMissing) return null;
+    return (
+      <span className="shrink-0 rounded-full bg-accent-soft px-2 py-0.5 text-[11px] font-medium text-accent">
+        no deadline
+      </span>
+    );
+  }
+  const overdue = dueTs < nowIso && istDayKey(dueTs) !== istDayKey(nowIso);
+  const today = istDayKey(dueTs) === istDayKey(nowIso);
+  if (overdue) {
+    return (
+      <span className="shrink-0 rounded-full bg-overdue-soft px-2 py-0.5 text-[11px] font-medium text-overdue">
+        overdue
+      </span>
+    );
+  }
+  if (today) {
+    return (
+      <span className="shrink-0 rounded-full bg-today-soft px-2 py-0.5 text-[11px] font-medium text-today">
+        today
+      </span>
+    );
+  }
+  return (
+    <span className="shrink-0 text-[11px] text-neutral-500">
+      {formatDateShortIST(dueTs)}
+    </span>
+  );
+}
+
 export function Field({
   label,
   children,
@@ -65,10 +140,19 @@ export function Field({
   );
 }
 
-export function Empty({ children }: { children: React.ReactNode }) {
+// Empty states teach: a short bold line about what lives here, then how to
+// fill it. Old single-child call sites still render fine.
+export function Empty({
+  title,
+  children,
+}: {
+  title?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="rounded-xl border border-dashed border-neutral-300 p-6 text-center text-sm text-neutral-500 dark:border-neutral-700">
-      {children}
+    <div className="rounded-xl border border-dashed border-neutral-300 p-6 text-center dark:border-neutral-700">
+      {title && <p className="text-sm font-semibold">{title}</p>}
+      <p className={"text-sm text-neutral-500 " + (title ? "mt-1" : "")}>{children}</p>
     </div>
   );
 }
@@ -101,9 +185,9 @@ export function RemindChips({
               onChange(selected ? value.filter((x) => x !== d) : [...value, d])
             }
             className={
-              "rounded-full border px-3 py-1.5 text-sm " +
+              "press min-h-11 rounded-full border px-3.5 text-sm " +
               (selected
-                ? "border-indigo-600 bg-indigo-600 text-white"
+                ? "border-accent bg-accent text-white dark:text-neutral-950"
                 : "border-neutral-300 text-neutral-600 dark:border-neutral-700 dark:text-neutral-300")
             }
           >
@@ -127,12 +211,12 @@ export function Drawer({
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center sm:items-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative z-50 max-h-[85vh] w-full max-w-md overflow-y-auto rounded-t-2xl border border-neutral-200 bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] dark:border-neutral-800 dark:bg-neutral-950 sm:rounded-2xl">
+      <div className="rise-in relative z-50 max-h-[85vh] w-full max-w-md overflow-y-auto rounded-t-2xl border border-neutral-200 bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] dark:border-neutral-800 dark:bg-neutral-950 sm:rounded-2xl">
         <div className="sticky top-0 z-10 -mx-4 -mt-4 mb-2 flex items-center justify-between border-b border-neutral-100 bg-white px-4 py-3 dark:border-neutral-900 dark:bg-neutral-950">
           <h2 className="text-base font-semibold">{title}</h2>
           <button
             onClick={onClose}
-            className="-m-2 p-2 text-sm font-medium text-neutral-500 dark:text-neutral-400"
+            className="-m-2 min-h-11 p-2 text-sm font-medium text-neutral-500 dark:text-neutral-400"
             aria-label="Close"
           >
             Close

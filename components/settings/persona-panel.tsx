@@ -51,7 +51,7 @@ export default function PersonaPanel({
         </button>
       </div>
 
-      {message && <p className="mt-2 text-sm text-indigo-700 dark:text-indigo-300">{message}</p>}
+      {message && <p className="mt-2 text-sm text-accent">{message}</p>}
 
       {open && !editing && (
         <>

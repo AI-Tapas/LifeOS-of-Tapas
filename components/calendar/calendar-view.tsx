@@ -174,13 +174,13 @@ export default function CalendarView({
           <button
             onClick={manualRefresh}
             disabled={pending}
-            className="rounded-xl border border-neutral-300 px-3 py-1.5 text-xs font-medium disabled:opacity-50 dark:border-neutral-700"
+            className="press min-h-11 rounded-xl border border-neutral-300 px-3 text-xs font-medium disabled:opacity-50 dark:border-neutral-700"
           >
             {pending ? "Syncing" : "Refresh"}
           </button>
           <button
             onClick={() => openCreate(anchor, istHour(new Date().toISOString()) + 1)}
-            className="rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white"
+            className="press min-h-11 rounded-xl bg-accent px-3 text-xs font-medium text-white dark:text-neutral-950"
           >
             + New
           </button>
@@ -195,9 +195,9 @@ export default function CalendarView({
               onClick={() => go(v, anchor)}
               aria-pressed={v === view}
               className={
-                "rounded-full px-3.5 py-1.5 text-sm capitalize " +
+                "press min-h-11 rounded-full px-3.5 text-sm capitalize " +
                 (v === view
-                  ? "bg-indigo-600 text-white"
+                  ? "bg-accent text-white dark:text-neutral-950"
                   : "border border-neutral-300 text-neutral-600 dark:border-neutral-700 dark:text-neutral-300")
               }
             >
@@ -208,20 +208,20 @@ export default function CalendarView({
         <div className="flex items-center gap-1">
           <button
             onClick={() => step(-1)}
-            className="rounded-lg border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700"
+            className="press min-h-11 min-w-11 rounded-lg border border-neutral-300 px-2 text-sm dark:border-neutral-700"
             aria-label="Previous"
           >
             ‹
           </button>
           <button
             onClick={() => go(view, keyToCivil(todayKey))}
-            className="rounded-lg border border-neutral-300 px-2 py-1 text-xs dark:border-neutral-700"
+            className="press min-h-11 rounded-lg border border-neutral-300 px-2 text-xs font-medium text-accent dark:border-neutral-700"
           >
             Today
           </button>
           <button
             onClick={() => step(1)}
-            className="rounded-lg border border-neutral-300 px-2 py-1 text-sm dark:border-neutral-700"
+            className="press min-h-11 min-w-11 rounded-lg border border-neutral-300 px-2 text-sm dark:border-neutral-700"
             aria-label="Next"
           >
             ›
@@ -358,7 +358,7 @@ function MonthGrid({
                 className={
                   "text-[11px] " +
                   (isToday
-                    ? "inline-flex h-5 w-5 items-center justify-center rounded-full bg-indigo-600 text-white"
+                    ? "inline-flex h-5 w-5 items-center justify-center rounded-full bg-accent text-white dark:text-neutral-950"
                     : "text-neutral-500")
                 }
               >
@@ -425,13 +425,13 @@ function WeekAgenda({
         return (
           <section key={key}>
             <div className="flex items-center justify-between border-b border-neutral-200 pb-1 dark:border-neutral-800">
-              <h3 className={"text-sm font-medium " + (isToday ? "text-indigo-600" : "")}>
+              <h3 className={"text-sm font-medium " + (isToday ? "text-accent" : "")}>
                 {formatWeekdayIST(istInstant(c, 12, 0))} {c.d}{" "}
                 {isToday && <span className="text-xs">(today)</span>}
               </h3>
               <button
                 onClick={() => onAddDay(c)}
-                className="-m-2 p-2 text-xs font-medium text-neutral-500 dark:text-neutral-400"
+                className="press -my-2 flex min-h-11 items-center px-2 text-xs font-medium text-neutral-500 dark:text-neutral-400"
                 aria-label="Add event"
               >
                 + add
@@ -507,7 +507,7 @@ function DayGrid({
           <div key={h} className="flex gap-2 py-1">
             <button
               onClick={() => onAddHour(h)}
-              className="w-12 shrink-0 pt-1 text-right text-[11px] text-neutral-400 active:text-indigo-600"
+              className="w-12 shrink-0 pt-1 text-right text-[11px] text-neutral-400 active:text-accent"
             >
               {hourLabel(h)}
             </button>
@@ -541,7 +541,7 @@ function EventRow({
   return (
     <button
       onClick={onClick}
-      className="block w-full min-w-0 break-words rounded-lg border-l-4 px-2 py-1 text-left text-sm"
+      className="press block min-h-11 w-full min-w-0 break-words rounded-lg border-l-4 px-2 py-1.5 text-left text-sm"
       style={{ borderColor: col.hex, backgroundColor: col.soft, overflowWrap: "anywhere" }}
     >
       <span className="font-medium">{event.title}</span>
@@ -616,7 +616,7 @@ function EventDetail({
               setArmed(false);
               onEdit(event);
             }}
-            className="rounded-lg bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white"
+            className="press min-h-11 rounded-lg bg-accent px-3 text-sm font-medium text-white dark:text-neutral-950"
           >
             Edit
           </button>
@@ -638,8 +638,8 @@ function EventDetail({
             disabled={pending}
             className={
               armed
-                ? "rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
-                : "rounded-lg border border-neutral-300 px-3 py-1.5 text-sm text-red-600 disabled:opacity-50 dark:border-neutral-700"
+                ? "press min-h-11 rounded-lg bg-red-600 px-3 text-sm font-medium text-white disabled:opacity-50"
+                : "press min-h-11 rounded-lg border border-neutral-300 px-3 text-sm text-red-600 disabled:opacity-50 dark:border-neutral-700"
             }
           >
             {armed ? "Confirm delete" : "Delete"}
@@ -878,13 +878,13 @@ function EventForm({
                 <button
                   onClick={() => submit(true)}
                   disabled={pending}
-                  className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                  className="press min-h-11 rounded-lg bg-amber-600 px-3 text-sm font-medium text-white disabled:opacity-50"
                 >
                   {pending ? "Sending" : "Confirm and send invites"}
                 </button>
                 <button
                   onClick={() => setConfirmCount(null)}
-                  className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm dark:border-neutral-700"
+                  className="press min-h-11 rounded-lg border border-neutral-300 px-3 text-sm dark:border-neutral-700"
                 >
                   Cancel
                 </button>
@@ -894,7 +894,7 @@ function EventForm({
             <button
               onClick={() => submit(false)}
               disabled={pending}
-              className="w-full rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+              className="w-full rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white dark:text-neutral-950 disabled:opacity-50"
             >
               {pending ? "Saving" : isEdit ? "Save changes" : "Create event"}
             </button>

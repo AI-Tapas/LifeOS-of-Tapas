@@ -81,7 +81,7 @@ const items: Item[] = [
   { href: "/settings", label: "Settings", icon: icons.settings },
 ];
 
-export default function Nav() {
+export default function Nav({ queueCount = 0 }: { queueCount?: number }) {
   const pathname = usePathname();
 
   return (
@@ -89,6 +89,7 @@ export default function Nav() {
       <div className="mx-auto grid max-w-3xl grid-cols-4 sm:grid-cols-8">
         {items.map((item) => {
           const active = pathname === item.href;
+          const showBadge = item.href === "/assistant" && queueCount > 0;
           return (
             <Link
               key={item.href}
@@ -97,11 +98,21 @@ export default function Nav() {
               className={
                 "flex flex-col items-center gap-0.5 py-2 text-[10px] font-medium " +
                 (active
-                  ? "text-indigo-600 dark:text-indigo-400"
+                  ? "text-accent"
                   : "text-neutral-500 dark:text-neutral-400")
               }
             >
-              {item.icon}
+              <span className="relative">
+                {item.icon}
+                {showBadge && (
+                  <span
+                    className="absolute -right-1.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-waiting px-1 text-[9px] font-semibold text-white dark:text-neutral-950"
+                    aria-label={`${queueCount} awaiting approval`}
+                  >
+                    {queueCount > 9 ? "9+" : queueCount}
+                  </span>
+                )}
+              </span>
               {item.label}
             </Link>
           );
