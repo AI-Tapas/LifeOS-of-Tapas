@@ -872,3 +872,30 @@ test("access tokens are refused once expired or revoked", async () => {
   assert.equal(checkGrantUsable({ ...live, kind: "refresh" }, now, "access").ok, false);
   assert.equal(checkGrantUsable(null, now, "access").ok, false);
 });
+
+// --- destructive tools stay reversible ---------------------------------------
+//
+// Making the surface exhaustive introduced deletion. Tapas's own rule is that
+// the assistant may act alone where the act is reversible, so every delete
+// records the whole row and undo restores it.
+
+test("every delete tool is undoable, and the send path is not", async () => {
+  const execute = await import("../lib/assistant/tools.ts");
+  const deleteTools = execute.TOOLS.filter((t) => t.name.startsWith("delete_"));
+  assert.ok(deleteTools.length >= 5, "the delete tools exist");
+  for (const t of deleteTools) {
+    // delete_event is the exception: it removes an app-created calendar entry
+    // at the provider, which cannot be recreated with the same external id.
+    if (t.name === "delete_event") continue;
+    assert.match(
+      t.description,
+      /undo_action restores it|reversible with undo_action/i,
+      `${t.name} must promise reversibility`
+    );
+  }
+  // Nothing about sending is reversible, and nothing claims to be.
+  for (const kind of SEND_CLASS) {
+    const tool = execute.toolByName(kind)!;
+    assert.doesNotMatch(tool.description, /undo/i, `${kind} must not promise undo`);
+  }
+});

@@ -33,7 +33,11 @@ import {
   assertNoAttendees,
 } from "./tools";
 import { hashPayload, runApprovedExecution } from "./core";
-import { removeObligationReminder, syncObligationReminder } from "@/lib/reminders/writer";
+import {
+  removeObligationReminder,
+  syncObligationReminder,
+  syncTaskReminder,
+} from "@/lib/reminders/writer";
 import type { Database, Json } from "@/lib/database.types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -466,16 +470,15 @@ const performers: Record<string, Performer> = {
   async delete_task(supabase, userId, input) {
     const taskId = s(input.task_id);
     if (!taskId) throw new Error("task_id is required.");
-    const { data: prev } = await supabase
+    const { data: row } = await supabase
       .from("tasks")
-      .select("title")
+      .select("*")
       .eq("id", taskId)
       .single();
-    if (!prev) throw new Error("Task not found.");
+    if (!row) throw new Error("Task not found.");
     const r = await deleteTask(supabase, userId, taskId);
     if (!r.ok) throw new Error(r.message ?? "Could not delete the task.");
-    // Deletion is not reversible from a recorded id, so no undo is offered.
-    return { summary: `Task deleted: ${prev.title}.`, undo: null };
+    return { summary: `Task deleted: ${row.title}.`, undo: { row } };
   },
 
   async add_project(supabase, userId, input) {
@@ -520,15 +523,15 @@ const performers: Record<string, Performer> = {
   async delete_note(supabase, _userId, input) {
     const noteId = s(input.note_id);
     if (!noteId) throw new Error("note_id is required.");
-    const { data: prev } = await supabase
+    const { data: row } = await supabase
       .from("notes")
-      .select("title")
+      .select("*")
       .eq("id", noteId)
       .single();
-    if (!prev) throw new Error("Note not found.");
+    if (!row) throw new Error("Note not found.");
     const { error } = await supabase.from("notes").delete().eq("id", noteId);
     if (error) throw new Error(error.message);
-    return { summary: `Note deleted: ${prev.title}.`, undo: null };
+    return { summary: `Note deleted: ${row.title}.`, undo: { row } };
   },
 
   async update_person(supabase, _userId, input) {
@@ -567,15 +570,15 @@ const performers: Record<string, Performer> = {
   async delete_person(supabase, _userId, input) {
     const personId = s(input.person_id);
     if (!personId) throw new Error("person_id is required.");
-    const { data: prev } = await supabase
+    const { data: row } = await supabase
       .from("people")
-      .select("name")
+      .select("*")
       .eq("id", personId)
       .single();
-    if (!prev) throw new Error("Person not found.");
+    if (!row) throw new Error("Person not found.");
     const { error } = await supabase.from("people").delete().eq("id", personId);
     if (error) throw new Error(error.message);
-    return { summary: `Person deleted: ${prev.name}.`, undo: null };
+    return { summary: `Person deleted: ${row.name}.`, undo: { row } };
   },
 
   async update_obligation(supabase, userId, input) {
@@ -614,19 +617,19 @@ const performers: Record<string, Performer> = {
   async delete_obligation(supabase, userId, input) {
     const obligationId = s(input.obligation_id);
     if (!obligationId) throw new Error("obligation_id is required.");
-    const { data: prev } = await supabase
+    const { data: row } = await supabase
       .from("recurring_obligations")
-      .select("name")
+      .select("*")
       .eq("id", obligationId)
       .single();
-    if (!prev) throw new Error("Obligation not found.");
+    if (!row) throw new Error("Obligation not found.");
     await removeObligationReminder(userId, obligationId);
     const { error } = await supabase
       .from("recurring_obligations")
       .delete()
       .eq("id", obligationId);
     if (error) throw new Error(error.message);
-    return { summary: `Obligation deleted: ${prev.name}.`, undo: null };
+    return { summary: `Obligation deleted: ${row.name}.`, undo: { row } };
   },
 
   async add_finance_item(supabase, userId, input) {
@@ -682,15 +685,15 @@ const performers: Record<string, Performer> = {
   async delete_finance_item(supabase, _userId, input) {
     const itemId = s(input.finance_item_id);
     if (!itemId) throw new Error("finance_item_id is required.");
-    const { data: prev } = await supabase
+    const { data: row } = await supabase
       .from("finance_items")
-      .select("name")
+      .select("*")
       .eq("id", itemId)
       .single();
-    if (!prev) throw new Error("Holding not found.");
+    if (!row) throw new Error("Holding not found.");
     const { error } = await supabase.from("finance_items").delete().eq("id", itemId);
     if (error) throw new Error(error.message);
-    return { summary: `Holding deleted: ${prev.name}.`, undo: null };
+    return { summary: `Holding deleted: ${row.name}.`, undo: { row } };
   },
 
   async update_event_solo(supabase, userId, input) {
@@ -1046,6 +1049,11 @@ export async function rejectProposedAction(
 // Kinds with a reversible inverse. Send-class actions are deliberately absent:
 // a sent mail cannot be unsent.
 const UNDOABLE = new Set([
+  "delete_task",
+  "delete_note",
+  "delete_person",
+  "delete_obligation",
+  "delete_finance_item",
   "create_task",
   "update_task",
   "set_reminder",
@@ -1175,6 +1183,41 @@ async function performUndo(
         })
         .eq("id", String(undo.obligation_id));
       await syncObligationReminder(userId, String(undo.obligation_id));
+      return;
+    }
+    // Restoring a deleted row: the whole record was kept, original id and
+    // all, so undo is a genuine reversal rather than a fresh copy.
+    case "delete_task": {
+      const row = undo.row as Record<string, unknown>;
+      const { error } = await supabase.from("tasks").insert(row as never);
+      if (error) throw new Error(`Could not restore the task: ${error.message}`);
+      if (row.due_ts) await syncTaskReminder(userId, String(row.id));
+      return;
+    }
+    case "delete_note": {
+      const { error } = await supabase.from("notes").insert(undo.row as never);
+      if (error) throw new Error(`Could not restore the note: ${error.message}`);
+      return;
+    }
+    case "delete_person": {
+      const { error } = await supabase.from("people").insert(undo.row as never);
+      if (error) throw new Error(`Could not restore the person: ${error.message}`);
+      return;
+    }
+    case "delete_obligation": {
+      const row = undo.row as Record<string, unknown>;
+      const { error } = await supabase
+        .from("recurring_obligations")
+        .insert(row as never);
+      if (error) throw new Error(`Could not restore the obligation: ${error.message}`);
+      await syncObligationReminder(userId, String(row.id));
+      return;
+    }
+    case "delete_finance_item": {
+      const { error } = await supabase
+        .from("finance_items")
+        .insert(undo.row as never);
+      if (error) throw new Error(`Could not restore the holding: ${error.message}`);
       return;
     }
     case "add_project": {
