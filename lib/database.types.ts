@@ -481,6 +481,81 @@ export type Database = {
         }
         Relationships: []
       }
+      mcp_clients: {
+        Row: {
+          client_id: string
+          client_name: string
+          created_at: string
+          id: string
+          last_used_at: string | null
+          redirect_uris: string[]
+          user_id: string
+        }
+        Insert: {
+          client_id: string
+          client_name?: string
+          created_at?: string
+          id?: string
+          last_used_at?: string | null
+          redirect_uris?: string[]
+          user_id?: string
+        }
+        Update: {
+          client_id?: string
+          client_name?: string
+          created_at?: string
+          id?: string
+          last_used_at?: string | null
+          redirect_uris?: string[]
+          user_id?: string
+        }
+        Relationships: []
+      }
+      mcp_grants: {
+        Row: {
+          client_id: string
+          code_challenge: string | null
+          created_at: string
+          expires_at: string
+          id: string
+          kind: Database["public"]["Enums"]["mcp_grant_kind"]
+          redirect_uri: string | null
+          revoked_at: string | null
+          scope: string
+          token_hash: string
+          used_at: string | null
+          user_id: string
+        }
+        Insert: {
+          client_id: string
+          code_challenge?: string | null
+          created_at?: string
+          expires_at: string
+          id?: string
+          kind: Database["public"]["Enums"]["mcp_grant_kind"]
+          redirect_uri?: string | null
+          revoked_at?: string | null
+          scope?: string
+          token_hash: string
+          used_at?: string | null
+          user_id?: string
+        }
+        Update: {
+          client_id?: string
+          code_challenge?: string | null
+          created_at?: string
+          expires_at?: string
+          id?: string
+          kind?: Database["public"]["Enums"]["mcp_grant_kind"]
+          redirect_uri?: string | null
+          revoked_at?: string | null
+          scope?: string
+          token_hash?: string
+          used_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       notes: {
         Row: {
           body_md: string | null
@@ -966,6 +1041,7 @@ export type Database = {
         | "failed"
         | "undone"
       assistant_persona_source: "interview" | "seeded" | "edited"
+      mcp_grant_kind: "code" | "access" | "refresh"
       audit_actor: "user" | "assistant"
       bill_recipient: "institute" | "client" | "other"
       bill_status: "draft" | "sent" | "paid"
@@ -1153,6 +1229,7 @@ export const Constants = {
         "undone",
       ],
       assistant_persona_source: ["interview", "seeded", "edited"],
+      mcp_grant_kind: ["code", "access", "refresh"],
       audit_actor: ["user", "assistant"],
       bill_recipient: ["institute", "client", "other"],
       bill_status: ["draft", "sent", "paid"],

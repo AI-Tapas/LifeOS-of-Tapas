@@ -10,6 +10,9 @@ import PersonaPanel, {
   type PersonaVersionView,
 } from "@/components/settings/persona-panel";
 import ModelsPanel from "@/components/settings/models-panel";
+import ConnectionsPanel, {
+  type ConnectionView,
+} from "@/components/settings/connections-panel";
 import { providerOptions } from "@/lib/assistant/config";
 import { slotByKey } from "@/lib/accounts";
 import { formatDateIST } from "@/lib/datetime";
@@ -59,6 +62,21 @@ function statusMessage(sp: Search): { tone: "ok" | "warn" | "err"; text: string 
   return null;
 }
 
+// How many credentials this client can still use. Reading the clock lives
+// here rather than in the component body, which must stay pure.
+function countLiveTokens(
+  grants: { client_id: string; kind: string; expires_at: string }[],
+  clientId: string
+): number {
+  const nowMs = Date.now();
+  return grants.filter(
+    (g) =>
+      g.client_id === clientId &&
+      g.kind !== "code" &&
+      new Date(g.expires_at).getTime() > nowMs
+  ).length;
+}
+
 export default async function SettingsPage({
   searchParams,
 }: {
@@ -74,6 +92,8 @@ export default async function SettingsPage({
     { data: streams, error },
     { data: personas },
     { data: modelSettings },
+    { data: mcpClients },
+    { data: mcpGrants },
   ] =
     await Promise.all([
       supabase
@@ -98,6 +118,14 @@ export default async function SettingsPage({
         .from("assistant_settings")
         .select("chat_provider, chat_model, scan_provider, scan_model")
         .maybeSingle(),
+      supabase
+        .from("mcp_clients")
+        .select("client_id, client_name, created_at, last_used_at")
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("mcp_grants")
+        .select("client_id, kind, expires_at, revoked_at")
+        .is("revoked_at", null),
     ]);
 
   const personaVersions: PersonaVersionView[] = (personas ?? []).map((p) => ({
@@ -108,6 +136,14 @@ export default async function SettingsPage({
     created_label: formatDateIST(p.created_at),
   }));
   const activePersonaMd = (personas ?? []).find((p) => p.active)?.sections_md ?? "";
+
+  const connections: ConnectionView[] = (mcpClients ?? []).map((c) => ({
+    client_id: c.client_id,
+    client_name: c.client_name,
+    created_label: formatDateIST(c.created_at),
+    last_used_label: c.last_used_at ? formatDateIST(c.last_used_at) : null,
+    active_tokens: countLiveTokens(mcpGrants ?? [], c.client_id),
+  }));
 
   const toneClass =
     status?.tone === "ok"
@@ -174,6 +210,16 @@ export default async function SettingsPage({
             model: modelSettings?.scan_model ?? null,
           }}
         />
+      </div>
+
+      <h2 className="mt-10 text-lg font-medium">Connected applications</h2>
+      <p className="mt-1 text-sm text-neutral-500">
+        ChatGPT, Claude and other assistants you have allowed to use Life OS.
+        They can read and act on your own lists; sending anything to another
+        person still waits for your approval here.
+      </p>
+      <div className="mt-2">
+        <ConnectionsPanel items={connections} />
       </div>
 
       <h2 className="mt-10 text-lg font-medium">Assistant persona</h2>

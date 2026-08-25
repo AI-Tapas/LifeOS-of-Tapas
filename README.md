@@ -261,6 +261,25 @@ phone, and the week view is a readable 7-day agenda rather than a tiny time grid
 (this machine has no Docker); run `npm run db:types` to regenerate it once the
 local stack is up. Offline proof: `npm run test:m3` (Node 22.18+).
 
+## Connecting ChatGPT or Claude
+
+Life OS is also an MCP server, so an outside assistant can drive it on your
+existing subscription instead of API credits. Two ways in:
+
+- **Local (Claude Desktop, Claude Code)**: app/mcp-server, a stdio server
+  authenticated by the shared LIFEOS_MCP_TOKEN. See its README.
+- **Remote (ChatGPT, Claude on the web or a phone)**: point the client at
+  `https://life-os-of-tapas.vercel.app/api/mcp/http`. It registers itself,
+  sends you to a consent screen inside the app, and only then receives a
+  token. In ChatGPT this lives under Settings, Security and login, Developer
+  mode, then Create custom connector.
+
+Either way the connected assistant inherits the same rules as the in-app one:
+it can read your data and act on your own lists, but sending an email or
+inviting anyone only queues the request for your approval here. No connector
+can approve anything. Settings, Connected applications lists what is
+connected and disconnects it.
+
 ## Assistant (Milestone 4)
 
 The Assistant tab is a chat over the app's own data with a fixed tool set.

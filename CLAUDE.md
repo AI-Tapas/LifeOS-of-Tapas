@@ -228,5 +228,19 @@ and email-verification rules live in lib/accounts.ts.
   server itself lives in mcp-server/ (its own package, excluded from the Next
   tsconfig and eslint; stdio transport, and it fetches its tool list from the
   app so it cannot drift).
+- Remote MCP connector (ChatGPT, Claude web and mobile): POST /api/mcp/http
+  speaks Streamable HTTP with stateless JSON replies, handling initialize,
+  tools/list, tools/call and ping directly rather than pulling the MCP SDK
+  into the Next runtime. Guarded by an OAuth 2.1 bearer token.
+- The app is its own authorization server: dynamic client registration
+  (/api/mcp/oauth/register), authorize, token and revoke under
+  /api/mcp/oauth/*, with discovery rewritten from /.well-known/* in
+  next.config.ts because Next ignores dot-prefixed folders. Public clients
+  with PKCE S256 only, no client secrets. Codes are single use, five minutes,
+  bound to client and redirect URI; refresh tokens rotate on use; every
+  secret is stored as a sha256 hash in mcp_grants. The authorize step demands
+  a live owner session and a two-tap consent screen at /connect, so a token
+  exists only because Tapas approved it. Settings lists connections and can
+  revoke them. Rules are pure in lib/mcp/oauth-core.ts and tested offline.
 - Tests: npm run test:m4 (offline, the R6 red-team controls). rls.test.mjs
   adds audit_log append-only and payload-immutability trigger proofs.

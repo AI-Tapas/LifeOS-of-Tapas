@@ -39,7 +39,9 @@ export default async function proxy(request: NextRequest) {
     // 401 without one, so the cookie gate must not intercept it. Redirecting
     // an API call to /login would also hand the caller an HTML page instead
     // of a usable error.
-    request.nextUrl.pathname.startsWith("/api/mcp");
+    request.nextUrl.pathname.startsWith("/api/mcp") ||
+    // Public OAuth discovery, read by a client before it has any credentials.
+    request.nextUrl.pathname.startsWith("/.well-known/");
 
   if (!user && !isAuthRoute) {
     const url = request.nextUrl.clone();

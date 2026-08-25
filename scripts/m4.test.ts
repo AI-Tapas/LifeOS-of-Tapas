@@ -728,3 +728,111 @@ test("send-class tools stay confirm-bucket on the connector surface", async () =
     }
   }
 });
+
+// --- remote connector: OAuth rules ------------------------------------------
+//
+// These are the rules that decide whether a leaked code or token is useful to
+// anyone. They are pure, so they are proven here rather than by poking a
+// running server.
+
+test("PKCE: only S256, and only the matching verifier", async () => {
+  const { verifyPkce } = await import("../lib/mcp/oauth-core.ts");
+  const { createHash, randomBytes } = await import("node:crypto");
+  const verifier = randomBytes(32).toString("base64url");
+  const challenge = createHash("sha256").update(verifier).digest("base64url");
+
+  assert.equal(verifyPkce(verifier, challenge).ok, true);
+  assert.equal(verifyPkce(randomBytes(32).toString("base64url"), challenge).ok, false);
+  // The plain method was removed from OAuth 2.1 for good reason.
+  assert.equal(verifyPkce(verifier, challenge, "plain").ok, false);
+  // Too short to carry real entropy.
+  assert.equal(verifyPkce("short", challenge).ok, false);
+});
+
+test("authorization codes are single use, bound to client, redirect and PKCE", async () => {
+  const { checkCodeExchange } = await import("../lib/mcp/oauth-core.ts");
+  const { createHash, randomBytes } = await import("node:crypto");
+  const verifier = randomBytes(32).toString("base64url");
+  const challenge = createHash("sha256").update(verifier).digest("base64url");
+  const now = new Date("2026-08-25T10:00:00Z");
+  const base = {
+    kind: "code" as const,
+    client_id: "client_a",
+    redirect_uri: "https://chatgpt.com/cb",
+    code_challenge: challenge,
+    expires_at: "2026-08-25T10:04:00Z",
+    used_at: null,
+    revoked_at: null,
+  };
+  const good = { clientId: "client_a", redirectUri: "https://chatgpt.com/cb", verifier };
+
+  assert.equal(checkCodeExchange(base, good, now).ok, true);
+  assert.match(
+    (checkCodeExchange({ ...base, used_at: "2026-08-25T09:59:00Z" }, good, now) as { reason: string }).reason,
+    /already used/
+  );
+  assert.match(
+    (checkCodeExchange({ ...base, expires_at: "2026-08-25T09:00:00Z" }, good, now) as { reason: string }).reason,
+    /expired/
+  );
+  assert.match(
+    (checkCodeExchange(base, { ...good, clientId: "client_b" }, now) as { reason: string }).reason,
+    /different client/
+  );
+  assert.match(
+    (checkCodeExchange(base, { ...good, redirectUri: "https://evil.example/cb" }, now) as { reason: string }).reason,
+    /redirect URI does not match/
+  );
+  assert.equal(checkCodeExchange(null, good, now).ok, false);
+});
+
+test("redirect URIs must match exactly, and be https or loopback", async () => {
+  const { redirectUriAllowed, isAcceptableRedirectUri } = await import(
+    "../lib/mcp/oauth-core.ts"
+  );
+  const registered = ["https://chatgpt.com/connector_platform_oauth_redirect"];
+  assert.equal(redirectUriAllowed(registered[0], registered), true);
+  // A prefix or lookalike must not pass: this is how codes get stolen.
+  assert.equal(redirectUriAllowed("https://chatgpt.com", registered), false);
+  assert.equal(
+    redirectUriAllowed("https://chatgpt.com.evil.test/connector_platform_oauth_redirect", registered),
+    false
+  );
+
+  assert.equal(isAcceptableRedirectUri("https://claude.ai/api/mcp/auth_callback"), true);
+  assert.equal(isAcceptableRedirectUri("http://localhost:33418/callback"), true);
+  assert.equal(isAcceptableRedirectUri("http://evil.example.com/cb"), false);
+  assert.equal(isAcceptableRedirectUri("not-a-url"), false);
+});
+
+test("secrets are stored hashed, never in the clear", async () => {
+  const { hashSecret, secretMatchesHash, newSecret } = await import(
+    "../lib/mcp/oauth-core.ts"
+  );
+  const secret = newSecret();
+  const hash = hashSecret(secret);
+  assert.equal(hash.length, 64, "sha256 hex");
+  assert.equal(hash.includes(secret), false, "the hash must not contain the secret");
+  assert.equal(secretMatchesHash(secret, hash), true);
+  assert.equal(secretMatchesHash(newSecret(), hash), false);
+});
+
+test("access tokens are refused once expired or revoked", async () => {
+  const { checkGrantUsable } = await import("../lib/mcp/oauth-core.ts");
+  const now = new Date("2026-08-25T10:00:00Z");
+  const live = {
+    kind: "access" as const,
+    client_id: "c",
+    redirect_uri: null,
+    code_challenge: null,
+    expires_at: "2026-08-25T11:00:00Z",
+    used_at: null,
+    revoked_at: null,
+  };
+  assert.equal(checkGrantUsable(live, now, "access").ok, true);
+  assert.equal(checkGrantUsable({ ...live, revoked_at: "2026-08-25T09:00:00Z" }, now, "access").ok, false);
+  assert.equal(checkGrantUsable({ ...live, expires_at: "2026-08-25T09:00:00Z" }, now, "access").ok, false);
+  // A refresh token must not be accepted where an access token is required.
+  assert.equal(checkGrantUsable({ ...live, kind: "refresh" }, now, "access").ok, false);
+  assert.equal(checkGrantUsable(null, now, "access").ok, false);
+});

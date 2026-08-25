@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 const ALLOWED_EMAIL = "tapas.tnr@gmail.com";
@@ -17,13 +17,19 @@ function friendlySendError(message: string | undefined): string {
   return m;
 }
 
-export default function LoginPage() {
+function LoginForm() {
   const [email, setEmail] = useState(ALLOWED_EMAIL);
   const [code, setCode] = useState("");
   const [stage, setStage] = useState<"email" | "code">("email");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const router = useRouter();
+  // A connector's authorize link lands here when the session has lapsed;
+  // sending the owner back afterwards is what makes that flow bearable. Only
+  // in-app paths are honoured, so this can never bounce to another site.
+  const search = useSearchParams();
+  const rawNext = search.get("next") ?? "/";
+  const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/";
 
   async function sendOtp(e: React.FormEvent) {
     e.preventDefault();
@@ -32,7 +38,9 @@ export default function LoginPage() {
     const supabase = createClient();
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: `${location.origin}/auth/confirm` },
+      options: {
+        emailRedirectTo: `${location.origin}/auth/confirm?next=${encodeURIComponent(next)}`,
+      },
     });
     setBusy(false);
     if (error) {
@@ -51,7 +59,7 @@ export default function LoginPage() {
     if (error) {
       setError(error.message);
     } else {
-      router.push("/");
+      router.push(next);
       router.refresh();
     }
   }
@@ -70,7 +78,7 @@ export default function LoginPage() {
     if (error) {
       setError(error.message);
     } else {
-      router.push("/");
+      router.push(next);
       router.refresh();
     }
   }
@@ -148,5 +156,15 @@ export default function LoginPage() {
         {error && <p className="text-sm text-red-600">{error}</p>}
       </div>
     </main>
+  );
+}
+
+// useSearchParams reads the "next" hop, which forces this into a Suspense
+// boundary at prerender time.
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
   );
 }
