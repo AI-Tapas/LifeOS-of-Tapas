@@ -7,6 +7,7 @@ import { syncCalendars } from "@/lib/calendars";
 import { TokenRevokedError } from "@/lib/oauth/core";
 import { providerOptions } from "@/lib/assistant/config";
 import { requireUser } from "@/lib/auth/require-user";
+import { reportable, describeError } from "@/lib/errors";
 
 export type RefreshResult =
   | { ok: true; count: number }
@@ -227,29 +228,60 @@ export async function savePersonaVersionAction(
 export async function activatePersonaVersionAction(
   personaId: string
 ): Promise<{ ok: boolean; message?: string }> {
-  const { supabase, user } = await requireUser("/settings");
-  await supabase
-    .from("assistant_persona")
-    .update({ active: false })
-    .eq("active", true);
-  const { data, error } = await supabase
-    .from("assistant_persona")
-    .update({ active: true, updated_at: new Date().toISOString() })
-    .eq("id", personaId)
-    .select("version");
-  if (error || !data?.length) {
-    return { ok: false, message: error?.message ?? "Version not found." };
-  }
-  await supabase.from("audit_log").insert({
-    user_id: user.id,
-    actor: "user",
-    action: "persona_activated",
-    entity: "assistant_persona",
-    entity_id: personaId,
-    meta: { version: data[0].version },
-  });
-  revalidatePath("/settings");
-  return { ok: true };
+  return reportable(async () => {
+    const { supabase, user } = await requireUser("/settings");
+
+    // Every step reports its own outcome. This used to swallow the result of
+    // the first update and ignore whether the row was actually found, so a
+    // permission or lookup failure surfaced as a blank server error rather
+    // than a sentence naming what went wrong.
+    const cleared = await supabase
+      .from("assistant_persona")
+      .update({ active: false })
+      .eq("active", true)
+      .select("id");
+    if (cleared.error) {
+      return {
+        ok: false,
+        message: `Could not stand down the current version: ${describeError(cleared.error)}`,
+      };
+    }
+
+    const { data, error } = await supabase
+      .from("assistant_persona")
+      .update({ active: true, updated_at: new Date().toISOString() })
+      .eq("id", personaId)
+      .select("version");
+    if (error) {
+      return { ok: false, message: `Could not activate: ${describeError(error)}` };
+    }
+    if (!data?.length) {
+      return {
+        ok: false,
+        message:
+          "That version was not found, or your account is not allowed to change it. Nothing was altered.",
+      };
+    }
+
+    const logged = await supabase.from("audit_log").insert({
+      user_id: user.id,
+      actor: "user",
+      action: "persona_activated",
+      entity: "assistant_persona",
+      entity_id: personaId,
+      meta: { version: data[0].version },
+    });
+    if (logged.error) {
+      // The activation itself succeeded; say so rather than implying failure.
+      return {
+        ok: true,
+        message: `Version ${data[0].version} is active, but the audit entry failed: ${describeError(logged.error)}`,
+      };
+    }
+
+    revalidatePath("/settings");
+    return { ok: true };
+  }) as Promise<{ ok: boolean; message?: string }>;
 }
 
 // ---------------------------------------------------------------------------

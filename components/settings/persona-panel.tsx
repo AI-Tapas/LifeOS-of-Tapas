@@ -29,7 +29,7 @@ export default function PersonaPanel({
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(activeMd);
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
   const [pending, startTransition] = useTransition();
 
   const active = versions.find((v) => v.active);
@@ -51,7 +51,19 @@ export default function PersonaPanel({
         </button>
       </div>
 
-      {message && <p className="mt-2 text-sm text-accent">{message}</p>}
+      {message && (
+        <p
+          role="status"
+          className={
+            "mt-2 rounded-lg p-2 text-sm " +
+            (message.ok
+              ? "bg-ok-soft text-ok"
+              : "bg-overdue-soft text-overdue")
+          }
+        >
+          {message.text}
+        </p>
+      )}
 
       {open && !editing && (
         <>
@@ -90,10 +102,10 @@ export default function PersonaPanel({
                 startTransition(async () => {
                   const r = await savePersonaVersionAction(draft);
                   if (r.ok) {
-                    setMessage(`Saved as version ${r.version}, now active.`);
+                    setMessage({ text: `Saved as version ${r.version}, now active.`, ok: true });
                     setEditing(false);
                   } else {
-                    setMessage(r.message ?? "Could not save.");
+                    setMessage({ text: r.message ?? "Could not save.", ok: false });
                   }
                 })
               }
@@ -125,7 +137,11 @@ export default function PersonaPanel({
                     onClick={() =>
                       startTransition(async () => {
                         const r = await activatePersonaVersionAction(v.id);
-                        setMessage(r.ok ? `Version ${v.version} is now active.` : r.message ?? "Failed.");
+                        setMessage(
+                          r.ok
+                            ? { text: `Version ${v.version} is now active.`, ok: true }
+                            : { text: r.message ?? "Failed.", ok: false }
+                        );
                       })
                     }
                   >
