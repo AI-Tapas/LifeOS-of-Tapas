@@ -287,7 +287,7 @@ export const TOOLS: ToolDef[] = [
     name: "delete_task",
     bucket: "autonomous",
     description:
-      "Delete one of Tapas's own tasks, and its reminder. Use update_task with status dropped when the work was abandoned but worth remembering.",
+      "Delete one of Tapas's own tasks, and its reminder. Recorded in the queue and reversible with undo_action. Use update_task with status dropped when the work was abandoned but worth remembering.",
     input_schema: schema({ task_id: str("The task id from context.") }),
   },
   {
@@ -315,7 +315,8 @@ export const TOOLS: ToolDef[] = [
   {
     name: "delete_note",
     bucket: "autonomous",
-    description: "Delete a saved note.",
+    description:
+      "Delete a saved note. Reversible: undo_action restores it.",
     input_schema: schema({ note_id: str("The note id.") }),
   },
   {
@@ -337,7 +338,8 @@ export const TOOLS: ToolDef[] = [
   {
     name: "delete_person",
     bucket: "autonomous",
-    description: "Delete a person record.",
+    description:
+      "Delete a person record. Reversible: undo_action restores it.",
     input_schema: schema({ person_id: str("The person id.") }),
   },
   {
@@ -365,7 +367,8 @@ export const TOOLS: ToolDef[] = [
   {
     name: "delete_obligation",
     bucket: "autonomous",
-    description: "Delete a recurring obligation and its reminder.",
+    description:
+      "Delete a recurring obligation and its reminder. Reversible: undo_action restores it.",
     input_schema: schema({ obligation_id: str("The obligation id.") }),
   },
   {
@@ -398,7 +401,8 @@ export const TOOLS: ToolDef[] = [
   {
     name: "delete_finance_item",
     bucket: "autonomous",
-    description: "Delete a recorded holding.",
+    description:
+      "Delete a recorded holding. Reversible: undo_action restores it.",
     input_schema: schema({ finance_item_id: str("The holding id.") }),
   },
   {
