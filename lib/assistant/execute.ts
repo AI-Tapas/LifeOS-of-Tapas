@@ -764,9 +764,9 @@ const performers: Record<string, Performer> = {
     return { summary: `Event deleted: ${ev.title}.`, undo: null };
   },
 
-  async scan_mail() {
+  async scan_mail(supabase, userId) {
     const { runMailScan } = await import("@/lib/assistant/scan");
-    const summary = await runMailScan();
+    const summary = await runMailScan({ supabase, userId });
     return {
       summary:
         `Mail scan: ${summary.scanned} emails read, ${summary.created} task` +

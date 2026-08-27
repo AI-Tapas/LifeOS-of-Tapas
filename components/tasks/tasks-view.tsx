@@ -25,8 +25,8 @@ import {
   createProjectAction,
   updateProjectAction,
   deleteProjectAction,
-  type TaskInput,
 } from "@/app/(app)/tasks/actions";
+import type { TaskInput } from "@/lib/tasks/write";
 
 export interface TaskRow {
   id: string;

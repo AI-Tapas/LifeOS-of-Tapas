@@ -16,7 +16,11 @@ import {
 import type { Database } from "@/lib/database.types";
 import { requireUser } from "@/lib/auth/require-user";
 
-export type { TaskInput, TaskResult };
+// NOTE: never re-export types from a "use server" module. Next.js treats
+// every export here as a server action and emits registerServerReference
+// for it, so a type-only export becomes a runtime ReferenceError the
+// moment this module is loaded. Import these types from
+// @/lib/tasks/write instead.
 
 type TaskStatus = Database["public"]["Enums"]["task_status"];
 

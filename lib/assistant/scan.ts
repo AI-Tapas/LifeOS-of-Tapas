@@ -6,7 +6,7 @@
 // Bodies are never stored: tasks carry a short title, a short note and the
 // message ref only (attack A2).
 
-import { createClient } from "@/lib/supabase/server";
+import { cookieActor, type Actor } from "@/lib/assistant/actor";
 import { runLlmTurn } from "@/lib/assistant/llm";
 import { SCAN_TOOL } from "@/lib/assistant/tools";
 import {
@@ -21,7 +21,7 @@ import {
 } from "@/lib/assistant/core";
 import { loadLlmOverride } from "@/lib/assistant/settings";
 import { listRecentGmail, listRecentGraph } from "@/lib/assistant/mail";
-import { createTaskAction } from "@/app/(app)/tasks/actions";
+import { createTask } from "@/lib/tasks/write";
 import { istInstant } from "@/lib/datetime";
 import type { Json } from "@/lib/database.types";
 
@@ -44,12 +44,12 @@ const SLOT_STREAM: Record<string, string> = {
   icai: "ICAI",
 };
 
-export async function runMailScan(): Promise<ScanSummary> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("not signed in");
+// The actor is passed in so this runs identically for the signed-in owner in
+// the app and for the MCP connector, which has no cookie and arrives with the
+// service actor instead. Writing tasks through lib/tasks/write rather than the
+// "use server" action keeps this off the server-action path entirely.
+export async function runMailScan(actor?: Actor): Promise<ScanSummary> {
+  const { supabase, userId } = actor ?? (await cookieActor());
 
   const { data: accounts } = await supabase
     .from("accounts")
@@ -157,7 +157,7 @@ export async function runMailScan(): Promise<ScanSummary> {
     const streamName = SLOT_STREAM[account.slot] ?? "Personal";
     const workStreamId = await resolveStreamId(supabase, streamName);
     for (const p of accepted) {
-      const r = await createTaskAction({
+      const r = await createTask(supabase, userId, {
         title: p.title,
         notes: p.note,
         status: "inbox",
@@ -172,7 +172,7 @@ export async function runMailScan(): Promise<ScanSummary> {
       }
       summary.created += 1;
       await supabase.from("assistant_actions").insert({
-        user_id: user.id,
+        user_id: userId,
         kind: "create_task",
         mode: "auto",
         status: "executed",
@@ -184,7 +184,7 @@ export async function runMailScan(): Promise<ScanSummary> {
       });
     }
     await supabase.from("audit_log").insert({
-      user_id: user.id,
+      user_id: userId,
       actor: "assistant",
       action: "mail_scan",
       entity: "accounts",
@@ -201,7 +201,7 @@ export async function runMailScan(): Promise<ScanSummary> {
 }
 
 async function resolveStreamId(
-  supabase: Awaited<ReturnType<typeof createClient>>,
+  supabase: Actor["supabase"],
   name: string
 ): Promise<string> {
   const { data } = await supabase.from("work_streams").select("id, name");
