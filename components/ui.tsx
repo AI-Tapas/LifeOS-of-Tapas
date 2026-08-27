@@ -5,6 +5,8 @@
 // controls keep a minimum 44px hit target, and .press gives them uniform
 // touch feedback that respects reduced-motion.
 
+import { useEffect, useState } from "react";
+
 import { formatDateShortIST, istDayKey } from "@/lib/datetime";
 
 export const inputCls =
@@ -83,6 +85,52 @@ export function SectionLabel({
   );
 }
 
+// A count that jumps from 3 to 2 reads as a rendering glitch; a count that
+// hands over reads as the app agreeing with you. The old value leaves upward
+// while the new one arrives from below, in one 120ms beat. The outgoing value
+// is absolutely positioned, so nothing around it moves. The handover is
+// derived during render, not in an effect, so the new value never paints once
+// before it animates.
+export function Rolling({
+  value,
+  className = "",
+}: {
+  value: string | number;
+  className?: string;
+}) {
+  const [shown, setShown] = useState<{
+    cur: string | number;
+    out: string | number | null;
+  }>({ cur: value, out: null });
+  if (shown.cur !== value) setShown({ cur: value, out: shown.cur });
+
+  useEffect(() => {
+    if (shown.out === null) return;
+    const t = setTimeout(() => setShown((s) => ({ ...s, out: null })), 200);
+    return () => clearTimeout(t);
+  }, [shown.out]);
+
+  return (
+    <span className={"relative inline-block tabular-nums " + className}>
+      {shown.out !== null && (
+        <span
+          key={`out-${shown.out}`}
+          className="roll-out absolute inset-0 text-center"
+          aria-hidden
+        >
+          {shown.out}
+        </span>
+      )}
+      <span
+        key={`cur-${value}`}
+        className={"inline-block " + (shown.out !== null ? "roll-in" : "")}
+      >
+        {value}
+      </span>
+    </span>
+  );
+}
+
 // Serif title, hairline rule, trailing count or action: the one band-header
 // look shared by Home's bands and today's-shape, and Tasks overview's bands.
 export function BandHead({
@@ -103,9 +151,10 @@ export function BandHead({
       {action !== undefined
         ? action
         : count !== undefined && (
-            <span className="text-[11px] font-bold leading-none text-muted">
-              {count}
-            </span>
+            <Rolling
+              value={count}
+              className="text-[11px] font-bold leading-none text-muted"
+            />
           )}
     </div>
   );

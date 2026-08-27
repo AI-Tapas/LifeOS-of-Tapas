@@ -237,10 +237,13 @@ export default function AssistantChat() {
               </p>
             ))}
             {t.role === "assistant" && !t.content && busy && i === turns.length - 1 ? (
-              <span className="flex gap-1 py-1" aria-hidden>
-                <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-muted" />
-                <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-muted [animation-delay:0.2s]" />
-                <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-muted [animation-delay:0.4s]" />
+              // Three dots that lift in sequence: typing, not blinking. The
+              // phase offsets live in globals.css so all three start
+              // mid-cycle instead of waiting their turn at full opacity.
+              <span className="flex items-end gap-1 py-1.5" aria-hidden>
+                <span className="typing-dot h-1.5 w-1.5 rounded-full bg-muted" />
+                <span className="typing-dot h-1.5 w-1.5 rounded-full bg-muted" />
+                <span className="typing-dot h-1.5 w-1.5 rounded-full bg-muted" />
               </span>
             ) : (
               <p className="whitespace-pre-wrap">{t.content}</p>

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { Rolling } from "@/components/ui";
 
 // Bottom navigation. Every destination is visible: a "More" sheet saved a row
 // of height but cost a tap and, worse, hid half the app behind a guess. On a
@@ -107,7 +108,7 @@ export default function Nav({ queueCount = 0 }: { queueCount?: number }) {
                     className="absolute -right-1.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-waiting px-1 text-[9px] font-semibold text-white dark:text-neutral-950"
                     aria-label={`${queueCount} awaiting approval`}
                   >
-                    {queueCount > 9 ? "9+" : queueCount}
+                    <Rolling value={queueCount > 9 ? "9+" : queueCount} />
                   </span>
                 )}
               </span>

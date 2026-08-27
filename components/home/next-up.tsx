@@ -56,6 +56,9 @@ const SECTIONS: {
   },
 ];
 
+// Items past this position all arrive together.
+const STAGGER_CAP = 7;
+
 // Manufactured-deadline choices, all at 9:30 am IST like every task due date.
 function deadlineChoices(): { label: string; iso: string }[] {
   const today = civilToday();
@@ -70,7 +73,15 @@ function deadlineChoices(): { label: string; iso: string }[] {
   ];
 }
 
-function Row({ row, nowIso }: { row: NextUpRow; nowIso: string }) {
+function Row({
+  row,
+  nowIso,
+  arriveIndex,
+}: {
+  row: NextUpRow;
+  nowIso: string;
+  arriveIndex: number;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [done, setDone] = useState(false);
@@ -95,7 +106,14 @@ function Row({ row, nowIso }: { row: NextUpRow; nowIso: string }) {
   }
 
   return (
-    <li className="py-2 first:pt-0 last:pb-0">
+    <li
+      // Arrival is staggered by position; completion leaves an "ok" tint that
+      // fades over the row before the refreshed list drops it.
+      className={
+        "arrive py-2 first:pt-0 last:pb-0" + (done ? " settle-done" : "")
+      }
+      style={{ ["--i" as string]: arriveIndex }}
+    >
       <div className="flex items-center gap-3">
         <button
           onClick={complete}
@@ -173,10 +191,18 @@ export default function NextUp({
   const empty =
     bands.do_first.length + bands.important.length + bands.urgent.length === 0;
 
+  // Arrival order for the stagger, counted across bands and rows together so
+  // the screen assembles top to bottom. Capped at eight: past that the tail of
+  // a long list would still be trickling in when the thumb reaches it. Pure
+  // per render, and CSS animations only replay when an element remounts, so a
+  // data refresh (completing a task, say) never re-runs the entrance.
+  let arrived = 0;
+  const next = () => Math.min(arrived++, STAGGER_CAP);
+
   return (
     <div>
       {empty ? (
-        <div className="rounded-xl border border-dashed border-border-strong p-6 text-center">
+        <div className="rise-in rounded-xl border border-dashed border-border-strong p-6 text-center">
           <p className="text-sm font-semibold">Desk clear.</p>
           <p className="mt-1 text-sm text-secondary">
             Nothing urgent, nothing important waiting. Capture new work with the
@@ -192,13 +218,18 @@ export default function NextUp({
           const rows = bands[s.key];
           if (rows.length === 0) return null;
           const shown = rows.slice(0, s.cap);
+          const bandIndex = next();
           return (
-            <section key={s.key} className="mt-6 first:mt-0">
+            <section
+              key={s.key}
+              className="arrive mt-6 first:mt-0"
+              style={{ ["--i" as string]: bandIndex }}
+            >
               <BandHead title={s.label} count={rows.length} />
               <p className="mt-1.5 text-[11px] text-muted">{s.hint}</p>
               <ul className="mt-1 divide-y divide-border">
                 {shown.map((r) => (
-                  <Row key={r.id} row={r} nowIso={nowIso} />
+                  <Row key={r.id} row={r} nowIso={nowIso} arriveIndex={next()} />
                 ))}
               </ul>
               {rows.length > shown.length && (

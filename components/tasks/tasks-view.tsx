@@ -217,19 +217,32 @@ function TaskItem({
   const router = useRouter();
   const nowIso = useContext(NowContext);
   const [pending, startTransition] = useTransition();
+  // Marked locally the moment the tap lands, so the tick pops and the row
+  // settles here rather than only on the server round trip. Rolled back if the
+  // write fails.
+  const [justDone, setJustDone] = useState(false);
 
   function complete() {
+    setJustDone(true);
     startTransition(async () => {
       const r = await setTaskStatusAction(task.id, "done");
       if (r.ok && r.reminderNote) onNotice(r.reminderNote);
-      else if (!r.ok) onNotice(r.message);
+      else if (!r.ok) {
+        onNotice(r.message);
+        setJustDone(false);
+      }
       router.refresh();
     });
   }
 
-  const done = task.status === "done";
+  const done = task.status === "done" || justDone;
   return (
-    <div className="flex items-center gap-1 rounded-lg border border-border bg-surface p-1.5 shadow-[var(--shadow-card)]">
+    <div
+      className={
+        "flex items-center gap-1 rounded-lg border border-border bg-surface p-1.5 shadow-[var(--shadow-card)]" +
+        (justDone ? " settle-done" : "")
+      }
+    >
       <button
         onClick={complete}
         disabled={pending || done}

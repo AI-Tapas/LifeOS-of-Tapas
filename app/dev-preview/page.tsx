@@ -16,6 +16,11 @@ import TasksView, {
 import NextUp, { type NextUpBands } from "@/components/home/next-up";
 import Timeline from "@/components/home/timeline";
 import { PendingCard } from "@/components/assistant/queue";
+import MotionDemo from "./motion-demo";
+
+// The timeline demo hangs off the real clock, so this page must not be
+// prerendered at build time.
+export const dynamic = "force-dynamic";
 
 const accounts: CalAccount[] = [
   { id: "a1", slot: "taxstrategia", status: "connected", label: "Tax Strategia (Google Workspace)" },
@@ -166,7 +171,7 @@ const pendingItem = {
   cc: [],
 };
 
-export default function DevPreviewPage() {
+export default async function DevPreviewPage() {
   // Hidden in production unless the local-only harness flag is set (the
   // sandbox's dev server cannot compile CSS reliably, so visual checks run
   // against npm start with ALLOW_DEV_PREVIEW=1 in .env.local; Vercel never
@@ -175,15 +180,26 @@ export default function DevPreviewPage() {
     notFound();
   }
 
+  // Hung off the real clock so the NOW line lands mid-rail and its minute tick
+  // can be watched. The next meeting starts two minutes out, so the line can be
+  // seen easing to its new slot without waiting for the day to move.
+  const nowMs = new Date().getTime();
+  const at = (minutes: number) => new Date(nowMs + minutes * 60_000).toISOString();
   const timelineEvents = [
-    { id: "tl1", title: "ICAI study circle: recent AAR rulings", start_ts: "2026-08-25T05:00:00Z", all_day: false, slot: "icai" },
-    { id: "tl2", title: "Call: Meridian Exports, notice strategy", start_ts: "2026-08-25T08:30:00Z", all_day: false, slot: "taxstrategia" },
-    { id: "tl3", title: "Gym", start_ts: "2026-08-25T13:00:00Z", all_day: false, slot: "ca_tapasnr" },
-    { id: "tl4", title: "AICA Level 1 orientation", start_ts: "2026-08-25T00:00:00Z", all_day: true, slot: "altechon" },
+    { id: "tl1", title: "ICAI study circle: recent AAR rulings", start_ts: at(-150), all_day: false, slot: "icai" },
+    { id: "tl2", title: "Call: Meridian Exports, notice strategy", start_ts: at(-40), all_day: false, slot: "taxstrategia" },
+    { id: "tl3", title: "Review the Vraj Textiles reconciliation", start_ts: at(2), all_day: false, slot: "taxstrategia" },
+    { id: "tl4", title: "Gym", start_ts: at(180), all_day: false, slot: "ca_tapasnr" },
+    { id: "tl5", title: "AICA Level 1 orientation", start_ts: at(0), all_day: true, slot: "altechon" },
   ];
 
   return (
     <div className="mx-auto min-h-dvh max-w-3xl px-4 pb-32 pt-6">
+      {/* Mirrors the real shell nesting: app/(app)/template.tsx wraps the page
+          content in .page-in and the bottom nav is that wrapper's SIBLING, so
+          the route-change transform is never an ancestor of a fixed element.
+          Keep Nav outside this div; that is the whole point of it. */}
+      <div className="page-in">
       <p className="mb-4 rounded bg-amber-100 p-1 text-center text-xs">dev preview: home header</p>
       <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-brand-deep">
         Tuesday, 25 August 2026
@@ -225,8 +241,11 @@ export default function DevPreviewPage() {
         <span className="text-[11px] font-bold text-muted">Calendar</span>
       </div>
       <div className="mt-3">
-        <Timeline events={timelineEvents} nowIso="2026-08-25T07:35:00Z" />
+        <Timeline events={timelineEvents} nowIso={new Date(nowMs).toISOString()} />
       </div>
+
+      <p className="mb-4 mt-8 rounded bg-amber-100 p-1 text-center text-xs">dev preview: motion (counter roll, completion settle)</p>
+      <MotionDemo />
 
       <p className="mb-4 mt-8 rounded bg-amber-100 p-1 text-center text-xs">dev preview: home approval banner</p>
       <Link
@@ -261,7 +280,8 @@ export default function DevPreviewPage() {
         workStreams={workStreams}
         nowIso="2026-08-25T06:00:00Z"
       />
-      <Nav />
+      </div>
+      <Nav queueCount={2} />
     </div>
   );
 }

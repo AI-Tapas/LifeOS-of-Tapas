@@ -49,6 +49,12 @@
   --shadow-card: 0 1px 2px rgba(20, 40, 63, 0.05),
     0 10px 24px -20px rgba(20, 40, 63, 0.18);
 
+  /* Motion: one easing family and one base duration for the whole app, so
+     every movement reads as the same hand. Kept outside the reduced-motion
+     query on purpose: they are values, not animations. */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --dur: 180ms;
+
   /* Per-account calendar colours (lib/account-colors.ts reads these as CSS
      vars, not literal hex, so the same inline-style mechanism the calendar
      needs - Tailwind can't JIT a class name built from account data at
@@ -203,11 +209,33 @@ body {
 }
 
 /* Feedback that earns its place, and none of it for users who asked the OS
-   for less motion. */
+   for less motion.
+
+   Physics rule, learned from a real bug: position: fixed breaks when any
+   ancestor carries a transform or a filter, so the bottom nav, the quick-add
+   button and the drawers would scroll away with the page. Everything below
+   animates a LEAF (a card, a row, a chip, the page-content wrapper that sits
+   beside the nav rather than above it), never a wrapper that contains them.
+   No lingering will-change either. */
+
+/* The now-line only exists once JavaScript has measured where it belongs, and
+   the outgoing digit of a rolling count is invisible unless it can animate
+   out. Both states must hold with reduced motion too, so they live outside
+   the query. */
+.now-line {
+  opacity: 0;
+}
+.now-line[data-ready] {
+  opacity: 1;
+}
+.roll-out {
+  opacity: 0;
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .press {
-    transition: transform 0.1s ease, background-color 0.15s ease,
-      border-color 0.15s ease, opacity 0.15s ease;
+    transition: transform 0.1s var(--ease), background-color 0.15s var(--ease),
+      border-color 0.15s var(--ease), opacity 0.15s var(--ease);
   }
   .press:active {
     transform: scale(0.97);
@@ -224,7 +252,7 @@ body {
     }
   }
   .pop-done {
-    animation: pop-done 0.25s ease;
+    animation: pop-done 0.25s var(--ease);
   }
   @keyframes rise-in {
     from {
@@ -237,7 +265,7 @@ body {
     }
   }
   .rise-in {
-    animation: rise-in 0.18s ease;
+    animation: rise-in var(--dur) var(--ease);
   }
   @keyframes pulse-dot {
     0%,
@@ -250,5 +278,115 @@ body {
   }
   .pulse-dot {
     animation: pulse-dot 1.2s ease-in-out infinite;
+  }
+
+  /* Route change: the screen settles in once per navigation. Applied by
+     app/(app)/template.tsx, which App Router remounts on every navigation and
+     leaves alone on a data refresh. It wraps the page content only; the nav is
+     its sibling, so this transform never becomes the nav's ancestor. */
+  @keyframes page-in {
+    from {
+      opacity: 0;
+      transform: translateY(3px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  .page-in {
+    animation: page-in var(--dur) var(--ease);
+  }
+
+  /* Staggered arrival. The caller sets --i as the item's position and caps it,
+     so a long list never trails in for a full second. */
+  .arrive {
+    animation: rise-in var(--dur) var(--ease) both;
+    animation-delay: calc(var(--i, 0) * 25ms);
+  }
+
+  /* Completion settle: the row holds an "ok" tint for a beat before the list
+     drops it. A fading overlay, not a background swap, so the row's own
+     surface colour is never overridden and nothing snaps back at the end. */
+  @keyframes settle-done {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+  .settle-done {
+    position: relative;
+  }
+  .settle-done::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: var(--ok-soft);
+    pointer-events: none;
+    animation: settle-done 250ms var(--ease) forwards;
+  }
+
+  /* The now-line eases to its new slot when a meeting starts. data-eased is
+     set a frame after the first measurement, so the line never animates in
+     from the top of the rail on load. */
+  .now-line[data-eased] {
+    transition: transform var(--dur) var(--ease);
+  }
+
+  /* Counts change honestly: the old number leaves upward, the new one arrives
+     from below, in one beat. */
+  @keyframes roll-in {
+    from {
+      opacity: 0;
+      transform: translateY(60%);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes roll-out {
+    from {
+      opacity: 1;
+      transform: none;
+    }
+    to {
+      opacity: 0;
+      transform: translateY(-60%);
+    }
+  }
+  .roll-in {
+    animation: roll-in 120ms var(--ease) both;
+  }
+  .roll-out {
+    animation: roll-out 120ms var(--ease) both;
+  }
+
+  /* Typing, not blinking: each dot lifts a beat after the one before it. The
+     delays are negative so all three start mid-cycle instead of sitting at
+     full opacity until their turn comes round. */
+  @keyframes typing-dot {
+    0%,
+    60%,
+    100% {
+      opacity: 0.3;
+      transform: none;
+    }
+    30% {
+      opacity: 1;
+      transform: translateY(-2px);
+    }
+  }
+  .typing-dot {
+    animation: typing-dot 1.1s var(--ease) infinite;
+  }
+  .typing-dot:nth-child(2) {
+    animation-delay: -0.92s;
+  }
+  .typing-dot:nth-child(3) {
+    animation-delay: -0.74s;
   }
 }
