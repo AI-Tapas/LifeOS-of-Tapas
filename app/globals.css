@@ -48,6 +48,21 @@
 
   --shadow-card: 0 1px 2px rgba(20, 40, 63, 0.05),
     0 10px 24px -20px rgba(20, 40, 63, 0.18);
+
+  /* Per-account calendar colours (lib/account-colors.ts reads these as CSS
+     vars, not literal hex, so the same inline-style mechanism the calendar
+     needs - Tailwind can't JIT a class name built from account data at
+     runtime - still gets a theme-aware colour for free). */
+  --acct-taxstrategia: var(--brand);
+  --acct-taxstrategia-soft: var(--brand-soft);
+  --acct-personal: #5a8ab5;
+  --acct-personal-soft: rgba(90, 138, 181, 0.14);
+  --acct-icai: #5e8c73;
+  --acct-icai-soft: rgba(94, 140, 115, 0.14);
+  --acct-altechon: #7b63a8;
+  --acct-altechon-soft: rgba(123, 99, 168, 0.14);
+  --acct-fallback: var(--text-muted);
+  --acct-fallback-soft: rgba(107, 114, 128, 0.14);
 }
 
 @theme inline {
@@ -118,6 +133,17 @@
 
     --shadow-card: 0 1px 0 rgba(4, 10, 18, 0.5),
       0 12px 28px -18px rgba(4, 10, 18, 0.8);
+
+    --acct-taxstrategia: var(--brand);
+    --acct-taxstrategia-soft: var(--brand-soft);
+    --acct-personal: #7aa5cc;
+    --acct-personal-soft: rgba(122, 165, 204, 0.16);
+    --acct-icai: #74ad8e;
+    --acct-icai-soft: rgba(116, 173, 142, 0.16);
+    --acct-altechon: #9780c2;
+    --acct-altechon-soft: rgba(151, 128, 194, 0.16);
+    --acct-fallback: var(--text-muted);
+    --acct-fallback-soft: rgba(123, 147, 174, 0.16);
   }
 }
 
