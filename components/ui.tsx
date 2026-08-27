@@ -83,6 +83,34 @@ export function SectionLabel({
   );
 }
 
+// Serif title, hairline rule, trailing count or action: the one band-header
+// look shared by Home's bands and today's-shape, and Tasks overview's bands.
+export function BandHead({
+  title,
+  count,
+  action,
+}: {
+  title: string;
+  count?: number;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-baseline gap-2.5">
+      <h2 className="font-serif text-[19px] font-medium leading-none tracking-tight text-foreground">
+        {title}
+      </h2>
+      <div className="h-px flex-1 bg-border" aria-hidden />
+      {action !== undefined
+        ? action
+        : count !== undefined && (
+            <span className="text-[11px] font-bold leading-none text-muted">
+              {count}
+            </span>
+          )}
+    </div>
+  );
+}
+
 // Due-state chip: colour is the meaning. Overdue red, due today amber,
 // everything else a quiet date. A missing date is called out (the starved
 // state) only when flagMissing says it matters, so low-priority undated tasks

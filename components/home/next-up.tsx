@@ -8,7 +8,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { DueBadge } from "@/components/ui";
+import { BandHead, DueBadge } from "@/components/ui";
 import {
   setTaskStatusAction,
   updateTaskAction,
@@ -194,15 +194,7 @@ export default function NextUp({
           const shown = rows.slice(0, s.cap);
           return (
             <section key={s.key} className="mt-6 first:mt-0">
-              <div className="flex items-baseline gap-2.5">
-                <h2 className="font-serif text-[19px] font-medium leading-none tracking-tight text-foreground">
-                  {s.label}
-                </h2>
-                <div className="h-px flex-1 bg-border" aria-hidden />
-                <span className="text-[11px] font-bold leading-none text-muted">
-                  {rows.length}
-                </span>
-              </div>
+              <BandHead title={s.label} count={rows.length} />
               <p className="mt-1.5 text-[11px] text-muted">{s.hint}</p>
               <ul className="mt-1 divide-y divide-border">
                 {shown.map((r) => (

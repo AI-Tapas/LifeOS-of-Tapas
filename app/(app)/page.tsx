@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { SectionLabel } from "@/components/ui";
+import { BandHead, SectionLabel } from "@/components/ui";
 import NextUp, { type NextUpBands } from "@/components/home/next-up";
 import Timeline from "@/components/home/timeline";
 import {
@@ -184,15 +184,14 @@ export default async function DashboardPage() {
       </div>
 
       <section className="mt-6">
-        <div className="flex items-baseline gap-2.5">
-          <h2 className="font-serif text-[19px] font-medium leading-none tracking-tight text-foreground">
-            Today&apos;s shape
-          </h2>
-          <div className="h-px flex-1 bg-border" aria-hidden />
-          <Link href="/calendar" className="text-[11px] font-bold text-muted">
-            Calendar
-          </Link>
-        </div>
+        <BandHead
+          title="Today&apos;s shape"
+          action={
+            <Link href="/calendar" className="text-[11px] font-bold text-muted">
+              Calendar
+            </Link>
+          }
+        />
         <div className="mt-3">
           <Timeline events={timelineEvents} nowIso={nowIso} />
         </div>
