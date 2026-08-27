@@ -26,7 +26,21 @@ import {
   istInstant,
   startOfWeek,
 } from "../datetime.ts";
-import { accountColor } from "../account-colors.ts";
+// The app's accountColor() now returns CSS var() references resolved by
+// globals.css, which an email client never loads. The brief renders in
+// Gmail, so it carries its own fixed hex copies of the light-theme account
+// palette (source of truth: the --acct-* tokens in app/globals.css).
+const EMAIL_ACCOUNT_HEX: Record<string, string> = {
+  taxstrategia: "#a66e5e", // clay (--brand)
+  ca_tapasnr: "#5a8ab5", // dusty blue
+  altechon: "#7b63a8", // violet
+  icai: "#5e8c73", // sage
+};
+const EMAIL_ACCOUNT_FALLBACK = "#6b7280";
+
+function emailAccountHex(slot: string | null): string {
+  return (slot && EMAIL_ACCOUNT_HEX[slot]) || EMAIL_ACCOUNT_FALLBACK;
+}
 
 export interface BriefTask extends TriageTask {
   stream: string;
@@ -290,7 +304,7 @@ function renderHtml(r: RenderInput): string {
     ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
         ${r.events
           .map((e) => {
-            const hex = accountColor(e.account_slot).hex;
+            const hex = emailAccountHex(e.account_slot);
             const when = e.all_day ? "All day" : formatTimeIST(e.start_ts);
             return `
           <tr><td style="padding:5px 0;font-family:${FONT};">

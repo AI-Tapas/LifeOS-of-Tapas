@@ -187,6 +187,21 @@ test("the app's own reminder events are dropped from Also today, real meetings k
   assert.ok(!html.includes(">Today<"), "old Today heading gone from html");
 });
 
+test("email html never contains CSS var() references, which mail clients cannot resolve", () => {
+  const { html } = composeBrief({
+    nowMs: NOW,
+    tasks: [task({ id: "a", title: "File reply to SCN", priority: "high", due_ts: "2026-08-25T12:00:00Z" })],
+    events: [
+      event({ id: "e1", title: "AICA committee call", start_ts: "2026-08-25T09:00:00Z", account_slot: "taxstrategia" }),
+      event({ id: "e2", title: "Unknown slot event", start_ts: "2026-08-25T10:00:00Z", account_slot: "mystery" }),
+    ],
+    pendingApprovalsCount: 1,
+    accountsNeedingReconnect: [{ slot: "icai", label: "ICAI" }],
+    appBaseUrl: APP_BASE_URL,
+  });
+  assert.ok(!html.includes("var(--"), "email html must use fixed hex colours only");
+});
+
 test("with no reminder id list every event is kept (older callers unaffected)", () => {
   const { text } = composeBrief({
     nowMs: NOW,
