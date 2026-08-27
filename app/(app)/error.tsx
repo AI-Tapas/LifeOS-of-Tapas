@@ -23,6 +23,15 @@ function reloadKey(digest: string | undefined): string {
   return `life_os_auto_reload_${digest ?? "no_digest"}`;
 }
 
+function alreadyTried(digest: string | undefined): boolean {
+  try {
+    return sessionStorage.getItem(reloadKey(digest)) === "1";
+  } catch {
+    // storage blocked: skip the auto-reload rather than risk a loop
+    return true;
+  }
+}
+
 export default function AppError({
   error,
   reset,
@@ -30,25 +39,20 @@ export default function AppError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  const [autoReloading, setAutoReloading] = useState(true);
+  // Decided once, synchronously, from sessionStorage at mount, so the effect
+  // below only ever performs side effects and never has to setState itself.
+  const [autoReloading] = useState(() => !alreadyTried(error.digest));
 
   useEffect(() => {
     console.error("Life OS error boundary:", error);
-    const key = reloadKey(error.digest);
-    let alreadyTried = false;
+    if (!autoReloading) return;
     try {
-      alreadyTried = sessionStorage.getItem(key) === "1";
-      if (!alreadyTried) sessionStorage.setItem(key, "1");
+      sessionStorage.setItem(reloadKey(error.digest), "1");
     } catch {
-      // storage blocked: skip the auto-reload rather than risk a loop
-      alreadyTried = true;
+      // ignore: the lazy-init read above already decided to reload
     }
-    if (!alreadyTried) {
-      window.location.reload();
-    } else {
-      setAutoReloading(false);
-    }
-  }, [error]);
+    window.location.reload();
+  }, [error, autoReloading]);
 
   // The one automatic attempt is in flight; a flash of error UI would only
   // alarm for the case that fixes itself.
