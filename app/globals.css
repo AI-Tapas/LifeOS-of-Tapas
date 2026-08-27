@@ -169,10 +169,14 @@ body {
 /* Hard clamp: the page itself can never scroll or lay out sideways (iOS
    Safari expands the layout for any unbreakable overflow without this).
    Scrollable rows inside the page (bottom nav) are unaffected. */
+/* clip, not hidden: overflow-x hidden forces overflow-y to compute to auto,
+   which makes body its own scroll container. Mobile browsers then scroll
+   that box instead of the document and position: fixed elements (the bottom
+   nav) scroll away with the page. clip clips without creating a scroller. */
 html,
 body {
   max-width: 100%;
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 /* Muted text has two levels across the app: text-neutral-500 for secondary
