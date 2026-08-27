@@ -159,10 +159,10 @@ export default async function SettingsPage({
 
   const toneClass =
     status?.tone === "ok"
-      ? "border-green-300 bg-green-50 text-green-800 dark:border-green-800 dark:bg-green-950/40 dark:text-green-300"
+      ? "border-ok/30 bg-ok-soft text-ok"
       : status?.tone === "warn"
-        ? "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200"
-        : "border-red-300 bg-red-50 text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300";
+        ? "border-today/30 bg-today-soft text-today"
+        : "border-overdue/30 bg-overdue-soft text-overdue";
 
   return (
     <main>
@@ -179,7 +179,7 @@ export default async function SettingsPage({
       )}
 
       <h2 className="mt-6 text-base font-semibold tracking-tight">Accounts</h2>
-      <p className="mt-1 text-sm text-neutral-500">
+      <p className="mt-1 text-sm text-secondary">
         External calendar and mail accounts. These are separate from your sign-in.
       </p>
       <div className="mt-3">
@@ -191,22 +191,22 @@ export default async function SettingsPage({
 
       <h2 className="mt-8 text-base font-semibold tracking-tight">Work streams</h2>
       {error && (
-        <p className="mt-2 text-sm text-red-600">
+        <p className="mt-2 text-sm text-overdue">
           Could not load work streams: {error.message}
         </p>
       )}
-      <div className="mt-2 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
-        <ul className="divide-y divide-neutral-200 dark:divide-neutral-800">
+      <div className="mt-2 rounded-2xl border border-border bg-surface p-4 shadow-[var(--shadow-card)]">
+        <ul className="divide-y divide-border">
           {streams?.map((s) => (
             <li key={s.id} className="flex items-baseline justify-between py-3 first:pt-0 last:pb-0">
               <div>
                 <p className="font-medium">{s.name}</p>
-                <p className="text-sm text-neutral-500">
+                <p className="text-sm text-secondary">
                   {s.kind.replace(/_/g, " ")}
                   {s.billing_entity ? `, bills as ${s.billing_entity}` : ""}
                 </p>
               </div>
-              <span className="text-xs text-neutral-400">
+              <span className="text-xs text-muted">
                 {s.feeds_billing ? "billable" : "non-billing"}
               </span>
             </li>
@@ -231,7 +231,7 @@ export default async function SettingsPage({
       </div>
 
       <h2 className="mt-8 text-base font-semibold tracking-tight">Connected applications</h2>
-      <p className="mt-1 text-sm text-neutral-500">
+      <p className="mt-1 text-sm text-secondary">
         ChatGPT, Claude and other assistants you have allowed to use Life OS.
         They can read and act on your own lists; sending anything to another
         person still waits for your approval here.
@@ -241,7 +241,7 @@ export default async function SettingsPage({
       </div>
 
       <h2 className="mt-8 text-base font-semibold tracking-tight">Assistant persona</h2>
-      <p className="mt-1 text-sm text-neutral-500">
+      <p className="mt-1 text-sm text-secondary">
         How the assistant sounds and judges. Kept private to your session.
       </p>
       <div className="mt-2">
@@ -249,7 +249,7 @@ export default async function SettingsPage({
       </div>
 
       <h2 className="mt-8 text-base font-semibold tracking-tight">Security</h2>
-      <div className="mt-2 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+      <div className="mt-2 rounded-2xl border border-border bg-surface p-4 shadow-[var(--shadow-card)]">
         <div className="space-y-4">
           <PasskeyButton />
           <SignOutButton />

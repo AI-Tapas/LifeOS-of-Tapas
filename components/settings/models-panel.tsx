@@ -92,8 +92,8 @@ export default function ModelsPanel({
   }
 
   return (
-    <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
-      <p className="text-sm text-neutral-500">
+    <div className="rounded-2xl border border-border bg-surface p-4 shadow-[var(--shadow-card)]">
+      <p className="text-sm text-secondary">
         Which model does what. Leave a row on Server default to follow the
         deployment setting, currently {envProvider}. Saved choices apply to the
         next message; keys live on the server and are never shown here.
@@ -106,14 +106,14 @@ export default function ModelsPanel({
         return (
           <div
             key={role.key}
-            className="mt-4 border-t border-neutral-100 pt-4 first:border-0 dark:border-neutral-800"
+            className="mt-4 border-t border-border pt-4 first:border-0"
           >
             <p className="font-medium">{role.label}</p>
-            <p className="text-xs text-neutral-500">{role.hint}</p>
+            <p className="text-xs text-secondary">{role.hint}</p>
 
             <div className="mt-2 grid gap-2 sm:grid-cols-2">
               <label className="block space-y-1">
-                <span className="text-xs font-medium text-neutral-500">Provider</span>
+                <span className="text-xs font-medium text-secondary">Provider</span>
                 <select
                   className={inputCls}
                   value={values[providerKey]}
@@ -130,7 +130,7 @@ export default function ModelsPanel({
               </label>
 
               <label className="block space-y-1">
-                <span className="text-xs font-medium text-neutral-500">
+                <span className="text-xs font-medium text-secondary">
                   Model id (blank uses the default)
                 </span>
                 <input
@@ -153,7 +153,7 @@ export default function ModelsPanel({
                 Test this model
               </button>
               {tested[role.key] && (
-                <span className="text-xs text-neutral-600 dark:text-neutral-300">
+                <span className="text-xs text-secondary">
                   {tested[role.key]}
                 </span>
               )}

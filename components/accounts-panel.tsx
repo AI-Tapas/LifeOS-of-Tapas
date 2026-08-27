@@ -32,10 +32,10 @@ export interface CalendarView {
 }
 
 const STATUS_STYLE: Record<AccountView["status"], string> = {
-  connected: "bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300",
-  needs_reauth: "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200",
-  forwarded: "bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300",
-  disconnected: "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400",
+  connected: "bg-ok-soft text-ok",
+  needs_reauth: "bg-today-soft text-today",
+  forwarded: "bg-waiting-soft text-waiting",
+  disconnected: "bg-surface-2 text-secondary",
 };
 
 const STATUS_LABEL: Record<AccountView["status"], string> = {
@@ -144,7 +144,7 @@ export default function AccountsPanel({
 
   return (
     <div className="space-y-4">
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error && <p className="text-sm text-overdue">{error}</p>}
 
       {SLOTS.map((slot) => {
         const acct = bySlot.get(slot.key);
@@ -157,7 +157,7 @@ export default function AccountsPanel({
         return (
           <section
             key={slot.key}
-            className="rounded-xl border border-neutral-200 p-4 dark:border-neutral-800"
+            className="rounded-xl border border-border p-4"
           >
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -176,7 +176,7 @@ export default function AccountsPanel({
             </div>
 
             {status === "needs_reauth" && (
-              <p className="mt-2 text-sm text-amber-700 dark:text-amber-300">
+              <p className="mt-2 text-sm text-today">
                 Access was revoked (this happens after a password change). Reconnect to
                 restore service.
               </p>
@@ -200,7 +200,7 @@ export default function AccountsPanel({
                       onChange={(e) =>
                         run(acct!.id, () => setPrimaryWriteAction(acct!.id, e.target.value))
                       }
-                      className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+                      className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm"
                     >
                       <option value="" disabled>
                         Choose a calendar
@@ -241,7 +241,7 @@ export default function AccountsPanel({
                         runRefresh(acct!.id);
                       }}
                       disabled={busyId === acct!.id}
-                      className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm disabled:opacity-50 dark:border-neutral-700"
+                      className="rounded-lg border border-border-strong px-3 py-1.5 text-sm disabled:opacity-50"
                     >
                       {busyId === acct!.id
                         ? "Refreshing"
@@ -251,7 +251,7 @@ export default function AccountsPanel({
                   {status === "needs_reauth" && (
                     <a
                       href={startHref}
-                      className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white"
+                      className="rounded-lg bg-today px-3 py-1.5 text-sm font-medium text-white dark:text-neutral-950"
                     >
                       Reconnect
                     </a>
@@ -269,7 +269,7 @@ export default function AccountsPanel({
                     className={
                       armedId === acct!.id
                         ? "rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
-                        : "rounded-lg border border-neutral-300 px-3 py-1.5 text-sm text-red-600 disabled:opacity-50 dark:border-neutral-700"
+                        : "rounded-lg border border-border-strong px-3 py-1.5 text-sm text-overdue disabled:opacity-50"
                     }
                   >
                     {armedId === acct!.id ? "Confirm disconnect" : "Disconnect"}
@@ -281,10 +281,10 @@ export default function AccountsPanel({
                     className={
                       "text-sm " +
                       (notice.tone === "ok"
-                        ? "text-green-600"
+                        ? "text-ok"
                         : notice.tone === "warn"
-                          ? "text-amber-700 dark:text-amber-300"
-                          : "text-red-600")
+                          ? "text-today"
+                          : "text-overdue")
                     }
                   >
                     {notice.text}
@@ -305,7 +305,7 @@ export default function AccountsPanel({
             )}
 
             {status === "forwarded" && (
-              <p className="mt-3 text-sm text-neutral-500">
+              <p className="mt-3 text-sm text-secondary">
                 Mail arrives via a Gmail forwarding filter into ca.tapasnr. No direct
                 connection is held.
               </p>
@@ -329,16 +329,16 @@ export default function AccountsPanel({
       })}
 
       {caAccount && reminderCals.length > 0 && (
-        <section className="rounded-xl border border-neutral-200 p-4 dark:border-neutral-800">
+        <section className="rounded-xl border border-border p-4">
           <h3 className="font-medium">Reminder-home calendar</h3>
-          <p className="text-sm text-neutral-500">
+          <p className="text-sm text-secondary">
             Where app reminders are written. Must be a ca.tapasnr calendar.
           </p>
           <select
             value={currentReminderHome?.id ?? ""}
             disabled={busyId === caAccount.id}
             onChange={(e) => run(caAccount.id, () => setReminderHomeAction(e.target.value))}
-            className="mt-2 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+            className="mt-2 w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm"
           >
             <option value="" disabled>
               Choose a calendar

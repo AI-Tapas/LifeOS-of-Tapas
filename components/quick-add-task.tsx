@@ -38,10 +38,10 @@ export default function QuickAddTask({
   return (
     <div className="fixed bottom-28 right-4 z-30 sm:bottom-16">
       {open ? (
-        <div className="w-72 rounded-xl border border-neutral-200 bg-white p-3 shadow-lg dark:border-neutral-800 dark:bg-neutral-950">
+        <div className="w-72 rounded-xl border border-border bg-surface p-3 shadow-lg">
           <div className="mb-2 flex items-center justify-between">
-            <span className="text-xs font-semibold text-neutral-500">Quick task</span>
-            <button onClick={() => setOpen(false)} className="text-xs text-neutral-400">
+            <span className="text-xs font-semibold text-secondary">Quick task</span>
+            <button onClick={() => setOpen(false)} className="text-xs text-muted">
               Close
             </button>
           </div>
@@ -51,12 +51,12 @@ export default function QuickAddTask({
             onChange={(e) => setTitle(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && add()}
             placeholder="What needs doing?"
-            className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+            className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm"
           />
           <select
             value={wsId}
             onChange={(e) => setWsId(e.target.value)}
-            className="mt-2 w-full rounded-lg border border-neutral-300 px-2 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+            className="mt-2 w-full rounded-lg border border-border-strong bg-surface px-2 py-2 text-sm"
           >
             {workStreams.map((w) => (
               <option key={w.id} value={w.id}>
@@ -64,7 +64,7 @@ export default function QuickAddTask({
               </option>
             ))}
           </select>
-          {note && <p className="mt-2 text-xs text-neutral-500">{note}</p>}
+          {note && <p className="mt-2 text-xs text-secondary">{note}</p>}
           <button
             onClick={add}
             disabled={pending}

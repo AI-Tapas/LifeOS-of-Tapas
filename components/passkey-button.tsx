@@ -20,12 +20,12 @@ export default function PasskeyButton() {
       <button
         onClick={register}
         disabled={busy}
-        className="rounded-lg border border-neutral-300 px-3 py-2 text-sm disabled:opacity-50 dark:border-neutral-700"
+        className="rounded-lg border border-border-strong px-3 py-2 text-sm disabled:opacity-50"
       >
         {busy ? "Waiting for device" : "Add a passkey for this device"}
       </button>
       {message && (
-        <p className="mt-2 text-sm text-neutral-500">{message}</p>
+        <p className="mt-2 text-sm text-secondary">{message}</p>
       )}
     </div>
   );

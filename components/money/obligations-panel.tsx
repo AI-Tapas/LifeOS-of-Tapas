@@ -112,7 +112,7 @@ export default function ObligationsPanel({
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-medium">Obligations</h2>
-          <p className="text-sm text-neutral-500">
+          <p className="text-sm text-secondary">
             Recurring bills and payments. Each active one sets a Google Calendar reminder.
           </p>
         </div>
@@ -125,7 +125,7 @@ export default function ObligationsPanel({
       </div>
 
       {notice && (
-        <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+        <p className="mt-3 rounded-lg border border-today/30 bg-today-soft p-2 text-xs text-today">
           {notice}
         </p>
       )}
@@ -137,12 +137,12 @@ export default function ObligationsPanel({
           obligations.map((o) => (
             <div
               key={o.id}
-              className="rounded-lg border border-neutral-200 bg-white p-3 shadow-sm dark:border-neutral-800 dark:bg-neutral-900"
+              className="rounded-lg border border-border bg-surface p-3 shadow-[var(--shadow-card)]"
             >
               <div className="flex items-start justify-between gap-2">
                 <button onClick={() => setEditing(o)} className="min-w-0 text-left">
                   <p className="font-medium">{o.name}</p>
-                  <p className="text-xs capitalize text-neutral-500">
+                  <p className="text-xs capitalize text-secondary">
                     {label(o.category)} · {label(o.frequency)} · {dueLabel(o)}
                   </p>
                   <p className="mt-0.5 text-sm">
@@ -151,7 +151,7 @@ export default function ObligationsPanel({
                     {o.account_ref ? ` · ${o.account_ref}` : ""}
                   </p>
                 </button>
-                <label className="flex shrink-0 items-center gap-1 text-xs text-neutral-500">
+                <label className="flex shrink-0 items-center gap-1 text-xs text-secondary">
                   <input
                     type="checkbox"
                     checked={o.active}
@@ -397,7 +397,7 @@ function ObligationForm({
           />
         </Field>
 
-        {err && <p className="text-sm text-red-600">{err}</p>}
+        {err && <p className="text-sm text-overdue">{err}</p>}
         <div className={drawerFooterCls + " flex gap-2"}>
           <button
             onClick={submit}
@@ -413,7 +413,7 @@ function ObligationForm({
               className={
                 armed
                   ? "rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-                  : "rounded-lg border border-neutral-300 px-3 py-2 text-sm text-red-600 disabled:opacity-50 dark:border-neutral-700"
+                  : "rounded-lg border border-border-strong px-3 py-2 text-sm text-overdue disabled:opacity-50"
               }
             >
               {armed ? "Confirm delete" : "Delete"}

@@ -56,7 +56,7 @@ export default async function ConnectPage({
     return (
       <main>
         <PageHeader title="Connection refused" />
-        <p className="rounded-xl border border-red-300 bg-red-50 p-4 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
+        <p className="rounded-xl border border-overdue/30 bg-overdue-soft p-4 text-sm text-overdue">
           {problem} Nothing has been granted.
         </p>
       </main>
@@ -70,26 +70,26 @@ export default async function ConnectPage({
         subtitle="Only approve this if you started it yourself, just now."
       />
 
-      <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+      <div className="rounded-2xl border border-border bg-surface p-4 shadow-[var(--shadow-card)]">
         <p className="text-sm">
-          <span className="text-neutral-500">Application:</span>{" "}
+          <span className="text-secondary">Application:</span>{" "}
           <span className="font-medium">{client!.client_name}</span>
         </p>
         <p className="mt-1 break-all text-sm">
-          <span className="text-neutral-500">Returns to:</span>{" "}
+          <span className="text-secondary">Returns to:</span>{" "}
           <span className="font-mono text-[13px]">{redirectUri}</span>
         </p>
-        <p className="mt-1 text-xs text-neutral-400">Client id {clientId}</p>
+        <p className="mt-1 text-xs text-muted">Client id {clientId}</p>
 
-        <div className="mt-3 rounded-xl bg-neutral-50 p-3 text-sm dark:bg-neutral-950">
+        <div className="mt-3 rounded-xl bg-surface-2 p-3 text-sm">
           <p className="font-medium">If you approve, this application can:</p>
-          <ul className="mt-1 list-disc space-y-0.5 pl-5 text-neutral-600 dark:text-neutral-300">
+          <ul className="mt-1 list-disc space-y-0.5 pl-5 text-secondary">
             <li>read your tasks, calendar and assistant context</li>
             <li>create tasks, reminders, notes, people and solo calendar events</li>
             <li>write email drafts and queue emails or invitations</li>
           </ul>
           <p className="mt-2 font-medium">It cannot:</p>
-          <ul className="mt-1 list-disc space-y-0.5 pl-5 text-neutral-600 dark:text-neutral-300">
+          <ul className="mt-1 list-disc space-y-0.5 pl-5 text-secondary">
             <li>send any email or invitation: those still wait for you here</li>
             <li>approve anything in the queue, or read your persona or accounts</li>
           </ul>
@@ -108,7 +108,7 @@ export default async function ConnectPage({
           </button>
           <Link
             href="/"
-            className="rounded-xl border border-neutral-300 px-4 py-2 text-sm font-medium dark:border-neutral-700"
+            className="rounded-xl border border-border-strong px-4 py-2 text-sm font-medium"
           >
             Cancel
           </Link>

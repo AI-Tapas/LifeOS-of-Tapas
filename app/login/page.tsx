@@ -87,8 +87,8 @@ function LoginForm() {
     <main className="flex min-h-dvh items-center justify-center p-6">
       <div className="w-full max-w-sm space-y-6">
         <div>
-          <h1 className="text-2xl font-semibold">Life OS</h1>
-          <p className="text-sm text-neutral-500">Sign in to continue</p>
+          <h1 className="font-serif text-[30px] font-medium text-foreground">Life OS</h1>
+          <p className="mt-0.5 text-sm text-secondary">Sign in to continue</p>
         </div>
 
         {stage === "email" ? (
@@ -100,7 +100,7 @@ function LoginForm() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700 dark:bg-neutral-900"
+                className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2"
               />
             </label>
             <button
@@ -114,14 +114,14 @@ function LoginForm() {
               type="button"
               onClick={signInWithPasskey}
               disabled={busy}
-              className="w-full rounded-lg border border-neutral-300 px-3 py-2 font-medium disabled:opacity-50 dark:border-neutral-700"
+              className="w-full rounded-lg border border-border-strong px-3 py-2 font-medium disabled:opacity-50"
             >
               Sign in with passkey
             </button>
           </form>
         ) : (
           <form onSubmit={verifyCode} className="space-y-4">
-            <p className="text-sm text-neutral-500">
+            <p className="text-sm text-secondary">
               A sign-in code and link were sent to {email}. Enter the code or
               open the link on this device.
             </p>
@@ -133,7 +133,7 @@ function LoginForm() {
                 required
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
-                className="w-full rounded-lg border border-neutral-300 px-3 py-2 tracking-widest dark:border-neutral-700 dark:bg-neutral-900"
+                className="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 tracking-widest"
               />
             </label>
             <button
@@ -146,14 +146,14 @@ function LoginForm() {
             <button
               type="button"
               onClick={() => setStage("email")}
-              className="w-full text-sm text-neutral-500 underline"
+              className="w-full text-sm text-secondary underline"
             >
               Use a different email
             </button>
           </form>
         )}
 
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p className="text-sm text-overdue">{error}</p>}
       </div>
     </main>
   );
