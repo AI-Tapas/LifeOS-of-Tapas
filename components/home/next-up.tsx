@@ -8,7 +8,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { DueBadge, SectionLabel } from "@/components/ui";
+import { DueBadge } from "@/components/ui";
 import {
   setTaskStatusAction,
   updateTaskAction,
@@ -33,28 +33,24 @@ export interface NextUpBands {
 const SECTIONS: {
   key: keyof Omit<NextUpBands, "later_count">;
   label: string;
-  tone: string;
   hint: string;
   cap: number;
 }[] = [
   {
     key: "do_first",
     label: "Do first",
-    tone: "text-overdue",
     hint: "Urgent and important.",
     cap: 6,
   },
   {
     key: "important",
     label: "Important, not urgent",
-    tone: "text-accent",
     hint: "The work that slips when nobody chases it.",
     cap: 5,
   },
   {
     key: "urgent",
     label: "Urgent, less important",
-    tone: "text-today",
     hint: "Deadline-driven. It can wait for the two lists above.",
     cap: 4,
   },
@@ -113,7 +109,7 @@ function Row({ row, nowIso }: { row: NextUpRow; nowIso: string }) {
           <span
             className={
               "flex h-5 w-5 items-center justify-center rounded-full border-2 " +
-              (done ? "border-ok bg-ok" : "border-neutral-400")
+              (done ? "border-ok bg-ok" : "border-border-strong")
             }
           >
             {done && (
@@ -180,9 +176,9 @@ export default function NextUp({
   return (
     <div>
       {empty ? (
-        <div className="rounded-xl border border-dashed border-neutral-300 p-6 text-center dark:border-neutral-700">
+        <div className="rounded-xl border border-dashed border-border-strong p-6 text-center">
           <p className="text-sm font-semibold">Desk clear.</p>
-          <p className="mt-1 text-sm text-neutral-500">
+          <p className="mt-1 text-sm text-secondary">
             Nothing urgent, nothing important waiting. Capture new work with the
             + button, or give a low-priority task a look in{" "}
             <Link href="/tasks" className="font-medium text-accent">
@@ -197,12 +193,18 @@ export default function NextUp({
           if (rows.length === 0) return null;
           const shown = rows.slice(0, s.cap);
           return (
-            <section key={s.key} className="mt-4 first:mt-0">
-              <div>
-                <SectionLabel tone={s.tone}>{s.label}</SectionLabel>
-                <p className="text-[11px] text-neutral-400">{s.hint}</p>
+            <section key={s.key} className="mt-6 first:mt-0">
+              <div className="flex items-baseline gap-2.5">
+                <h2 className="font-serif text-[19px] font-medium leading-none tracking-tight text-foreground">
+                  {s.label}
+                </h2>
+                <div className="h-px flex-1 bg-border" aria-hidden />
+                <span className="text-[11px] font-bold leading-none text-muted">
+                  {rows.length}
+                </span>
               </div>
-              <ul className="mt-1 divide-y divide-neutral-100 dark:divide-neutral-900">
+              <p className="mt-1.5 text-[11px] text-muted">{s.hint}</p>
+              <ul className="mt-1 divide-y divide-border">
                 {shown.map((r) => (
                   <Row key={r.id} row={r} nowIso={nowIso} />
                 ))}
@@ -210,7 +212,7 @@ export default function NextUp({
               {rows.length > shown.length && (
                 <Link
                   href="/tasks"
-                  className="text-xs font-medium text-neutral-500 underline-offset-2 hover:underline"
+                  className="text-xs font-medium text-secondary underline-offset-2 hover:underline"
                 >
                   +{rows.length - shown.length} more in Tasks
                 </Link>

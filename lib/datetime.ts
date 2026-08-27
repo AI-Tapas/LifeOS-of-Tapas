@@ -116,6 +116,10 @@ const WEEKDAY_FMT = new Intl.DateTimeFormat("en-GB", {
   timeZone: IST_TZ,
   weekday: "short",
 });
+const WEEKDAY_LONG_FMT = new Intl.DateTimeFormat("en-GB", {
+  timeZone: IST_TZ,
+  weekday: "long",
+});
 
 // "17 May 2026"
 export function formatDateIST(iso: string | Date): string {
@@ -140,6 +144,11 @@ export function formatDateTimeIST(iso: string | Date): string {
 // "Fri"
 export function formatWeekdayIST(iso: string | Date): string {
   return WEEKDAY_FMT.format(asDate(iso));
+}
+
+// "Friday"
+export function formatWeekdayLongIST(iso: string | Date): string {
+  return WEEKDAY_LONG_FMT.format(asDate(iso));
 }
 
 // "July 2026"

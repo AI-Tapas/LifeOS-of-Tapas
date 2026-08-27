@@ -1,22 +1,51 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { Card, SectionLabel } from "@/components/ui";
+import { SectionLabel } from "@/components/ui";
 import NextUp, { type NextUpBands } from "@/components/home/next-up";
+import Timeline from "@/components/home/timeline";
 import {
   addDays,
   civilKey,
   civilToday,
   civilWeekday,
   formatDateIST,
-  formatTimeIST,
-  formatWeekdayIST,
+  formatWeekdayLongIST,
+  istHour,
   istInstant,
   startOfWeek,
 } from "@/lib/datetime";
 import { triage, needsDeadline, weekendGuard } from "@/lib/tasks/triage";
-import { accountColor } from "@/lib/account-colors";
 
 export const dynamic = "force-dynamic";
+
+function greeting(hour: number): string {
+  if (hour < 12) return "Good morning";
+  if (hour < 17) return "Good afternoon";
+  return "Good evening";
+}
+
+// One honest line about the day, built from the same bands the lists below
+// show: not a generated summary, just the headline count plus whichever
+// do-first item leads. Quiet (null) once there is nothing left to flag.
+function narrativeLine(
+  bands: NextUpBands
+): { lead: string; emphasis: string | null } | null {
+  if (bands.do_first.length > 0) {
+    const n = bands.do_first.length;
+    return {
+      lead: `${n} ${n === 1 ? "matter needs" : "matters need"} you first.`,
+      emphasis: bands.do_first[0].title,
+    };
+  }
+  const upcoming = bands.important.length + bands.urgent.length;
+  if (upcoming > 0) {
+    return {
+      lead: `Nothing urgent right now. ${upcoming} task${upcoming === 1 ? "" : "s"} worth a look when you have room.`,
+      emphasis: null,
+    };
+  }
+  return null;
+}
 
 // Home answers one question: what should Tapas do next. Ranked the way he
 // asked for in the persona interview (urgent and important, then important,
@@ -73,6 +102,7 @@ export default async function DashboardPage() {
     later_count: bandsRaw.later.length,
   };
   const inboxCount = open.filter((t) => t.status === "inbox").length;
+  const narrative = narrativeLine(bands);
 
   // Weekend guard: from Wednesday, name what is due Saturday to Monday.
   const saturday = addDays(startOfWeek(today), 5);
@@ -83,29 +113,53 @@ export default async function DashboardPage() {
   ];
   const weekendRisk = weekendGuard(open, civilWeekday(today), guardKeys);
 
+  const timelineEvents = (events ?? []).map((e) => ({
+    id: e.id,
+    title: e.title,
+    start_ts: e.start_ts,
+    all_day: e.all_day,
+    slot: (e.accounts as { slot: string | null } | null)?.slot ?? null,
+  }));
+
   return (
     <main>
-      <div className="mb-4">
-        <h1 className="text-[22px] font-bold tracking-tight">
-          {formatWeekdayIST(nowIso)}
-        </h1>
-        <p className="mt-0.5 text-sm text-neutral-500">{formatDateIST(nowIso)}</p>
-      </div>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-brand-deep">
+        {formatWeekdayLongIST(nowIso)}, {formatDateIST(nowIso)}
+      </p>
+      <h1 className="mt-2.5 font-serif text-[30px] font-medium leading-tight tracking-tight text-foreground">
+        {greeting(istHour(nowIso))}, Tapas.
+      </h1>
+      {narrative && (
+        <p className="mt-2.5 max-w-[34ch] text-[14.5px] text-secondary">
+          {narrative.lead}
+          {narrative.emphasis && (
+            <>
+              {" "}
+              <strong className="font-semibold text-foreground">
+                {narrative.emphasis}.
+              </strong>
+            </>
+          )}
+        </p>
+      )}
 
       {weekendRisk.length > 0 && (
-        <div className="mb-3 rounded-xl border border-today/30 bg-today-soft p-3">
-          <p className="text-sm font-medium text-today">
-            Weekend at risk: {weekendRisk.length === 1 ? "a deadline lands" : `${weekendRisk.length} deadlines land`}{" "}
+        <div className="mt-5 rounded-2xl border border-brand/30 bg-brand-soft p-3.5">
+          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-brand-deep">
+            Weekend guard
+          </p>
+          <p className="mt-1.5 text-sm font-medium text-foreground">
+            {weekendRisk.length === 1 ? "A deadline lands" : `${weekendRisk.length} deadlines land`}{" "}
             between Saturday and Monday.
           </p>
           <ul className="mt-1 space-y-0.5">
             {weekendRisk.slice(0, 3).map((t) => (
-              <li key={t.id} className="text-xs text-today/90">
+              <li key={t.id} className="text-xs text-secondary">
                 {t.title}, due {formatDateIST(t.due_ts!)}
               </li>
             ))}
           </ul>
-          <p className="mt-1 text-xs text-today/80">
+          <p className="mt-1.5 text-xs text-secondary">
             Start it before Friday evening, or the weekend pays for it.
           </p>
         </div>
@@ -114,66 +168,40 @@ export default async function DashboardPage() {
       {(pendingCount ?? 0) > 0 && (
         <Link
           href="/assistant?tab=queue"
-          className="press mb-3 flex items-center justify-between rounded-xl border border-waiting/30 bg-waiting-soft p-3"
+          className="press mt-3 flex items-center gap-2.5 rounded-2xl border border-waiting/40 bg-waiting-soft p-3.5"
         >
-          <span className="text-sm font-medium text-waiting">
+          <span className="pulse-dot h-2 w-2 shrink-0 rounded-full bg-waiting" aria-hidden />
+          <span className="flex-1 text-[13.5px] font-semibold text-foreground">
             {pendingCount} {pendingCount === 1 ? "item is" : "items are"} waiting
-            for your approval
+            for your approval.
           </span>
-          <span className="text-sm text-waiting">Review</span>
+          <span className="shrink-0 text-sm font-medium text-waiting">Review</span>
         </Link>
       )}
 
-      <Card>
-        <div className="flex items-baseline justify-between">
-          <h2 className="text-sm font-semibold text-neutral-500">Next up</h2>
-          <Link href="/tasks" className="text-xs font-medium text-accent">
-            All tasks
-          </Link>
-        </div>
-        <div className="mt-2">
-          <NextUp bands={bands} nowIso={nowIso} />
-        </div>
-      </Card>
+      <div className="mt-6">
+        <NextUp bands={bands} nowIso={nowIso} />
+      </div>
 
-      <Card className="mt-3">
-        <div className="flex items-baseline justify-between">
-          <h2 className="text-sm font-semibold text-neutral-500">Schedule</h2>
-          <Link href="/calendar" className="text-xs font-medium text-accent">
+      <section className="mt-6">
+        <div className="flex items-baseline gap-2.5">
+          <h2 className="font-serif text-[19px] font-medium leading-none tracking-tight text-foreground">
+            Today&apos;s shape
+          </h2>
+          <div className="h-px flex-1 bg-border" aria-hidden />
+          <Link href="/calendar" className="text-[11px] font-bold text-muted">
             Calendar
           </Link>
         </div>
-        {events && events.length > 0 ? (
-          <ul className="mt-2 space-y-2">
-            {events.map((e) => {
-              const slot = (e.accounts as { slot: string | null } | null)?.slot;
-              const past = !e.all_day && e.start_ts < nowIso;
-              return (
-                <li key={e.id} className={"flex items-center gap-3 text-sm " + (past ? "opacity-50" : "")}>
-                  <span
-                    className="h-2 w-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: accountColor(slot).hex }}
-                    aria-hidden
-                  />
-                  <span className="w-16 shrink-0 text-neutral-500">
-                    {e.all_day ? "All day" : formatTimeIST(e.start_ts)}
-                  </span>
-                  <span className="min-w-0 break-words font-medium">{e.title}</span>
-                </li>
-              );
-            })}
-          </ul>
-        ) : (
-          <p className="mt-2 text-sm text-neutral-500">
-            No meetings today. A clear runway for the Do first list.
-          </p>
-        )}
-      </Card>
+        <div className="mt-3">
+          <Timeline events={timelineEvents} nowIso={nowIso} />
+        </div>
+      </section>
 
       {inboxCount > 0 && (
         <Link
           href="/tasks"
-          className="press mt-3 flex items-center justify-between rounded-xl border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900"
+          className="press mt-6 flex items-center justify-between rounded-xl border border-border bg-surface p-3"
         >
           <div>
             <SectionLabel>Inbox</SectionLabel>
