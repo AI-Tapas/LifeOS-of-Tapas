@@ -40,6 +40,9 @@ export default async function proxy(request: NextRequest) {
     // an API call to /login would also hand the caller an HTML page instead
     // of a usable error.
     request.nextUrl.pathname.startsWith("/api/mcp") ||
+    // Vercel Cron calls these with a bearer token and no cookie, same
+    // reasoning as /api/mcp above.
+    request.nextUrl.pathname.startsWith("/api/cron") ||
     // Public OAuth discovery, read by a client before it has any credentials.
     request.nextUrl.pathname.startsWith("/.well-known/");
 
