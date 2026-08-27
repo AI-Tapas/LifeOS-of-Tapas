@@ -176,7 +176,7 @@ export default async function AssistantPage({
         subtitle="Acts on its own for your private lists; asks before anything reaches another person."
       />
 
-      <div className="mb-4 flex gap-1 rounded-xl border border-neutral-200 bg-white p-1 dark:border-neutral-800 dark:bg-neutral-900">
+      <div className="mb-4 flex gap-1 rounded-xl border border-border bg-surface p-1">
         {TABS.map((t) => (
           <Link
             key={t.key}
@@ -186,7 +186,7 @@ export default async function AssistantPage({
               "flex min-h-11 flex-1 items-center justify-center rounded-lg text-center text-sm font-medium " +
               (tab === t.key
                 ? "bg-accent text-white dark:text-neutral-950"
-                : "text-neutral-600 dark:text-neutral-300")
+                : "text-secondary")
             }
           >
             {t.label}
@@ -211,9 +211,9 @@ export default async function AssistantPage({
       {tab === "queue" && (
         <div className="space-y-3">
           {pending.length === 0 && (
-            <div className="rounded-xl border border-dashed border-neutral-300 p-6 text-center dark:border-neutral-700">
+            <div className="rounded-xl border border-dashed border-border-strong p-6 text-center">
               <p className="text-sm font-semibold">Nothing waiting for approval.</p>
-              <p className="mt-1 text-sm text-neutral-500">
+              <p className="mt-1 text-sm text-secondary">
                 When the assistant drafts an email or an invite, it lands here
                 first. Nothing leaves this app until you approve it on this
                 screen.
@@ -227,11 +227,11 @@ export default async function AssistantPage({
       )}
 
       {tab === "history" && (
-        <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+        <div className="rounded-2xl border border-border bg-surface p-4 shadow-[var(--shadow-card)]">
           {history.length === 0 ? (
-            <p className="text-sm text-neutral-500">No assistant actions yet.</p>
+            <p className="text-sm text-secondary">No assistant actions yet.</p>
           ) : (
-            <ul className="divide-y divide-neutral-200 dark:divide-neutral-800">
+            <ul className="divide-y divide-border">
               {history.map((item) => (
                 <HistoryRow key={item.id} item={item} />
               ))}
@@ -241,7 +241,7 @@ export default async function AssistantPage({
       )}
 
       {tab === "audit" && (
-        <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+        <div className="rounded-2xl border border-border bg-surface p-4 shadow-[var(--shadow-card)]">
           <AuditList rows={audit} />
         </div>
       )}

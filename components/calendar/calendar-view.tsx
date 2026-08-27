@@ -194,7 +194,7 @@ export default function CalendarView({
           <button
             onClick={manualRefresh}
             disabled={pending}
-            className="press min-h-11 rounded-xl border border-neutral-300 px-3 text-xs font-medium disabled:opacity-50 dark:border-neutral-700"
+            className="press min-h-11 rounded-xl border border-border-strong px-3 text-xs font-medium disabled:opacity-50"
           >
             {pending ? "Syncing" : "Refresh"}
           </button>
@@ -218,7 +218,7 @@ export default function CalendarView({
                 "press min-h-11 rounded-full px-3.5 text-sm capitalize " +
                 (v === view
                   ? "bg-accent text-white dark:text-neutral-950"
-                  : "border border-neutral-300 text-neutral-600 dark:border-neutral-700 dark:text-neutral-300")
+                  : "border border-border-strong text-secondary")
               }
             >
               {v}
@@ -228,20 +228,20 @@ export default function CalendarView({
         <div className="flex items-center gap-1">
           <button
             onClick={() => step(-1)}
-            className="press min-h-11 min-w-11 rounded-lg border border-neutral-300 px-2 text-sm dark:border-neutral-700"
+            className="press min-h-11 min-w-11 rounded-lg border border-border-strong px-2 text-sm"
             aria-label="Previous"
           >
             ‹
           </button>
           <button
             onClick={() => go(view, keyToCivil(todayKey))}
-            className="press min-h-11 rounded-lg border border-neutral-300 px-2 text-xs font-medium text-accent dark:border-neutral-700"
+            className="press min-h-11 rounded-lg border border-border-strong px-2 text-xs font-medium text-accent"
           >
             Today
           </button>
           <button
             onClick={() => step(1)}
-            className="press min-h-11 min-w-11 rounded-lg border border-neutral-300 px-2 text-sm dark:border-neutral-700"
+            className="press min-h-11 min-w-11 rounded-lg border border-border-strong px-2 text-sm"
             aria-label="Next"
           >
             ›
@@ -262,7 +262,7 @@ export default function CalendarView({
       </div>
 
       {notice && (
-        <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+        <p className="mt-3 rounded-lg border border-today/30 bg-today-soft p-2 text-xs text-today">
           {notice}
         </p>
       )}
@@ -359,7 +359,7 @@ function MonthGrid({
           </div>
         ))}
       </div>
-      <div className="grid grid-cols-7 gap-px rounded-lg bg-neutral-200 dark:bg-neutral-800">
+      <div className="grid grid-cols-7 gap-px rounded-lg bg-border">
         {cells.map((c) => {
           const key = civilKey(c);
           const inMonth = c.m === anchor.m;
@@ -370,7 +370,7 @@ function MonthGrid({
               key={key}
               onClick={() => onDay(c)}
               className={
-                "min-h-16 bg-white p-1 text-left align-top dark:bg-neutral-950 " +
+                "min-h-16 bg-surface p-1 text-left align-top " +
                 (inMonth ? "" : "opacity-40")
               }
             >
@@ -444,14 +444,14 @@ function WeekAgenda({
         const isToday = key === todayKey;
         return (
           <section key={key}>
-            <div className="flex items-center justify-between border-b border-neutral-200 pb-1 dark:border-neutral-800">
+            <div className="flex items-center justify-between border-b border-border pb-1">
               <h3 className={"text-sm font-medium " + (isToday ? "text-accent" : "")}>
                 {formatWeekdayIST(istInstant(c, 12, 0))} {c.d}{" "}
                 {isToday && <span className="text-xs">(today)</span>}
               </h3>
               <button
                 onClick={() => onAddDay(c)}
-                className="press -my-2 flex min-h-11 items-center px-2 text-xs font-medium text-neutral-500 dark:text-neutral-400"
+                className="press -my-2 flex min-h-11 items-center px-2 text-xs font-medium text-muted"
                 aria-label="Add event"
               >
                 + add
@@ -522,7 +522,7 @@ function DayGrid({
           ))}
         </div>
       )}
-      <div className="divide-y divide-neutral-100 dark:divide-neutral-900">
+      <div className="divide-y divide-border">
         {Array.from({ length: 24 }, (_, h) => h).map((h) => (
           <div key={h} className="flex gap-2 py-1">
             <button
@@ -605,7 +605,7 @@ function EventDetail({
   return (
     <Drawer onClose={onClose} title="Event">
       <h3 className="text-lg font-medium">{event.title}</h3>
-      <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-300">
+      <p className="mt-1 text-sm text-secondary">
         {formatDateIST(event.start_ts)}
         {event.all_day
           ? " (all day)"
@@ -615,7 +615,7 @@ function EventDetail({
       </p>
       {event.location && <p className="mt-1 text-sm">{event.location}</p>}
       {event.description && (
-        <p className="mt-2 whitespace-pre-wrap text-sm text-neutral-600 dark:text-neutral-300">
+        <p className="mt-2 whitespace-pre-wrap text-sm text-secondary">
           {event.description}
         </p>
       )}
@@ -628,7 +628,7 @@ function EventDetail({
           Attendees: {attendees.map((a) => a.email).filter(Boolean).join(", ")}
         </p>
       )}
-      {err && <p className="mt-2 text-sm text-red-600">{err}</p>}
+      {err && <p className="mt-2 text-sm text-overdue">{err}</p>}
       <div className="mt-4 flex gap-2">
         {!readOnly && (
           <button
@@ -659,7 +659,7 @@ function EventDetail({
             className={
               armed
                 ? "press min-h-11 rounded-lg bg-red-600 px-3 text-sm font-medium text-white disabled:opacity-50"
-                : "press min-h-11 rounded-lg border border-neutral-300 px-3 text-sm text-red-600 disabled:opacity-50 dark:border-neutral-700"
+                : "press min-h-11 rounded-lg border border-border-strong px-3 text-sm text-overdue disabled:opacity-50"
             }
           >
             {armed ? "Confirm delete" : "Delete"}
@@ -885,12 +885,12 @@ function EventForm({
           />
         </Field>
 
-        {err && <p className="text-sm text-red-600">{err}</p>}
+        {err && <p className="text-sm text-overdue">{err}</p>}
 
         <div className={drawerFooterCls}>
           {confirmCount !== null ? (
-            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-800 dark:bg-amber-950/40">
-              <p className="text-amber-900 dark:text-amber-200">
+            <div className="rounded-lg border border-today/30 bg-today-soft p-3 text-sm">
+              <p className="text-today">
                 This will send an invite to {confirmCount}{" "}
                 {confirmCount === 1 ? "person" : "people"}.
               </p>
@@ -898,13 +898,13 @@ function EventForm({
                 <button
                   onClick={() => submit(true)}
                   disabled={pending}
-                  className="press min-h-11 rounded-lg bg-amber-600 px-3 text-sm font-medium text-white disabled:opacity-50"
+                  className="press min-h-11 rounded-lg bg-today px-3 text-sm font-medium text-white disabled:opacity-50 dark:text-neutral-950"
                 >
                   {pending ? "Sending" : "Confirm and send invites"}
                 </button>
                 <button
                   onClick={() => setConfirmCount(null)}
-                  className="press min-h-11 rounded-lg border border-neutral-300 px-3 text-sm dark:border-neutral-700"
+                  className="press min-h-11 rounded-lg border border-border-strong px-3 text-sm"
                 >
                   Cancel
                 </button>

@@ -85,7 +85,7 @@ export default function Nav({ queueCount = 0 }: { queueCount?: number }) {
   const pathname = usePathname();
 
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-neutral-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/95">
+    <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-lg dark:bg-background/92">
       <div className="mx-auto grid max-w-3xl grid-cols-4 sm:grid-cols-8">
         {items.map((item) => {
           const active = pathname === item.href;
@@ -96,10 +96,8 @@ export default function Nav({ queueCount = 0 }: { queueCount?: number }) {
               href={item.href}
               aria-current={active ? "page" : undefined}
               className={
-                "flex flex-col items-center gap-0.5 py-2 text-[10px] font-medium " +
-                (active
-                  ? "text-accent"
-                  : "text-neutral-500 dark:text-neutral-400")
+                "flex flex-col items-center gap-0.5 py-2 text-[10px] font-semibold " +
+                (active ? "text-accent dark:text-brand" : "text-muted")
               }
             >
               <span className="relative">

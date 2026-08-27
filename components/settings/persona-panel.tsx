@@ -35,13 +35,13 @@ export default function PersonaPanel({
   const active = versions.find((v) => v.active);
 
   return (
-    <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+    <div className="rounded-2xl border border-border bg-surface p-4 shadow-[var(--shadow-card)]">
       <div className="flex items-center justify-between">
         <div>
           <p className="font-medium">
             {active ? `Version ${active.version} (${active.source})` : "No persona set"}
           </p>
-          <p className="text-sm text-neutral-500">
+          <p className="text-sm text-secondary">
             Tone and judgment only. It can never skip your approvals; that rule
             lives in code.
           </p>
@@ -67,7 +67,7 @@ export default function PersonaPanel({
 
       {open && !editing && (
         <>
-          <pre className="mt-3 max-h-96 overflow-y-auto whitespace-pre-wrap rounded-xl bg-neutral-50 p-3 font-sans text-sm dark:bg-neutral-950">
+          <pre className="mt-3 max-h-96 overflow-y-auto whitespace-pre-wrap rounded-xl bg-surface-2 p-3 font-sans text-sm">
             {activeMd || "Empty."}
           </pre>
           <div className="mt-3 flex gap-2">
@@ -89,7 +89,7 @@ export default function PersonaPanel({
       {open && editing && (
         <>
           <textarea
-            className="mt-3 h-96 w-full rounded-xl border border-neutral-300 bg-white p-3 font-mono text-xs dark:border-neutral-700 dark:bg-neutral-950"
+            className="mt-3 h-96 w-full rounded-xl border border-border-strong bg-surface p-3 font-mono text-xs"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
           />
@@ -120,8 +120,8 @@ export default function PersonaPanel({
       )}
 
       {versions.length > 1 && (
-        <div className="mt-4 border-t border-neutral-100 pt-3 dark:border-neutral-800">
-          <p className="text-xs font-medium text-neutral-500">All versions</p>
+        <div className="mt-4 border-t border-border pt-3">
+          <p className="text-xs font-medium text-secondary">All versions</p>
           <ul className="mt-1 space-y-1">
             {versions.map((v) => (
               <li key={v.id} className="flex items-center justify-between text-sm">
@@ -133,7 +133,7 @@ export default function PersonaPanel({
                   <button
                     type="button"
                     disabled={pending}
-                    className="rounded-lg border border-neutral-300 px-2 py-0.5 text-xs disabled:opacity-50 dark:border-neutral-700"
+                    className="rounded-lg border border-border-strong px-2 py-0.5 text-xs disabled:opacity-50"
                     onClick={() =>
                       startTransition(async () => {
                         const r = await activatePersonaVersionAction(v.id);

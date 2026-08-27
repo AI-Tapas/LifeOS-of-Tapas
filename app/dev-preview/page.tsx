@@ -2,6 +2,7 @@
 // real Calendar and Tasks components inside the same shell markup as the
 // (app) layout, without auth or database. 404s in production.
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import Nav from "@/components/nav";
 import CalendarView, {
   type CalAccount,
@@ -13,8 +14,8 @@ import TasksView, {
   type WorkStreamRow,
 } from "@/components/tasks/tasks-view";
 import NextUp, { type NextUpBands } from "@/components/home/next-up";
+import Timeline from "@/components/home/timeline";
 import { PendingCard } from "@/components/assistant/queue";
-import { Card } from "@/components/ui";
 
 const accounts: CalAccount[] = [
   { id: "a1", slot: "taxstrategia", status: "connected", label: "Tax Strategia (Google Workspace)" },
@@ -174,26 +175,70 @@ export default function DevPreviewPage() {
     notFound();
   }
 
+  const timelineEvents = [
+    { id: "tl1", title: "ICAI study circle: recent AAR rulings", start_ts: "2026-08-25T05:00:00Z", all_day: false, slot: "icai" },
+    { id: "tl2", title: "Call: Meridian Exports, notice strategy", start_ts: "2026-08-25T08:30:00Z", all_day: false, slot: "taxstrategia" },
+    { id: "tl3", title: "Gym", start_ts: "2026-08-25T13:00:00Z", all_day: false, slot: "ca_tapasnr" },
+    { id: "tl4", title: "AICA Level 1 orientation", start_ts: "2026-08-25T00:00:00Z", all_day: true, slot: "altechon" },
+  ];
+
   return (
     <div className="mx-auto min-h-dvh max-w-3xl px-4 pb-32 pt-6">
-      <p className="mb-4 rounded bg-amber-100 p-1 text-center text-xs">dev preview: home next-up</p>
-      <div className="mb-3 rounded-xl border border-today/30 bg-today-soft p-3">
-        <p className="text-sm font-medium text-today">
-          Weekend at risk: a deadline lands between Saturday and Monday.
+      <p className="mb-4 rounded bg-amber-100 p-1 text-center text-xs">dev preview: home header</p>
+      <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-brand-deep">
+        Tuesday, 25 August 2026
+      </p>
+      <h1 className="mt-2.5 font-serif text-[30px] font-medium leading-tight tracking-tight text-foreground">
+        Good afternoon, Tapas.
+      </h1>
+      <p className="mt-2.5 max-w-[34ch] text-[14.5px] text-secondary">
+        2 matters need you first.{" "}
+        <strong className="font-semibold text-foreground">
+          Reply to GST notice for Sunrise Traders.
+        </strong>
+      </p>
+
+      <div className="mt-5 rounded-2xl border border-brand/30 bg-brand-soft p-3.5">
+        <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-brand-deep">
+          Weekend guard
+        </p>
+        <p className="mt-1.5 text-sm font-medium text-foreground">
+          A deadline lands between Saturday and Monday.
         </p>
         <ul className="mt-1 space-y-0.5">
-          <li className="text-xs text-today/90">GSTR-1 for Vraj Textiles, due 31 Aug 2026</li>
+          <li className="text-xs text-secondary">GSTR-1 for Vraj Textiles, due 31 Aug 2026</li>
         </ul>
-        <p className="mt-1 text-xs text-today/80">
+        <p className="mt-1.5 text-xs text-secondary">
           Start it before Friday evening, or the weekend pays for it.
         </p>
       </div>
-      <Card>
-        <h2 className="text-sm font-semibold text-neutral-500">Next up</h2>
-        <div className="mt-2">
-          <NextUp bands={nextUpBands} nowIso="2026-08-25T06:00:00Z" />
-        </div>
-      </Card>
+
+      <p className="mb-4 mt-8 rounded bg-amber-100 p-1 text-center text-xs">dev preview: home next-up (no card wrapper, per mockup)</p>
+      <NextUp bands={nextUpBands} nowIso="2026-08-25T06:00:00Z" />
+
+      <p className="mb-4 mt-8 rounded bg-amber-100 p-1 text-center text-xs">dev preview: today&apos;s shape (timeline)</p>
+      <div className="flex items-baseline gap-2.5">
+        <h2 className="font-serif text-[19px] font-medium leading-none tracking-tight text-foreground">
+          Today&apos;s shape
+        </h2>
+        <div className="h-px flex-1 bg-border" aria-hidden />
+        <span className="text-[11px] font-bold text-muted">Calendar</span>
+      </div>
+      <div className="mt-3">
+        <Timeline events={timelineEvents} nowIso="2026-08-25T07:35:00Z" />
+      </div>
+
+      <p className="mb-4 mt-8 rounded bg-amber-100 p-1 text-center text-xs">dev preview: home approval banner</p>
+      <Link
+        href="/assistant?tab=queue"
+        className="press flex items-center gap-2.5 rounded-2xl border border-waiting/40 bg-waiting-soft p-3.5"
+      >
+        <span className="pulse-dot h-2 w-2 shrink-0 rounded-full bg-waiting" aria-hidden />
+        <span className="flex-1 text-[13.5px] font-semibold text-foreground">
+          1 item is waiting for your approval.
+        </span>
+        <span className="shrink-0 text-sm font-medium text-waiting">Review</span>
+      </Link>
 
       <p className="mb-4 mt-8 rounded bg-amber-100 p-1 text-center text-xs">dev preview: approval queue card</p>
       <PendingCard item={pendingItem} />

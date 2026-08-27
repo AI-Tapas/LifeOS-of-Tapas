@@ -3,6 +3,7 @@
 import { createContext, useContext, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
+  BandHead,
   Drawer,
   DueBadge,
   Empty,
@@ -125,7 +126,7 @@ function TasksBody({ tasks, projects, workStreams }: TasksViewProps) {
               "press min-h-11 rounded-full px-3.5 text-sm capitalize " +
               (t === tab
                 ? "bg-accent text-white dark:text-neutral-950"
-                : "border border-neutral-300 text-neutral-600 dark:border-neutral-700 dark:text-neutral-300")
+                : "border border-border-strong text-secondary")
             }
           >
             {t}
@@ -133,10 +134,10 @@ function TasksBody({ tasks, projects, workStreams }: TasksViewProps) {
         ))}
       </div>
 
-      <p className="mt-2 text-xs text-neutral-500">{TAB_HINTS[tab]}</p>
+      <p className="mt-2 text-xs text-secondary">{TAB_HINTS[tab]}</p>
 
       {notice && (
-        <p className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+        <p className="mt-3 rounded-lg border border-today/30 bg-today-soft p-2 text-xs text-today">
           {notice}
         </p>
       )}
@@ -228,7 +229,7 @@ function TaskItem({
 
   const done = task.status === "done";
   return (
-    <div className="flex items-center gap-1 rounded-lg border border-neutral-200 bg-white p-1.5 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+    <div className="flex items-center gap-1 rounded-lg border border-border bg-surface p-1.5 shadow-[var(--shadow-card)]">
       <button
         onClick={complete}
         disabled={pending || done}
@@ -242,7 +243,7 @@ function TaskItem({
         <span
           className={
             "h-5 w-5 rounded-full border-2 " +
-            (done ? "border-ok bg-ok" : "border-neutral-400")
+            (done ? "border-ok bg-ok" : "border-border-strong")
           }
         />
       </button>
@@ -321,16 +322,15 @@ function OverviewTab({
     }))
     .filter((s) => s.count > 0);
 
-  const sections: { title: string; tone: string; hint?: string; items: TaskRow[] }[] = [
-    { title: "Do first", tone: "text-overdue", hint: "Urgent and important.", items: bands.do_first },
+  const sections: { title: string; hint?: string; items: TaskRow[] }[] = [
+    { title: "Do first", hint: "Urgent and important.", items: bands.do_first },
     {
       title: "Important, not urgent",
-      tone: "text-accent",
       hint: "Starves first when the week gets loud. A missing deadline is the warning sign.",
       items: bands.important,
     },
-    { title: "Urgent, less important", tone: "text-today", items: bands.urgent },
-    { title: "Everything else", tone: "", items: bands.later },
+    { title: "Urgent, less important", items: bands.urgent },
+    { title: "Everything else", items: bands.later },
   ];
 
   return (
@@ -340,19 +340,19 @@ function OverviewTab({
           <button
             key={s.label}
             onClick={() => onGoTo(s.go)}
-            className="press rounded-xl border border-neutral-200 bg-white p-3 text-left shadow-sm active:bg-neutral-50 dark:border-neutral-800 dark:bg-neutral-900 dark:active:bg-neutral-900"
+            className="press rounded-xl border border-border bg-surface p-3 text-left shadow-[var(--shadow-card)] active:bg-surface-2"
           >
             <p className={"text-2xl font-semibold " + s.tone}>{s.value}</p>
             <div className="flex items-baseline justify-between gap-2">
-              <p className="text-xs text-neutral-500">{s.label}</p>
-              <span className="text-[11px] text-neutral-400">View</span>
+              <p className="text-xs text-secondary">{s.label}</p>
+              <span className="text-[11px] text-muted">View</span>
             </div>
           </button>
         ))}
       </div>
 
       {starved.length > 0 && (
-        <p className="mt-3 rounded-xl border border-accent/30 bg-accent-soft p-3 text-xs text-accent">
+        <p className="mt-3 rounded-xl border border-waiting/30 bg-waiting-soft p-3 text-xs text-waiting">
           {starved.length === 1
             ? "1 important task has no deadline."
             : `${starved.length} important tasks have no deadline.`}{" "}
@@ -366,8 +366,8 @@ function OverviewTab({
         s.items.length === 0 ? null : (
           <section key={s.title} className="mt-5">
             <div className="mb-2">
-              <SectionLabel tone={s.tone}>{s.title}</SectionLabel>
-              {s.hint && <p className="mt-0.5 text-[11px] text-neutral-400">{s.hint}</p>}
+              <BandHead title={s.title} count={s.items.length} />
+              {s.hint && <p className="mt-1.5 text-[11px] text-muted">{s.hint}</p>}
             </div>
             <div className="space-y-2">
               {s.items.map((t) => (
@@ -401,7 +401,7 @@ function OverviewTab({
             {perStream.map((s) => (
               <span
                 key={s.name}
-                className="rounded-full border border-neutral-200 px-3 py-1 text-xs text-neutral-600 dark:border-neutral-800 dark:text-neutral-300"
+                className="rounded-full border border-border bg-surface-2 px-3 py-1 text-xs text-secondary"
               >
                 {s.name}: {s.count}
               </span>
@@ -463,7 +463,7 @@ function InboxTab({
                 <button
                   onClick={() => moveTo(t, "todo")}
                   disabled={pending}
-                  className="press min-h-11 shrink-0 rounded-lg border border-neutral-300 px-2.5 text-xs font-medium disabled:opacity-50 dark:border-neutral-700"
+                  className="press min-h-11 shrink-0 rounded-lg border border-border-strong px-2.5 text-xs font-medium disabled:opacity-50"
                 >
                   To do
                 </button>
@@ -540,7 +540,7 @@ function BoardTab({
                           <button
                             onClick={() => move(t, col.key === "done" ? "doing" : "todo")}
                             disabled={pending}
-                            className="press min-h-11 rounded-lg border border-neutral-300 px-2.5 text-xs font-medium disabled:opacity-50 dark:border-neutral-700"
+                            className="press min-h-11 rounded-lg border border-border-strong px-2.5 text-xs font-medium disabled:opacity-50"
                           >
                             Back
                           </button>
@@ -558,7 +558,7 @@ function BoardTab({
                               )
                             }
                             disabled={pending}
-                            className="press min-h-11 rounded-lg border border-neutral-300 px-2.5 text-xs font-medium disabled:opacity-50 dark:border-neutral-700"
+                            className="press min-h-11 rounded-lg border border-border-strong px-2.5 text-xs font-medium disabled:opacity-50"
                           >
                             {col.key === "inbox" ? "To do" : col.key === "todo" ? "Start" : "Done"}
                           </button>
@@ -636,7 +636,7 @@ function ProjectsTab({
       <div>
         <button
           onClick={() => setSelected(null)}
-          className="text-xs font-medium text-neutral-500 dark:text-neutral-400"
+          className="text-xs font-medium text-muted"
         >
           ‹ All projects
         </button>
@@ -668,12 +668,12 @@ function ProjectsTab({
     <div>
       <button
         onClick={() => setAdding((v) => !v)}
-        className="rounded-lg border border-neutral-300 px-3 py-1.5 text-sm dark:border-neutral-700"
+        className="rounded-lg border border-border-strong px-3 py-1.5 text-sm"
       >
         + Project
       </button>
       {adding && (
-        <div className="mt-2 space-y-2 rounded-lg border border-neutral-200 p-3 dark:border-neutral-800">
+        <div className="mt-2 space-y-2 rounded-lg border border-border p-3">
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -705,7 +705,7 @@ function ProjectsTab({
             return (
               <div
                 key={p.id}
-                className="flex items-center justify-between rounded-lg border border-neutral-200 bg-white p-2 shadow-sm dark:border-neutral-800 dark:bg-neutral-900"
+                className="flex items-center justify-between rounded-lg border border-border bg-surface p-2 shadow-[var(--shadow-card)]"
               >
                 <button
                   onClick={() => {
@@ -723,7 +723,7 @@ function ProjectsTab({
                   <select
                     value={p.status}
                     onChange={(e) => setStatus(p.id, e.target.value as ProjectRow["status"])}
-                    className="rounded border border-neutral-300 px-1 py-0.5 text-[11px] dark:border-neutral-700 dark:bg-neutral-900"
+                    className="rounded border border-border-strong bg-surface px-1 py-0.5 text-[11px]"
                   >
                     <option value="active">active</option>
                     <option value="on_hold">on hold</option>
@@ -735,7 +735,7 @@ function ProjectsTab({
                     className={
                       armedId === p.id
                         ? "rounded bg-red-600 px-1.5 py-0.5 text-[11px] font-medium text-white"
-                        : "text-[11px] text-red-600"
+                        : "text-[11px] text-overdue"
                     }
                   >
                     {armedId === p.id ? "Confirm delete" : "Delete"}
@@ -783,7 +783,7 @@ function QuickAdd({
       <select
         value={wsId}
         onChange={(e) => setWsId(e.target.value)}
-        className="w-32 shrink-0 rounded-lg border border-neutral-300 px-2 py-2 text-sm dark:border-neutral-700 dark:bg-neutral-900"
+        className="w-32 shrink-0 rounded-lg border border-border-strong bg-surface px-2 py-2 text-sm"
       >
         {workStreams.map((w) => (
           <option key={w.id} value={w.id}>
@@ -973,11 +973,11 @@ function TaskForm({
                   "rounded-full border px-3 py-1.5 text-sm " +
                   (f.status === value
                     ? value === "done"
-                      ? "border-green-600 bg-green-600 text-white"
+                      ? "border-green-600 bg-green-600 text-neutral-950"
                       : value === "dropped"
                         ? "border-neutral-500 bg-neutral-500 text-white"
                         : "border-accent bg-accent text-white dark:text-neutral-950"
-                    : "border-neutral-300 text-neutral-600 dark:border-neutral-700 dark:text-neutral-300")
+                    : "border-border-strong text-secondary")
                 }
               >
                 {label}
@@ -1083,7 +1083,7 @@ function TaskForm({
           />
         </Field>
 
-        {err && <p className="text-sm text-red-600">{err}</p>}
+        {err && <p className="text-sm text-overdue">{err}</p>}
         <div className={drawerFooterCls + " flex gap-2"}>
           <button
             onClick={submit}
@@ -1099,7 +1099,7 @@ function TaskForm({
               className={
                 armed
                   ? "rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
-                  : "rounded-lg border border-neutral-300 px-3 py-2 text-sm text-red-600 disabled:opacity-50 dark:border-neutral-700"
+                  : "rounded-lg border border-border-strong px-3 py-2 text-sm text-overdue disabled:opacity-50"
               }
             >
               {armed ? "Confirm delete" : "Delete"}

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { btnPrimary, inputCls } from "@/components/ui";
+import { btnGhost, btnPrimary, inputCls } from "@/components/ui";
 import { scanMailAction } from "@/app/(app)/assistant/actions";
 
 interface Turn {
@@ -162,7 +162,7 @@ export default function AssistantChat() {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
-        <p className="text-sm text-neutral-500">
+        <p className="text-sm text-secondary">
           Tasks, reminders and drafts happen straight away; anything that reaches
           another person waits for your approval in the Queue.
         </p>
@@ -175,18 +175,13 @@ export default function AssistantChat() {
                 setTurns([]);
                 setNotice(null);
               }}
-              className="press min-h-11 rounded-xl border border-neutral-300 px-3 text-sm font-medium disabled:opacity-50 dark:border-neutral-700"
+              className={btnGhost}
               disabled={busy}
             >
               New chat
             </button>
           )}
-          <button
-            type="button"
-            onClick={scanNow}
-            disabled={scanBusy}
-            className="press min-h-11 rounded-xl border border-neutral-300 px-3 text-sm font-medium disabled:opacity-50 dark:border-neutral-700"
-          >
+          <button type="button" onClick={scanNow} disabled={scanBusy} className={btnGhost}>
             {scanBusy ? "Scanning..." : "Scan mail now"}
           </button>
         </div>
@@ -209,9 +204,9 @@ export default function AssistantChat() {
 
       <div className="min-h-[40vh] space-y-3">
         {restored && turns.length === 0 && (
-          <div className="rounded-xl border border-dashed border-neutral-300 p-6 text-center dark:border-neutral-700">
+          <div className="rounded-xl border border-dashed border-border-strong p-6 text-center">
             <p className="text-sm font-semibold">Your desk, in one conversation.</p>
-            <p className="mt-1 text-sm text-neutral-500">
+            <p className="mt-1 text-sm text-secondary">
               Plan the week, draft a reply, set a reminder, or tap Scan mail
               now. Private lists change straight away and stay undoable;
               anything that reaches another person waits in the Queue for your
@@ -225,7 +220,7 @@ export default function AssistantChat() {
             className={
               t.role === "user"
                 ? "ml-8 rounded-2xl bg-accent p-3 text-sm text-white dark:text-neutral-950"
-                : "mr-4 rounded-2xl border border-neutral-200 bg-white p-3 text-sm dark:border-neutral-800 dark:bg-neutral-900"
+                : "mr-4 rounded-2xl border border-border bg-surface p-3 text-sm"
             }
           >
             {t.tools?.map((tool, j) => (
@@ -235,7 +230,7 @@ export default function AssistantChat() {
                   "mb-2 rounded-lg px-2 py-1 text-xs " +
                   (tool.error
                     ? "bg-overdue-soft text-overdue"
-                    : "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300")
+                    : "bg-surface-2 text-secondary")
                 }
               >
                 {tool.name}: {tool.summary}
@@ -243,9 +238,9 @@ export default function AssistantChat() {
             ))}
             {t.role === "assistant" && !t.content && busy && i === turns.length - 1 ? (
               <span className="flex gap-1 py-1" aria-hidden>
-                <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-neutral-400" />
-                <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-neutral-400 [animation-delay:0.2s]" />
-                <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-neutral-400 [animation-delay:0.4s]" />
+                <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-muted" />
+                <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-muted [animation-delay:0.2s]" />
+                <span className="pulse-dot h-1.5 w-1.5 rounded-full bg-muted [animation-delay:0.4s]" />
               </span>
             ) : (
               <p className="whitespace-pre-wrap">{t.content}</p>

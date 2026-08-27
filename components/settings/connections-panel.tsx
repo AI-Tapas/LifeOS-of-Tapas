@@ -32,9 +32,9 @@ export default function ConnectionsPanel({ items }: { items: ConnectionView[] })
   }
 
   return (
-    <div className="rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm dark:border-neutral-800 dark:bg-neutral-900">
+    <div className="rounded-2xl border border-border bg-surface p-4 shadow-[var(--shadow-card)]">
       {message && <p className="mb-2 text-sm text-accent">{message}</p>}
-      <ul className="divide-y divide-neutral-200 dark:divide-neutral-800">
+      <ul className="divide-y divide-border">
         {items.map((c) => (
           <li
             key={c.client_id}
@@ -42,7 +42,7 @@ export default function ConnectionsPanel({ items }: { items: ConnectionView[] })
           >
             <div className="min-w-0">
               <p className="font-medium">{c.client_name}</p>
-              <p className="text-xs text-neutral-500">
+              <p className="text-xs text-secondary">
                 Connected {c.created_label}
                 {c.last_used_label ? `, last used ${c.last_used_label}` : ", not used yet"}
                 {c.active_tokens
@@ -53,7 +53,7 @@ export default function ConnectionsPanel({ items }: { items: ConnectionView[] })
             <button
               type="button"
               disabled={pending}
-              className="shrink-0 rounded-lg border border-red-300 px-3 py-1 text-xs font-medium text-red-700 disabled:opacity-50 dark:border-red-800 dark:text-red-300"
+              className="shrink-0 rounded-lg border border-overdue/40 px-3 py-1 text-xs font-medium text-overdue disabled:opacity-50"
               onClick={() =>
                 startTransition(async () => {
                   const r = await revokeConnectionAction(c.client_id);
