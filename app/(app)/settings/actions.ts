@@ -336,3 +336,42 @@ export async function saveAssistantModelsAction(input: {
   revalidatePath("/assistant");
   return { ok: true };
 }
+
+// Bill letterhead: the name and address block printed at the top of every
+// reimbursement bill, plus the prefix of the bill number series. Kept as data
+// so nothing about him is hardcoded in the app.
+export async function saveBillingProfileAction(input: {
+  name: string;
+  address: string;
+  email: string;
+  phone: string;
+  footer: string;
+  bill_prefix: string;
+}): Promise<{ ok: boolean; message?: string }> {
+  const { supabase, user } = await requireUser("/settings");
+  const trimmed = (v: string) => v.trim();
+  const orNull = (v: string) => trimmed(v) || null;
+  const prefix = trimmed(input.bill_prefix) || "AICA";
+  // The prefix becomes part of a bill number like AICA/2026-27/001, so it must
+  // not carry the separator itself.
+  if (prefix.includes("/")) {
+    return { ok: false, message: "The bill prefix cannot contain a slash." };
+  }
+  const { error } = await supabase.from("billing_profile").upsert(
+    {
+      user_id: user.id,
+      name: trimmed(input.name),
+      address: trimmed(input.address),
+      email: orNull(input.email),
+      phone: orNull(input.phone),
+      footer: orNull(input.footer),
+      bill_prefix: prefix,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "user_id" }
+  );
+  if (error) return { ok: false, message: error.message };
+  revalidatePath("/settings");
+  revalidatePath("/trips");
+  return { ok: true };
+}

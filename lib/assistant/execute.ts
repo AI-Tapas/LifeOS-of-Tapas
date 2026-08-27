@@ -25,6 +25,17 @@ import {
   type TaskInput,
 } from "@/lib/tasks/write";
 import {
+  addTripExpense,
+  addTripLeg,
+  createBillDraft,
+  createTrip,
+  deleteBill,
+  deleteTrip,
+  deleteTripExpense,
+  updateTrip,
+} from "@/lib/trips/write";
+import { TRANSPORT_MODES, type TransportMode, type TripLeg } from "@/lib/trips/bill";
+import {
   AUTONOMOUS_KINDS,
   CONFIRM_KINDS,
   STUB_KINDS,
@@ -792,6 +803,129 @@ const performers: Record<string, Performer> = {
     return { summary: "The queued action was discarded; it can never be sent.", undo: null };
   },
 
+  // --- travel desk ---------------------------------------------------------
+  // Trips, their legs and their expenses are Tapas's own records, so they sit
+  // in the autonomous bucket and every one of them is undoable.
+  // create_bill_draft is autonomous too, and can ONLY ever write a draft: no
+  // tool here or anywhere else marks a bill sent or paid, and nothing in this
+  // module posts a bill to anybody.
+
+  async create_trip(supabase, userId, input) {
+    const title = s(input.title);
+    const purpose = s(input.purpose);
+    if (!title || !purpose) throw new Error("A purpose and title are required.");
+    const workStreamId = await resolveWorkStream(supabase, s(input.work_stream));
+    const r = await createTrip(supabase, userId, {
+      purpose: purpose as Database["public"]["Enums"]["trip_purpose"],
+      title,
+      work_stream_id: workStreamId,
+      start_date: s(input.start_date),
+      end_date: s(input.end_date),
+      cities: Array.isArray(input.cities)
+        ? (input.cities as unknown[]).filter((c): c is string => typeof c === "string")
+        : [],
+      billable_to: s(input.billable_to),
+      notes: s(input.notes),
+    });
+    if (!r.ok) throw new Error(r.message);
+    return { summary: `Trip created: ${title}.`, undo: { trip_id: r.id } };
+  },
+
+  async update_trip(supabase, userId, input) {
+    const tripId = s(input.trip_id);
+    if (!tripId) throw new Error("trip_id is required.");
+    const { data: prev } = await supabase
+      .from("trips")
+      .select("title, status, start_date, end_date, billable_to, notes")
+      .eq("id", tripId)
+      .single();
+    if (!prev) throw new Error("Trip not found.");
+    const r = await updateTrip(supabase, userId, tripId, {
+      ...(s(input.title) ? { title: s(input.title)! } : {}),
+      ...(s(input.status)
+        ? { status: s(input.status) as Database["public"]["Enums"]["trip_status"] }
+        : {}),
+      ...(s(input.start_date) ? { start_date: s(input.start_date) } : {}),
+      ...(s(input.end_date) ? { end_date: s(input.end_date) } : {}),
+      ...(input.billable_to !== undefined ? { billable_to: s(input.billable_to) } : {}),
+      ...(input.notes !== undefined ? { notes: s(input.notes) } : {}),
+    });
+    if (!r.ok) throw new Error(r.message);
+    return {
+      summary: `Trip updated: ${s(input.title) ?? prev.title}.`,
+      undo: { trip_id: tripId, prev },
+    };
+  },
+
+  async log_trip_leg(supabase, userId, input) {
+    const tripId = s(input.trip_id);
+    const date = s(input.date);
+    if (!tripId || !date) throw new Error("trip_id and date are required.");
+    const mode = s(input.mode) as TransportMode | null;
+    const leg: TripLeg = {
+      from: s(input.from_city) ?? "",
+      to: s(input.to_city) ?? "",
+      date,
+      mode: mode && TRANSPORT_MODES.includes(mode) ? mode : "other",
+      cost: typeof input.cost === "number" ? input.cost : null,
+    };
+    const r = await addTripLeg(supabase, userId, tripId, leg);
+    if (!r.ok) throw new Error(r.message);
+    return {
+      summary: `Leg logged: ${leg.from} to ${leg.to} on ${formatDateIST(
+        `${date}T00:00:00+05:30`
+      )}.`,
+      undo: { trip_id: tripId, previous_legs: r.previous },
+    };
+  },
+
+  async add_trip_expense(supabase, userId, input) {
+    const tripId = s(input.trip_id);
+    const category = s(input.category);
+    const date = s(input.date);
+    if (!tripId || !category || !date) {
+      throw new Error("trip_id, category and date are required.");
+    }
+    if (typeof input.amount !== "number") throw new Error("An amount is required.");
+    const r = await addTripExpense(supabase, userId, {
+      trip_id: tripId,
+      category: category as Database["public"]["Enums"]["trip_expense_category"],
+      amount: input.amount,
+      date,
+      billable: input.billable === true,
+      // Reference string only. There is no upload path anywhere in this app.
+      receipt_ref: s(input.receipt_ref),
+    });
+    if (!r.ok) throw new Error(r.message);
+    return {
+      summary: `Expense recorded: ${category} ${input.amount} on ${formatDateIST(
+        `${date}T00:00:00+05:30`
+      )}${input.billable === true ? ", billable" : ""}.`,
+      undo: { expense_id: r.id },
+    };
+  },
+
+  async create_bill_draft(supabase, userId, input) {
+    const tripId = s(input.trip_id);
+    if (!tripId) throw new Error("trip_id is required.");
+    const r = await createBillDraft(supabase, userId, {
+      trip_id: tripId,
+      bill_to:
+        (s(input.bill_to) as Database["public"]["Enums"]["bill_recipient"] | null) ??
+        undefined,
+      bill_to_address: s(input.bill_to_address),
+      number: s(input.number),
+      date: s(input.date),
+    });
+    if (!r.ok) throw new Error(r.message);
+    return {
+      summary:
+        `Bill ${r.note} drafted from the trip's billable expenses. It is a DRAFT: ` +
+        "nothing has been sent. Open Trips, check the lines, print it and send it yourself.",
+      undo: { bill_id: r.id },
+    };
+  },
+
   async add_event_solo(supabase, userId, input) {
     // Structural gates for attack A3: the schema has no attendees field,
     // smuggled attendee keys are refused here, and confirmed=false below
@@ -1067,6 +1201,11 @@ const UNDOABLE = new Set([
   "add_finance_item",
   "update_finance_item",
   "add_event_solo",
+  "create_trip",
+  "update_trip",
+  "log_trip_leg",
+  "add_trip_expense",
+  "create_bill_draft",
 ]);
 
 export async function undoExecutedAction(
@@ -1259,6 +1398,43 @@ async function performUndo(
     }
     case "add_event_solo": {
       await deleteAppEvent(userId, String(undo.event_id));
+      return;
+    }
+    case "create_trip": {
+      const r = await deleteTrip(supabase, userId, String(undo.trip_id));
+      if (!r.ok) throw new Error(r.message ?? "Could not delete the trip.");
+      return;
+    }
+    case "update_trip": {
+      const prev = (undo.prev ?? {}) as Record<string, unknown>;
+      const r = await updateTrip(supabase, userId, String(undo.trip_id), {
+        title: prev.title as string,
+        status: prev.status as Database["public"]["Enums"]["trip_status"],
+        start_date: (prev.start_date as string | null) ?? null,
+        end_date: (prev.end_date as string | null) ?? null,
+        billable_to: (prev.billable_to as string | null) ?? null,
+        notes: (prev.notes as string | null) ?? null,
+      });
+      if (!r.ok) throw new Error(r.message);
+      return;
+    }
+    case "log_trip_leg": {
+      // The whole leg array before the append goes back, so the undo is exact
+      // even if two legs share a date.
+      const r = await updateTrip(supabase, userId, String(undo.trip_id), {
+        legs: (undo.previous_legs ?? []) as TripLeg[],
+      });
+      if (!r.ok) throw new Error(r.message);
+      return;
+    }
+    case "add_trip_expense": {
+      const r = await deleteTripExpense(supabase, userId, String(undo.expense_id));
+      if (!r.ok) throw new Error(r.message ?? "Could not delete the expense.");
+      return;
+    }
+    case "create_bill_draft": {
+      const r = await deleteBill(supabase, userId, String(undo.bill_id));
+      if (!r.ok) throw new Error(r.message ?? "Could not delete the bill draft.");
       return;
     }
     default:

@@ -264,6 +264,7 @@ export type Database = {
         Row: {
           amount: number
           bill_to: Database["public"]["Enums"]["bill_recipient"]
+          bill_to_address: string | null
           date: string
           id: string
           line_items: Json
@@ -277,6 +278,7 @@ export type Database = {
         Insert: {
           amount: number
           bill_to: Database["public"]["Enums"]["bill_recipient"]
+          bill_to_address?: string | null
           date: string
           id?: string
           line_items?: Json
@@ -290,6 +292,7 @@ export type Database = {
         Update: {
           amount?: number
           bill_to?: Database["public"]["Enums"]["bill_recipient"]
+          bill_to_address?: string | null
           date?: string
           id?: string
           line_items?: Json
@@ -316,6 +319,39 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      billing_profile: {
+        Row: {
+          address: string
+          bill_prefix: string
+          email: string | null
+          footer: string | null
+          name: string
+          phone: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          address?: string
+          bill_prefix?: string
+          email?: string | null
+          footer?: string | null
+          name?: string
+          phone?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Update: {
+          address?: string
+          bill_prefix?: string
+          email?: string | null
+          footer?: string | null
+          name?: string
+          phone?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       calendars: {
         Row: {
@@ -1073,7 +1109,13 @@ export type Database = {
       task_status: "inbox" | "todo" | "doing" | "done" | "dropped"
       trip_expense_category: "transport" | "hotel" | "per_diem" | "other"
       trip_purpose: "aica" | "conference" | "leisure" | "other"
-      trip_status: "planned" | "booked" | "done" | "cancelled"
+      trip_status:
+        | "planned"
+        | "booked"
+        | "underway"
+        | "done"
+        | "billed"
+        | "cancelled"
       work_stream_kind:
         | "training"
         | "consulting"

@@ -252,3 +252,42 @@ and email-verification rules live in lib/accounts.ts.
   revoke them. Rules are pure in lib/mcp/oauth-core.ts and tested offline.
 - Tests: npm run test:m4 (offline, the R6 red-team controls). rls.test.mjs
   adds audit_log append-only and payload-immutability trigger proofs.
+
+## Travel Desk (Milestone 6)
+
+- Schema: trips, trip_expenses and bills shipped in M1 with the right shapes.
+  Migration 20260828000100_m6_travel_desk.sql adds only what was missing:
+  trip_status gains 'underway' and 'billed' (the trail is planned, underway,
+  done, billed; 'booked' and 'cancelled' stay valid), bills gains
+  bill_to_address (the enum says which kind of payer, the bill still has to
+  print a name and address), and billing_profile holds the letterhead. The
+  seed_new_user trigger now seeds a billing_profile row too.
+- receipt_ref and pdf_ref stay reference strings. There is no upload path, no
+  storage bucket and no attachment UI anywhere in this module, and
+  scripts/m6.test.ts fails if any tool grows a file-shaped parameter.
+- lib/trips/bill.ts is pure: leg and line-item parsing, line items derived
+  from billable expenses, the billable rollup, Indian amount-in-words, and
+  financial-year bill numbering (AICA/2026-27/001, restarting each April).
+  Relative .ts imports so node --test can run it.
+- lib/trips/write.ts is the one write path, same pattern as lib/tasks/write.ts:
+  browser server actions, the in-app assistant and the MCP connectors all go
+  through it. createBillDraft can only ever write status 'draft'.
+  setBillStatus (sent, paid) exists only for the Trips screen: no assistant or
+  connector tool can reach it, because the app never sends a bill.
+- Screens: /trips groups the month ahead and lists past trips below;
+  /trips/[id] carries legs, expenses by category and the bills; /trips/bill/[id]
+  is the print view. The PDF is the browser's own Save as PDF driven by the
+  @media print block in globals.css (everything hidden except .print-sheet),
+  so no PDF library is installed.
+- His working rules live where each fits: the transport preference order and
+  the AICA "arrive the night before, the branch books the hotel" note sit in
+  the leg and trip forms; the more-than-a-day gap between trips shows as an
+  observation with no merge button (chaining is a question, never automatic);
+  and the same three rules are in HARD_RULES so the assistant says the same
+  thing in chat.
+- Assistant tools: the three trip stubs became real autonomous, undoable tools
+  (create_trip, update_trip, log_trip_leg, add_trip_expense,
+  create_bill_draft), mirrored by the read tools lifeos_list_trips and
+  lifeos_list_bills.
+- Tests: npm run test:m6 (offline). app/dev-preview renders the three trips
+  screens with mock data for visual checks without a database.

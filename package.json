@@ -15,7 +15,8 @@
     "icons": "node scripts/gen-icons.mjs",
     "test:m4": "node --test scripts/m4.test.ts",
     "test:triage": "node --test scripts/triage.test.ts",
-    "test:m5": "node --test scripts/m5.test.ts"
+    "test:m5": "node --test scripts/m5.test.ts",
+    "test:m6": "node --test scripts/m6.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",
