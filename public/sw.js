@@ -2,7 +2,7 @@
 // reading. No offline writes in V1. Hand-written instead of a bundler plugin
 // because Next 16 builds with Turbopack, which webpack-based PWA plugins do
 // not support; this stays independent of the build tool.
-const CACHE = "life-os-v3";
+const CACHE = "life-os-v4";
 const SHELL = [
   "/offline",
   "/manifest.webmanifest",

@@ -1,73 +1,60 @@
-// Generates placeholder PWA icons as PNGs with no image dependencies:
-// a slate background with a centred indigo rounded square.
-// Run: node scripts/gen-icons.mjs
-import { deflateSync } from "node:zlib";
-import { mkdirSync, writeFileSync } from "node:fs";
+// Generates the PWA icons from an inline SVG: Slate and Clay identity, a
+// serif "L." on deep slate. The letterform is a hand-drawn path (no <text>),
+// so rasterisation is identical on every machine regardless of installed
+// fonts. Run: node scripts/gen-icons.mjs  (also: npm run icons)
+import sharp from "sharp";
+import { mkdirSync } from "node:fs";
 
-const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
-  let c = n;
-  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-  return c >>> 0;
-});
+const SLATE = "#14283f"; // dark surface token
+const SLATE_DEEP = "#0f1e30"; // dark background token
+const CREAM = "#f4efe9"; // warm off-white, matches the Desk feel
+const CLAY = "#a66e5e"; // --brand
 
-function crc32(buf) {
-  let c = 0xffffffff;
-  for (const b of buf) c = CRC_TABLE[(c ^ b) & 0xff] ^ (c >>> 8);
-  return (c ^ 0xffffffff) >>> 0;
-}
-
-function chunk(type, data) {
-  const out = Buffer.alloc(12 + data.length);
-  out.writeUInt32BE(data.length, 0);
-  out.write(type, 4, "ascii");
-  data.copy(out, 8);
-  out.writeUInt32BE(crc32(out.subarray(4, 8 + data.length)), 8 + data.length);
-  return out;
-}
-
-function png(size) {
-  const bg = [15, 23, 42]; // slate-900
-  const fg = [99, 102, 241]; // indigo-500
-  const lo = Math.round(size * 0.28);
-  const hi = Math.round(size * 0.72);
-  const r = Math.round(size * 0.08);
-
-  const raw = Buffer.alloc(size * (1 + size * 3));
-  for (let y = 0; y < size; y++) {
-    const row = y * (1 + size * 3);
-    raw[row] = 0; // filter: none
-    for (let x = 0; x < size; x++) {
-      let inside = x >= lo && x < hi && y >= lo && y < hi;
-      if (inside) {
-        // knock the corners off for a rounded look
-        const dx = Math.max(lo + r - x, x - (hi - 1 - r), 0);
-        const dy = Math.max(lo + r - y, y - (hi - 1 - r), 0);
-        if (dx * dx + dy * dy > r * r) inside = false;
-      }
-      const [cr, cg, cb] = inside ? fg : bg;
-      const p = row + 1 + x * 3;
-      raw[p] = cr;
-      raw[p + 1] = cg;
-      raw[p + 2] = cb;
-    }
-  }
-
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(size, 0);
-  ihdr.writeUInt32BE(size, 4);
-  ihdr[8] = 8; // bit depth
-  ihdr[9] = 2; // colour type: RGB
-
-  return Buffer.concat([
-    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
-    chunk("IHDR", ihdr),
-    chunk("IDAT", deflateSync(raw)),
-    chunk("IEND", Buffer.alloc(0)),
-  ]);
+// One 1000x1000 art board. The mark sits inside the centre ~55% so the same
+// art survives a maskable circle crop (safe zone is the centre 80%).
+// The "L" is a classic bracketed-serif capital: vertical stem, foot arm,
+// head and foot serifs, drawn as one path on a 1000-unit grid.
+function svg() {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="30%" r="90%">
+      <stop offset="0%" stop-color="${SLATE}"/>
+      <stop offset="100%" stop-color="${SLATE_DEEP}"/>
+    </radialGradient>
+  </defs>
+  <rect width="1000" height="1000" fill="url(#bg)"/>
+  <!-- hairline ring, a quiet nod to the app's card borders; r stays inside
+       the maskable safe zone (centre 80%) so no launcher shape shaves it -->
+  <circle cx="500" cy="500" r="385" fill="none" stroke="#2c4f77" stroke-width="6" opacity="0.55"/>
+  <!-- serif L: stem with head serif, foot arm rising to a flared terminal -->
+  <path fill="${CREAM}" d="
+    M 338 300
+    L 522 300
+    L 522 322
+    C 492 326, 480 332, 480 366
+    L 480 640
+    C 480 666, 488 674, 514 674
+    L 550 674
+    C 596 674, 616 658, 630 606
+    L 656 612
+    L 634 700
+    L 338 700
+    L 338 678
+    C 368 674, 380 668, 380 634
+    L 380 366
+    C 380 332, 368 326, 338 322
+    Z"/>
+  <!-- the clay full stop, sitting on the same baseline -->
+  <circle cx="692" cy="666" r="34" fill="${CLAY}"/>
+</svg>`;
 }
 
 mkdirSync("public/icons", { recursive: true });
+const art = Buffer.from(svg());
 for (const size of [180, 192, 512]) {
-  writeFileSync(`public/icons/icon-${size}.png`, png(size));
+  await sharp(art, { density: 300 })
+    .resize(size, size)
+    .png()
+    .toFile(`public/icons/icon-${size}.png`);
   console.log(`public/icons/icon-${size}.png`);
 }
