@@ -39,7 +39,7 @@ export async function GET(req: Request): Promise<Response> {
     const dayStart = istInstant(today, 0, 0).toISOString();
     const dayEnd = istInstant(today, 23, 59).toISOString();
 
-    const [{ data: tasks }, { data: streams }, { data: events }, { count: pendingCount }, { data: needsReauth }, { data: briefAccount }] =
+    const [{ data: tasks }, { data: streams }, { data: events }, { count: pendingCount }, { data: needsReauth }, { data: briefAccount }, { data: reminderRows }] =
       await Promise.all([
         supabase
           .from("tasks")
@@ -49,7 +49,7 @@ export async function GET(req: Request): Promise<Response> {
         supabase.from("work_streams").select("id, name").eq("user_id", userId),
         supabase
           .from("events")
-          .select("id, title, start_ts, all_day, accounts(slot, label)")
+          .select("id, title, start_ts, all_day, ext_event_id, accounts(slot, label)")
           .eq("user_id", userId)
           .gte("start_ts", dayStart)
           .lte("start_ts", dayEnd)
@@ -66,6 +66,13 @@ export async function GET(req: Request): Promise<Response> {
           .eq("user_id", userId)
           .eq("slot", "ca_tapasnr")
           .maybeSingle(),
+        // The app's own reminder events; the composer drops these from the
+        // Also today list so a task never appears twice in one brief.
+        supabase
+          .from("reminders")
+          .select("ext_event_id")
+          .eq("user_id", userId)
+          .not("ext_event_id", "is", null),
       ]);
 
     const streamName = new Map((streams ?? []).map((s) => [s.id, s.name]));
@@ -88,6 +95,7 @@ export async function GET(req: Request): Promise<Response> {
         all_day: e.all_day,
         account_slot: acc?.slot ?? null,
         account_label: acc?.label ?? null,
+        ext_event_id: e.ext_event_id,
       };
     });
     const accountsNeedingReconnect: BriefAccountIssue[] = (needsReauth ?? []).map((a) => ({
@@ -99,6 +107,9 @@ export async function GET(req: Request): Promise<Response> {
       nowMs: Date.now(),
       tasks: briefTasks,
       events: briefEvents,
+      reminderExtEventIds: (reminderRows ?? [])
+        .map((r) => r.ext_event_id)
+        .filter((v): v is string => v !== null),
       pendingApprovalsCount: pendingCount ?? 0,
       accountsNeedingReconnect,
       appBaseUrl,

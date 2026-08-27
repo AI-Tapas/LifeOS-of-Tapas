@@ -164,6 +164,41 @@ test("today's events list time, title and account", () => {
   assert.ok(text.includes("Tax Strategia"));
 });
 
+test("the app's own reminder events are dropped from Also today, real meetings kept", () => {
+  const { html, text } = composeBrief({
+    nowMs: NOW,
+    tasks: [
+      task({ id: "a", title: "File reply to SCN", priority: "high", due_ts: "2026-08-25T12:00:00Z" }),
+    ],
+    events: [
+      event({ id: "e1", title: "File reply to SCN", start_ts: "2026-08-25T12:00:00Z", ext_event_id: "gcal_rem_1" }),
+      event({ id: "e2", title: "AICA committee call", start_ts: "2026-08-25T09:00:00Z", ext_event_id: "gcal_meet_2" }),
+    ],
+    reminderExtEventIds: ["gcal_rem_1"],
+    pendingApprovalsCount: 0,
+    accountsNeedingReconnect: [],
+    appBaseUrl: APP_BASE_URL,
+  });
+  const alsoToday = text.slice(text.indexOf("Also today:"));
+  assert.ok(!alsoToday.includes("File reply to SCN"), "reminder event must not repeat under Also today");
+  assert.ok(alsoToday.includes("AICA committee call"), "a real meeting must stay");
+  assert.ok(text.includes("File reply to SCN"), "the task itself still ranks in the bands");
+  assert.ok(html.includes("Also today"), "html heading renamed");
+  assert.ok(!html.includes(">Today<"), "old Today heading gone from html");
+});
+
+test("with no reminder id list every event is kept (older callers unaffected)", () => {
+  const { text } = composeBrief({
+    nowMs: NOW,
+    tasks: [],
+    events: [event({ id: "e1", title: "AICA committee call", start_ts: "2026-08-25T09:00:00Z", ext_event_id: "gcal_meet_2" })],
+    pendingApprovalsCount: 0,
+    accountsNeedingReconnect: [],
+    appBaseUrl: APP_BASE_URL,
+  });
+  assert.ok(text.includes("AICA committee call"));
+});
+
 test("pending approvals line is omitted at zero and pluralises correctly above one", () => {
   const zero = composeBrief({
     nowMs: NOW,

@@ -41,6 +41,7 @@ export interface BriefEvent {
   all_day: boolean;
   account_slot: string | null;
   account_label: string | null;
+  ext_event_id?: string | null;
 }
 
 export interface BriefAccountIssue {
@@ -52,6 +53,11 @@ export interface ComposeBriefInput {
   nowMs: number;
   tasks: BriefTask[]; // open tasks: status in inbox/todo/doing
   events: BriefEvent[]; // today's events, all connected accounts, pre-sorted by start_ts (this does not re-sort, same contract as the events query's own .order("start_ts"))
+  // ext_event_ids of the app's own task/obligation reminder events. A task
+  // with a due date writes a reminder event onto the calendar, so without
+  // this filter the same item appears twice: once in the ranked bands and
+  // again under Also today. Optional so older fixtures stay valid.
+  reminderExtEventIds?: string[];
   pendingApprovalsCount: number;
   accountsNeedingReconnect: BriefAccountIssue[];
   appBaseUrl: string;
@@ -93,6 +99,11 @@ export function composeBrief(input: ComposeBriefInput): ComposedBrief {
   const today = civilToday(nowMs);
   const weekday = civilWeekday(today);
 
+  const reminderIds = new Set(input.reminderExtEventIds ?? []);
+  const meetings = events.filter(
+    (e) => !e.ext_event_id || !reminderIds.has(e.ext_event_id)
+  );
+
   const bands = triage(tasks, nowMs);
   const topItem = bands.do_first[0] ?? bands.important[0] ?? bands.urgent[0] ?? null;
 
@@ -124,7 +135,7 @@ export function composeBrief(input: ComposeBriefInput): ComposedBrief {
     accountsNeedingReconnect,
     weekendRisk,
     bands,
-    events,
+    events: meetings,
     pendingApprovalsCount,
     scannedTasks,
     nowIso,
@@ -136,7 +147,7 @@ export function composeBrief(input: ComposeBriefInput): ComposedBrief {
     accountsNeedingReconnect,
     weekendRisk,
     bands,
-    events,
+    events: meetings,
     pendingApprovalsCount,
     scannedTasks,
     nowIso,
@@ -334,7 +345,7 @@ function renderHtml(r: RenderInput): string {
       ${bandsHtml}
       <tr><td style="padding:20px 32px 0 32px;">
         <div style="border-top:1px solid ${COLORS.cardBorder};padding-top:14px;">
-          <h2 style="margin:0 0 8px 0;font-size:13px;color:${COLORS.muted};font-family:${FONT};text-transform:uppercase;letter-spacing:0.03em;">Today</h2>
+          <h2 style="margin:0 0 8px 0;font-size:13px;color:${COLORS.muted};font-family:${FONT};text-transform:uppercase;letter-spacing:0.03em;">Also today</h2>
           ${eventsHtml}
         </div>
       </td></tr>
@@ -384,7 +395,7 @@ function renderText(r: RenderInput): string {
     }
   }
 
-  lines.push("Today:");
+  lines.push("Also today:");
   if (r.events.length) {
     for (const e of r.events) {
       const when = e.all_day ? "All day" : formatTimeIST(e.start_ts);
