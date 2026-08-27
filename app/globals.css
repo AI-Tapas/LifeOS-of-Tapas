@@ -1,38 +1,74 @@
 @import "tailwindcss";
 
 /* ---------------------------------------------------------------------------
-   Design tokens. One small set with real semantic meaning, light and dark both
-   first class. Status colours are for STATE, never decoration:
+   Design tokens: "Slate and Clay Desk". Light is the main theme, dark is the
+   night theme (both first class). One small set with real semantic meaning.
+   Status colours are for STATE, never decoration:
      overdue  - past its date, act now
      today    - due today, the day's real work
      waiting  - sitting with someone else or awaiting Tapas's approval
      ok       - done, confirmed, healthy
-     accent   - interactive brand colour (indigo, matches the app icon)
+     accent   - interactive brand colour (navy, primary actions, active tab)
+     brand    - clay, identity moments only (date kicker, now-line, weekend
+                guard). Never used for the semantic states above, and the
+                weekend guard always stays clay, never the "today" amber.
    Soft variants are chip/backdrop fills for the same states.
 --------------------------------------------------------------------------- */
 :root {
-  --background: #fafaf9;
-  --foreground: #171717;
+  --background: #f8f9fb;
+  --surface: #ffffff;
+  --surface-2: #eff1f5;
+  --border: #e8ebf0;
+  --border-strong: #cbd2db;
 
-  --accent: #4f46e5;
-  --accent-soft: #eef2ff;
-  /* red-700, not red-600: the badge text runs at 11px, and 600 lands at 4.41
-     against its own soft fill, just under the AA floor. */
-  --overdue: #b91c1c;
-  --overdue-soft: #fef2f2;
-  --today: #b45309;
-  --today-soft: #fffbeb;
-  --waiting: #0369a1;
-  --waiting-soft: #f0f9ff;
-  --ok: #047857;
-  --ok-soft: #ecfdf5;
+  --foreground: #1a1a2e;
+  --text-secondary: #4b5563;
+  --text-muted: #6b7280;
+
+  --accent: #1e3a5f;
+  --accent-hover: #2c4f77;
+  --accent-soft: #eff3f8;
+
+  --brand: #a66e5e;
+  --brand-deep: #8f5b4c;
+  --brand-soft: #f6eeea;
+
+  --overdue: #9e4339;
+  --overdue-soft: #f4e3e0;
+  /* today-600/waiting-600/ok-600 as OneGST ships them read ~3.6-3.7:1 against
+     their own -soft fill at small chip text sizes, under the 4.5 AA floor.
+     Darkened in-hue until each clears 4.5:1 against both its soft fill and
+     the page background (see design-slate-clay contrast audit). */
+  --today: #8d6227;
+  --today-soft: #f6ebd8;
+  --waiting: #43698d;
+  --waiting-soft: #dbe6f0;
+  --ok: #37784f;
+  --ok-soft: #e4f1e9;
+
+  --shadow-card: 0 1px 2px rgba(20, 40, 63, 0.05),
+    0 10px 24px -20px rgba(20, 40, 63, 0.18);
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+
   --color-foreground: var(--foreground);
+  --color-secondary: var(--text-secondary);
+  --color-muted: var(--text-muted);
+
   --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
   --color-accent-soft: var(--accent-soft);
+
+  --color-brand: var(--brand);
+  --color-brand-deep: var(--brand-deep);
+  --color-brand-soft: var(--brand-soft);
+
   --color-overdue: var(--overdue);
   --color-overdue-soft: var(--overdue-soft);
   --color-today: var(--today);
@@ -41,33 +77,67 @@
   --color-waiting-soft: var(--waiting-soft);
   --color-ok: var(--ok);
   --color-ok-soft: var(--ok-soft);
-  --font-sans: var(--font-geist-sans);
+
+  --font-sans: var(--font-hanken-grotesk);
+  --font-serif: var(--font-spectral);
   --font-mono: var(--font-geist-mono);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #0f1e30;
+    --surface: #14283f;
+    --surface-2: #1a3554;
+    --border: #20395a;
+    --border-strong: #2c4f77;
 
-    --accent: #818cf8;
-    --accent-soft: rgba(99, 102, 241, 0.16);
-    --overdue: #f87171;
-    --overdue-soft: rgba(248, 113, 113, 0.12);
-    --today: #fbbf24;
-    --today-soft: rgba(251, 191, 36, 0.1);
-    --waiting: #38bdf8;
-    --waiting-soft: rgba(56, 189, 248, 0.1);
-    --ok: #34d399;
-    --ok-soft: rgba(52, 211, 153, 0.1);
+    --foreground: #edf1f6;
+    --text-secondary: #b9cbdf;
+    --text-muted: #7b93ae;
+
+    --accent: #8fb3d4;
+    --accent-soft: rgba(143, 179, 212, 0.16);
+
+    --brand: #c08d7b;
+    /* Lightened from the mockup's clay-deep (#A66E5E, same as light's plain
+       --brand): that value is text on --brand-soft at 4.2:1, under the AA
+       floor. --brand-deep is the "safe for small text" clay in both themes;
+       plain --brand stays for fills, borders and dots (3:1 bar, comfortably
+       met unchanged). */
+    --brand-deep: #c49584;
+    --brand-soft: rgba(166, 110, 94, 0.2);
+
+    --overdue: #d29a8f;
+    --overdue-soft: rgba(158, 67, 57, 0.2);
+    --today: #d9ac64;
+    --today-soft: rgba(160, 111, 44, 0.18);
+    --waiting: #8fb3d4;
+    --waiting-soft: rgba(77, 122, 163, 0.18);
+    --ok: #8fc3a4;
+    --ok-soft: rgba(143, 195, 164, 0.16);
+
+    --shadow-card: 0 1px 0 rgba(4, 10, 18, 0.5),
+      0 12px 28px -18px rgba(4, 10, 18, 0.8);
   }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  font-family: var(--font-hanken-grotesk), system-ui, -apple-system, sans-serif;
   -webkit-tap-highlight-color: transparent;
+}
+
+/* Subtle dusty-blue glow at the top of the night theme, per the mockup. */
+@media (prefers-color-scheme: dark) {
+  body {
+    background-image: radial-gradient(
+      ellipse 90% 40% at 50% -5%,
+      rgba(90, 138, 181, 0.1),
+      transparent
+    );
+    background-repeat: no-repeat;
+  }
 }
 
 /* Hard clamp: the page itself can never scroll or lay out sideways (iOS
@@ -81,24 +151,17 @@ body {
 
 /* Muted text has two levels across the app: text-neutral-500 for secondary
    lines and text-neutral-400 for hints. Tailwind's stock values fail the 4.5
-   AA floor for body text on exactly one surface each, so each theme lifts the
-   one that fails: 400 is too pale on the light surfaces (2.5:1), 500 too dark
-   on the dark ones (3.8:1). Both land around 5:1 after this.
+   AA floor for body text on some surfaces, so both are pinned to the design
+   tokens instead, which already carry AA-checked values for both themes.
    Scoped to elements that carry no explicit per-theme text colour of their
    own, so a deliberate override is never overridden back.
    ponytail: two rules instead of editing ~100 call sites; if a muted token is
    ever introduced, replace these and the call sites together. */
 .text-neutral-400:not([class*="dark:text-"]) {
-  color: #6f6f6f;
+  color: var(--text-muted);
 }
-
-@media (prefers-color-scheme: dark) {
-  .text-neutral-400:not([class*="dark:text-"]) {
-    color: #a3a3a3;
-  }
-  .text-neutral-500:not([class*="dark:text-"]) {
-    color: #8a8a8a;
-  }
+.text-neutral-500:not([class*="dark:text-"]) {
+  color: var(--text-secondary);
 }
 
 /* Accessibility floor: every focusable control shows the same visible ring

@@ -8,15 +8,15 @@
 import { formatDateShortIST, istDayKey } from "@/lib/datetime";
 
 export const inputCls =
-  "w-full rounded-lg border border-neutral-300 bg-white px-3 py-2.5 text-base dark:border-neutral-700 dark:bg-neutral-900";
+  "w-full rounded-lg border border-border-strong bg-surface px-3 py-2.5 text-base";
 
 export const btnPrimary =
-  "press min-h-11 rounded-xl bg-accent px-4 py-2 text-sm font-medium text-white active:opacity-90 disabled:opacity-50 dark:text-neutral-950";
+  "press min-h-11 rounded-xl bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent-hover active:opacity-90 disabled:opacity-50 dark:text-neutral-950";
 export const btnGhost =
-  "press min-h-11 rounded-xl border border-neutral-300 px-4 py-2 text-sm font-medium active:bg-neutral-100 disabled:opacity-50 dark:border-neutral-700 dark:active:bg-neutral-900";
+  "press min-h-11 rounded-xl border border-border-strong px-4 py-2 text-sm font-medium active:bg-surface-2 disabled:opacity-50";
 // Small in-card action, still a 44px target.
 export const btnSmall =
-  "press min-h-11 rounded-lg border border-neutral-300 px-3 text-xs font-medium disabled:opacity-50 dark:border-neutral-700";
+  "press min-h-11 rounded-lg border border-border-strong px-3 text-xs font-medium disabled:opacity-50";
 
 export function Card({
   children,
@@ -28,7 +28,7 @@ export function Card({
   return (
     <div
       className={
-        "rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm dark:border-neutral-800 dark:bg-neutral-900 " +
+        "rounded-2xl border border-border bg-surface p-4 shadow-[var(--shadow-card)] " +
         className
       }
     >
@@ -49,8 +49,10 @@ export function PageHeader({
   return (
     <div className="mb-4 flex items-start justify-between gap-3">
       <div>
-        <h1 className="text-[22px] font-bold tracking-tight">{title}</h1>
-        {subtitle && <p className="mt-0.5 text-sm text-neutral-500">{subtitle}</p>}
+        <h1 className="font-serif text-[30px] font-medium leading-tight tracking-tight text-foreground">
+          {title}
+        </h1>
+        {subtitle && <p className="mt-0.5 text-sm text-secondary">{subtitle}</p>}
       </div>
       {action}
     </div>
@@ -64,14 +66,14 @@ export function SectionLabel({
   className = "",
 }: {
   children: React.ReactNode;
-  tone?: string; // e.g. "text-overdue"; default neutral
+  tone?: string; // e.g. "text-overdue"; default muted
   className?: string;
 }) {
   return (
     <h3
       className={
-        "text-[11px] font-semibold uppercase tracking-wider " +
-        (tone || "text-neutral-500") +
+        "text-[11px] font-bold uppercase tracking-wider " +
+        (tone || "text-muted") +
         " " +
         className
       }
@@ -97,7 +99,7 @@ export function DueBadge({
   if (!dueTs) {
     if (!flagMissing) return null;
     return (
-      <span className="shrink-0 rounded-full bg-accent-soft px-2 py-0.5 text-[11px] font-medium text-accent">
+      <span className="shrink-0 rounded-full bg-waiting-soft px-2.5 py-1 text-[11px] font-semibold text-waiting">
         no deadline
       </span>
     );
@@ -106,20 +108,20 @@ export function DueBadge({
   const today = istDayKey(dueTs) === istDayKey(nowIso);
   if (overdue) {
     return (
-      <span className="shrink-0 rounded-full bg-overdue-soft px-2 py-0.5 text-[11px] font-medium text-overdue">
+      <span className="shrink-0 rounded-full bg-overdue-soft px-2.5 py-1 text-[11px] font-semibold text-overdue">
         overdue
       </span>
     );
   }
   if (today) {
     return (
-      <span className="shrink-0 rounded-full bg-today-soft px-2 py-0.5 text-[11px] font-medium text-today">
+      <span className="shrink-0 rounded-full bg-today-soft px-2.5 py-1 text-[11px] font-semibold text-today">
         today
       </span>
     );
   }
   return (
-    <span className="shrink-0 text-[11px] text-neutral-500">
+    <span className="shrink-0 text-[11px] text-secondary">
       {formatDateShortIST(dueTs)}
     </span>
   );
@@ -134,7 +136,7 @@ export function Field({
 }) {
   return (
     <label className="block space-y-1">
-      <span className="text-xs font-medium text-neutral-500">{label}</span>
+      <span className="text-xs font-medium text-secondary">{label}</span>
       {children}
     </label>
   );
@@ -150,9 +152,9 @@ export function Empty({
   children: React.ReactNode;
 }) {
   return (
-    <div className="rounded-xl border border-dashed border-neutral-300 p-6 text-center dark:border-neutral-700">
+    <div className="rounded-xl border border-dashed border-border-strong p-6 text-center">
       {title && <p className="text-sm font-semibold">{title}</p>}
-      <p className={"text-sm text-neutral-500 " + (title ? "mt-1" : "")}>{children}</p>
+      <p className={"text-sm text-secondary " + (title ? "mt-1" : "")}>{children}</p>
     </div>
   );
 }
@@ -160,7 +162,7 @@ export function Empty({
 // Sticky footer for drawer forms: cancels the drawer's p-4 so it sits flush,
 // and keeps its own padding above the home-indicator safe area.
 export const drawerFooterCls =
-  "sticky bottom-0 z-10 -mx-4 -mb-[max(1rem,env(safe-area-inset-bottom))] mt-3 border-t border-neutral-100 bg-white px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] dark:border-neutral-900 dark:bg-neutral-950";
+  "sticky bottom-0 z-10 -mx-4 -mb-[max(1rem,env(safe-area-inset-bottom))] mt-3 border-t border-border bg-surface px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]";
 
 // Toggle chips for reminder offsets (days before due). Fixed choices.
 const REMIND_CHOICES = [0, 1, 3, 7, 14, 28];
@@ -188,7 +190,7 @@ export function RemindChips({
               "press min-h-11 rounded-full border px-3.5 text-sm " +
               (selected
                 ? "border-accent bg-accent text-white dark:text-neutral-950"
-                : "border-neutral-300 text-neutral-600 dark:border-neutral-700 dark:text-neutral-300")
+                : "border-border-strong text-secondary")
             }
           >
             {d}
@@ -211,12 +213,12 @@ export function Drawer({
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center sm:items-center">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="rise-in relative z-50 max-h-[85vh] w-full max-w-md overflow-y-auto rounded-t-2xl border border-neutral-200 bg-white p-4 pb-[max(1rem,env(safe-area-inset-bottom))] dark:border-neutral-800 dark:bg-neutral-950 sm:rounded-2xl">
-        <div className="sticky top-0 z-10 -mx-4 -mt-4 mb-2 flex items-center justify-between border-b border-neutral-100 bg-white px-4 py-3 dark:border-neutral-900 dark:bg-neutral-950">
+      <div className="rise-in relative z-50 max-h-[85vh] w-full max-w-md overflow-y-auto rounded-t-2xl border border-border bg-surface p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:rounded-2xl">
+        <div className="sticky top-0 z-10 -mx-4 -mt-4 mb-2 flex items-center justify-between border-b border-border bg-surface px-4 py-3">
           <h2 className="text-base font-semibold">{title}</h2>
           <button
             onClick={onClose}
-            className="-m-2 min-h-11 p-2 text-sm font-medium text-neutral-500 dark:text-neutral-400"
+            className="-m-2 min-h-11 p-2 text-sm font-medium text-muted"
             aria-label="Close"
           >
             Close

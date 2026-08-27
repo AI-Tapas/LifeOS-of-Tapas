@@ -1,11 +1,21 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist_Mono, Hanken_Grotesk, Spectral } from "next/font/google";
 import "./globals.css";
 import SwRegister from "@/components/sw-register";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// Body and UI text. Variable font: the weights it's used at (400/500/600/700)
+// come from the classes applied in markup, not a fixed weight list here.
+const hankenGrotesk = Hanken_Grotesk({
+  variable: "--font-hanken-grotesk",
   subsets: ["latin"],
+});
+
+// Headings only: page titles and band headers. Static font, so the weights
+// actually used (500 for titles, 600 for occasional emphasis) must be listed.
+const spectral = Spectral({
+  variable: "--font-spectral",
+  subsets: ["latin"],
+  weight: ["400", "500", "600"],
 });
 
 const geistMono = Geist_Mono({
@@ -29,7 +39,10 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0f172a",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f8f9fb" },
+    { media: "(prefers-color-scheme: dark)", color: "#0f1e30" },
+  ],
   width: "device-width",
   initialScale: 1,
 };
@@ -42,7 +55,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${hankenGrotesk.variable} ${spectral.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full">
         {children}
