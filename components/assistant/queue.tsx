@@ -59,7 +59,7 @@ function RecipientLine({ r }: { r: RecipientFlag }) {
       {r.flags.map((f) => (
         <span
           key={f}
-          className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 font-sans text-[11px] font-medium text-amber-900 dark:bg-amber-900/50 dark:text-amber-200"
+          className="ml-2 rounded bg-today-soft px-1.5 py-0.5 font-sans text-[11px] font-medium text-today"
         >
           {f}
         </span>
@@ -83,19 +83,19 @@ export function PendingCard({ item }: { item: PendingView }) {
     });
 
   return (
-    <div className="rounded-2xl border border-waiting/30 bg-white p-4 shadow-sm dark:bg-neutral-900">
+    <div className="rounded-2xl border border-waiting/40 bg-surface p-4 shadow-[var(--shadow-card)]">
       <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-waiting">
         <span className="pulse-dot inline-block h-2 w-2 rounded-full bg-waiting" aria-hidden />
         {item.kind === "send_email" ? "Email awaiting your approval" : "Invite awaiting your approval"}
       </p>
       <p className="mt-2 text-sm">
-        <span className="text-neutral-500">From account:</span>{" "}
+        <span className="text-secondary">From account:</span>{" "}
         <span className="font-medium">{item.account_label}</span>
       </p>
 
       {item.to && (
         <div className="mt-2 text-sm">
-          <p className="text-neutral-500">To:</p>
+          <p className="text-secondary">To:</p>
           <ul className="mt-0.5 space-y-0.5">
             {item.to.map((r) => (
               <RecipientLine key={r.email} r={r} />
@@ -105,7 +105,7 @@ export function PendingCard({ item }: { item: PendingView }) {
       )}
       {item.cc && item.cc.length > 0 && (
         <div className="mt-2 text-sm">
-          <p className="text-neutral-500">Cc:</p>
+          <p className="text-secondary">Cc:</p>
           <ul className="mt-0.5 space-y-0.5">
             {item.cc.map((r) => (
               <RecipientLine key={r.email} r={r} />
@@ -115,7 +115,7 @@ export function PendingCard({ item }: { item: PendingView }) {
       )}
       {item.attendees && (
         <div className="mt-2 text-sm">
-          <p className="text-neutral-500">Invitees:</p>
+          <p className="text-secondary">Invitees:</p>
           <ul className="mt-0.5 space-y-0.5">
             {item.attendees.map((r) => (
               <RecipientLine key={r.email} r={r} />
@@ -129,13 +129,13 @@ export function PendingCard({ item }: { item: PendingView }) {
         <p className="mt-2 text-sm font-medium">Subject: {item.subject}</p>
       )}
       {item.body && (
-        <pre className="mt-2 max-h-72 overflow-y-auto whitespace-pre-wrap rounded-xl bg-neutral-50 p-3 font-sans text-sm dark:bg-neutral-950">
+        <pre className="mt-2 max-h-72 overflow-y-auto whitespace-pre-wrap rounded-xl bg-surface-2 p-3 font-sans text-sm">
           {item.body}
         </pre>
       )}
-      <p className="mt-2 text-xs text-neutral-400">Proposed {item.created_at_label}</p>
+      <p className="mt-2 text-xs text-muted">Proposed {item.created_at_label}</p>
 
-      {message && <p className="mt-2 text-sm text-red-600">{message}</p>}
+      {message && <p className="mt-2 text-sm text-overdue">{message}</p>}
 
       <div className="mt-3 flex flex-wrap gap-2">
         {!armed ? (
@@ -165,7 +165,7 @@ export function PendingCard({ item }: { item: PendingView }) {
           type="button"
           onClick={() => act(rejectActionAction)}
           disabled={pending}
-          className="press min-h-11 rounded-xl border border-neutral-300 px-4 py-2 text-sm font-medium disabled:opacity-50 dark:border-neutral-700"
+          className="press min-h-11 rounded-xl border border-border-strong px-4 py-2 text-sm font-medium disabled:opacity-50"
         >
           Reject
         </button>
@@ -173,7 +173,7 @@ export function PendingCard({ item }: { item: PendingView }) {
           <button
             type="button"
             onClick={() => setArmed(false)}
-            className="press min-h-11 px-2 text-sm text-neutral-500"
+            className="press min-h-11 px-2 text-sm text-secondary"
           >
             Cancel
           </button>
@@ -193,18 +193,18 @@ export function HistoryRow({ item }: { item: HistoryView }) {
       ? "text-ok"
       : item.status === "failed"
         ? "text-overdue"
-        : "text-neutral-500";
+        : "text-secondary";
 
   return (
     <li className="flex items-start justify-between gap-3 py-3 first:pt-0 last:pb-0">
       <div className="min-w-0">
         <p className="truncate text-sm font-medium">{item.title || item.kind}</p>
-        <p className="text-xs text-neutral-500">
+        <p className="text-xs text-secondary">
           {item.kind} <span className={statusColor}>{undone ? "undone" : item.status}</span>{" "}
           {item.when_label}
         </p>
-        {item.error && <p className="text-xs text-red-600">{item.error}</p>}
-        {message && <p className="text-xs text-red-600">{message}</p>}
+        {item.error && <p className="text-xs text-overdue">{item.error}</p>}
+        {message && <p className="text-xs text-overdue">{message}</p>}
       </div>
       {item.undoable && !undone && (
         <button
@@ -217,7 +217,7 @@ export function HistoryRow({ item }: { item: HistoryView }) {
               else setMessage(r.message ?? "Undo failed.");
             })
           }
-          className="press min-h-11 shrink-0 rounded-lg border border-neutral-300 px-3 text-xs font-medium disabled:opacity-50 dark:border-neutral-700"
+          className="press min-h-11 shrink-0 rounded-lg border border-border-strong px-3 text-xs font-medium disabled:opacity-50"
         >
           {pending ? "Undoing..." : "Undo"}
         </button>
@@ -228,17 +228,17 @@ export function HistoryRow({ item }: { item: HistoryView }) {
 
 export function AuditList({ rows }: { rows: AuditView[] }) {
   if (!rows.length) {
-    return <p className="text-sm text-neutral-500">Nothing logged yet.</p>;
+    return <p className="text-sm text-secondary">Nothing logged yet.</p>;
   }
   return (
-    <ul className="divide-y divide-neutral-200 dark:divide-neutral-800">
+    <ul className="divide-y divide-border">
       {rows.map((r) => (
         <li key={r.id} className="py-2 first:pt-0 last:pb-0">
           <p className="text-sm">
             <span className="font-medium">{r.action}</span>{" "}
-            <span className="text-neutral-500">on {r.entity}</span>
+            <span className="text-secondary">on {r.entity}</span>
           </p>
-          <p className="text-xs text-neutral-500">
+          <p className="text-xs text-secondary">
             {r.actor} at {r.ts_label}
             {r.detail ? `, ${r.detail}` : ""}
           </p>
