@@ -200,6 +200,43 @@ body {
   color: var(--text-secondary);
 }
 
+/* Print: the bill's "PDF" path. The browser's own Save as PDF does the work,
+   so no PDF library ships in this app. Everything on the page is hidden and
+   only .print-sheet is made visible again, which means the shell (bottom nav,
+   re-auth banner, quick-add button) needs no knowledge of printing.
+   Colours are forced to ink on white: the night theme must not print grey. */
+@media print {
+  @page {
+    margin: 15mm;
+  }
+  body * {
+    visibility: hidden;
+  }
+  .print-sheet,
+  .print-sheet * {
+    visibility: visible;
+  }
+  .print-sheet {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    border: 0 !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+  .print-sheet * {
+    color: #000000 !important;
+    background: transparent !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+}
+
 /* Accessibility floor: every focusable control shows the same visible ring
    when reached by keyboard, in both themes. */
 :focus-visible {

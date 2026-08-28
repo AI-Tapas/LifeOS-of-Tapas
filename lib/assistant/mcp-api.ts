@@ -15,7 +15,8 @@ import { serviceActor } from "@/lib/assistant/actor";
 import { executeToolCall } from "@/lib/assistant/execute";
 import { MCP_READ_TOOLS, mcpWriteTools, type ToolDef } from "@/lib/assistant/tools";
 import { buildAppContext } from "@/lib/assistant/context";
-import { formatDateIST, formatDateTimeIST } from "@/lib/datetime";
+import { civilKey, civilToday, formatDateIST, formatDateTimeIST } from "@/lib/datetime";
+import { parseLegs, parseLineItems } from "@/lib/trips/bill";
 import { fenceUntrusted } from "@/lib/assistant/prompt";
 
 export const READ_TOOL_NAMES = MCP_READ_TOOLS;
@@ -116,6 +117,38 @@ export const READ_TOOL_SCHEMAS: Record<string, Record<string, unknown>> = {
     required: [],
     additionalProperties: false,
   },
+  lifeos_list_trips: {
+    type: "object",
+    properties: {
+      purpose: {
+        type: "string",
+        enum: ["aica", "conference", "leisure", "other"],
+        description: "Restrict to one kind of trip.",
+      },
+      upcoming_only: {
+        type: "boolean",
+        description: "Only trips that have not finished yet. Defaults to false.",
+      },
+      limit: { type: "integer", description: "1 to 100, default 25." },
+      offset: { type: "integer", description: "For paging, default 0." },
+    },
+    required: [],
+    additionalProperties: false,
+  },
+  lifeos_list_bills: {
+    type: "object",
+    properties: {
+      status: {
+        type: "string",
+        enum: ["draft", "sent", "paid"],
+        description: "Restrict to bills in one state.",
+      },
+      limit: { type: "integer", description: "1 to 100, default 25." },
+      offset: { type: "integer", description: "For paging, default 0." },
+    },
+    required: [],
+    additionalProperties: false,
+  },
   lifeos_list_action_history: {
     type: "object",
     properties: {
@@ -153,6 +186,10 @@ export const READ_TOOL_DESCRIPTIONS: Record<string, string> = {
     "List recorded investments and deposits, with their value and any maturity or review date.",
   lifeos_list_projects:
     "List projects and the work stream each belongs to, for filing tasks under one.",
+  lifeos_list_trips:
+    "List trips with their purpose, dates, status and how much billable expense each carries, plus the legs logged against them.",
+  lifeos_list_bills:
+    "List reimbursement bills with their number, date, payer, amount and status. Read-only: no connector can create a bill beyond a draft, or mark one sent or paid.",
   lifeos_list_action_history:
     "List assistant actions that already ran, with their ids, so one can be undone with lifeos_undo_action.",
   lifeos_list_pending_actions:
@@ -379,6 +416,80 @@ export async function runReadTool(
       status: p.status,
       work_stream: (p.work_streams as { name: string } | null)?.name ?? null,
       notes: p.notes,
+    }));
+    return paginate(items, count ?? items.length, limit, offset);
+  }
+
+  if (name === "lifeos_list_trips") {
+    let q = supabase
+      .from("trips")
+      .select(
+        "id, title, purpose, status, start_date, end_date, cities, legs, billable_to, notes, work_streams(name), trip_expenses(amount, billable)",
+        { count: "exact" }
+      )
+      .order("start_date", { ascending: false, nullsFirst: false })
+      .range(offset, offset + limit - 1);
+    if (typeof input.purpose === "string" && input.purpose) {
+      q = q.eq("purpose", input.purpose as never);
+    }
+    if (input.upcoming_only === true) {
+      q = q.or(`end_date.gte.${civilKey(civilToday())},end_date.is.null`);
+    }
+    const { data, count, error } = await q;
+    if (error) throw new Error(error.message);
+    const items = (data ?? []).map((t) => {
+      const expenses = (t.trip_expenses ?? []) as {
+        amount: number;
+        billable: boolean;
+      }[];
+      return {
+        id: t.id,
+        title: t.title,
+        purpose: t.purpose,
+        status: t.status,
+        start_date: t.start_date,
+        end_date: t.end_date,
+        cities: t.cities,
+        legs: parseLegs(t.legs),
+        work_stream: (t.work_streams as { name: string } | null)?.name ?? null,
+        billable_to: t.billable_to,
+        notes: t.notes,
+        billable_total: expenses
+          .filter((e) => e.billable)
+          .reduce((sum, e) => sum + Number(e.amount), 0),
+        expense_count: expenses.length,
+      };
+    });
+    return paginate(items, count ?? items.length, limit, offset);
+  }
+
+  if (name === "lifeos_list_bills") {
+    let q = supabase
+      .from("bills")
+      .select(
+        "id, number, date, bill_to, bill_to_address, amount, status, line_items, trip_id, trips(title)",
+        { count: "exact" }
+      )
+      .order("date", { ascending: false })
+      .range(offset, offset + limit - 1);
+    if (typeof input.status === "string" && input.status) {
+      q = q.eq("status", input.status as never);
+    }
+    const { data, count, error } = await q;
+    if (error) throw new Error(error.message);
+    const items = (data ?? []).map((b) => ({
+      id: b.id,
+      number: b.number,
+      date: formatDateIST(`${b.date}T00:00:00+05:30`),
+      date_raw: b.date,
+      bill_to: b.bill_to,
+      bill_to_address: b.bill_to_address,
+      amount: Number(b.amount),
+      status: b.status,
+      line_items: parseLineItems(b.line_items),
+      trip_id: b.trip_id,
+      trip: (b.trips as { title: string } | null)?.title ?? null,
+      note: "Bills are printed and sent by Tapas himself. No connector can send one or change its status.",
     }));
     return paginate(items, count ?? items.length, limit, offset);
   }

@@ -17,6 +17,13 @@ import NextUp, { type NextUpBands } from "@/components/home/next-up";
 import Timeline from "@/components/home/timeline";
 import { PendingCard } from "@/components/assistant/queue";
 import MotionDemo from "./motion-demo";
+import TripsView, { type TripRow } from "@/components/trips/trips-view";
+import TripDetail, {
+  type BillSummary,
+  type ExpenseRow,
+} from "@/components/trips/trip-detail";
+import BillSheet from "@/components/trips/bill-sheet";
+import { deriveLineItems, parseLegs } from "@/lib/trips/bill";
 
 // The timeline demo hangs off the real clock, so this page must not be
 // prerendered at build time.
@@ -171,6 +178,98 @@ const pendingItem = {
   cc: [],
 };
 
+// --- Travel Desk fixtures (M6) ---------------------------------------------
+const trips: TripRow[] = [
+  {
+    id: "t1",
+    purpose: "aica",
+    title: "AICA session, Rajkot branch",
+    work_stream_id: "w1",
+    start_date: "2026-09-03",
+    end_date: "2026-09-04",
+    cities: ["Rajkot"],
+    status: "planned",
+    billable_to: "ICAI Rajkot Branch",
+    notes: null,
+    stream_name: "ICAI",
+    billable_total: 6550,
+    expense_count: 5,
+    bill_count: 0,
+  },
+  {
+    id: "t2",
+    purpose: "aica",
+    title: "AICA session, Surat branch",
+    work_stream_id: "w1",
+    start_date: "2026-09-07",
+    end_date: "2026-09-08",
+    cities: ["Surat"],
+    status: "planned",
+    billable_to: "ICAI Surat Branch",
+    notes: null,
+    stream_name: "ICAI",
+    billable_total: 0,
+    expense_count: 0,
+    bill_count: 0,
+  },
+  {
+    id: "t3",
+    purpose: "conference",
+    title: "GST conclave, Mumbai",
+    work_stream_id: "w2",
+    start_date: "2026-10-15",
+    end_date: "2026-10-16",
+    cities: ["Mumbai"],
+    status: "planned",
+    billable_to: null,
+    notes: null,
+    stream_name: "Tax Strategia",
+    billable_total: 0,
+    expense_count: 0,
+    bill_count: 0,
+  },
+  {
+    id: "t4",
+    purpose: "aica",
+    title: "AICA session, Bhavnagar branch",
+    work_stream_id: "w1",
+    start_date: "2026-05-17",
+    end_date: "2026-05-19",
+    cities: ["Bhavnagar"],
+    status: "billed",
+    billable_to: "ICAI Bhavnagar Branch",
+    notes: null,
+    stream_name: "ICAI",
+    billable_total: 6550,
+    expense_count: 5,
+    bill_count: 1,
+  },
+];
+
+const tripExpenses: ExpenseRow[] = [
+  { id: "x1", category: "transport", amount: 1240, date: "2026-05-17", billable: true, receipt_ref: "physical file" },
+  { id: "x2", category: "transport", amount: 1310, date: "2026-05-19", billable: true, receipt_ref: null },
+  { id: "x3", category: "hotel", amount: 3200, date: "2026-05-17", billable: true, receipt_ref: "May folder" },
+  { id: "x4", category: "per_diem", amount: 800, date: "2026-05-18", billable: true, receipt_ref: null },
+  { id: "x5", category: "other", amount: 450, date: "2026-05-18", billable: false, receipt_ref: null },
+];
+
+const tripBills: BillSummary[] = [
+  {
+    id: "b1",
+    number: "AICA/2026-27/001",
+    date: "2026-05-20",
+    bill_to: "institute",
+    amount: 6550,
+    status: "draft",
+  },
+];
+
+const tripLegs = parseLegs([
+  { from: "Ahmedabad", to: "Bhavnagar", date: "2026-05-17", mode: "vande_bharat", cost: 1240 },
+  { from: "Bhavnagar", to: "Ahmedabad", date: "2026-05-19", mode: "tejas", cost: 1310 },
+]);
+
 export default async function DevPreviewPage() {
   // Hidden in production unless the local-only harness flag is set (the
   // sandbox's dev server cannot compile CSS reliably, so visual checks run
@@ -280,6 +379,57 @@ export default async function DevPreviewPage() {
         workStreams={workStreams}
         nowIso="2026-08-25T06:00:00Z"
       />
+      <hr className="my-8" />
+      <p className="mb-4 rounded bg-amber-100 p-1 text-center text-xs">dev preview: trips overview</p>
+      <TripsView trips={trips} workStreams={workStreams} todayKey="2026-08-25" />
+
+      <hr className="my-8" />
+      <p className="mb-4 rounded bg-amber-100 p-1 text-center text-xs">dev preview: trip detail</p>
+      <TripDetail
+        trip={{
+          id: "t4",
+          purpose: "aica",
+          title: "AICA session, Bhavnagar branch",
+          work_stream_id: "w1",
+          start_date: "2026-05-17",
+          end_date: "2026-05-19",
+          cities: ["Bhavnagar"],
+          status: "done",
+          billable_to: "ICAI Bhavnagar Branch",
+          notes: null,
+        }}
+        streamName="ICAI"
+        legs={tripLegs}
+        expenses={tripExpenses}
+        bills={tripBills}
+        workStreams={workStreams}
+        suggestedNumber="AICA/2026-27/002"
+        todayKey="2026-08-25"
+      />
+
+      <hr className="my-8" />
+      <p className="mb-4 rounded bg-amber-100 p-1 text-center text-xs">dev preview: bill print view</p>
+      <BillSheet
+        bill={{
+          number: "AICA/2026-27/001",
+          date: "2026-05-20",
+          bill_to: "institute",
+          bill_to_address: "The Chairman\nICAI Bhavnagar Branch\nBhavnagar",
+          amount: 6550,
+          line_items: deriveLineItems(tripExpenses),
+          trip_title: "AICA session, Bhavnagar branch",
+          trip_start: "2026-05-17",
+          trip_end: "2026-05-19",
+        }}
+        letterhead={{
+          name: "Letterhead name",
+          address: "Office address line one\nAhmedabad 380015",
+          email: "name@example.com",
+          phone: "+91 00000 00000",
+          footer: "Bank details go here.",
+        }}
+      />
+
       </div>
       <Nav queueCount={2} />
     </div>

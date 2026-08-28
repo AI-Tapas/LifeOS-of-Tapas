@@ -456,22 +456,105 @@ export const TOOLS: ToolDef[] = [
     input_schema: schema({ query: str("What to look up.") }),
   },
   {
+    name: "create_trip",
+    bucket: "autonomous",
+    description:
+      "Create a trip: an AICA session, a conference, leisure or other travel. Expenses and the reimbursement bill hang off it.",
+    input_schema: schema({
+      purpose: enumOf(
+        ["aica", "conference", "leisure", "other"],
+        "What the trip is for."
+      ),
+      title: str("Short trip title, e.g. AICA session, Rajkot branch."),
+      work_stream: strOrNull(
+        "Work stream name, e.g. ICAI, Tax Strategia, Personal. Omit to file it under Personal."
+      ),
+      start_date: { ...strOrNull(DATE_DESC) },
+      end_date: { ...strOrNull(DATE_DESC) },
+      cities: opt({
+        type: "array",
+        items: { type: "string" },
+        description: "Cities the trip covers, in order.",
+      }),
+      billable_to: strOrNull(
+        "Who reimburses it, e.g. ICAI Rajkot branch. Omit when he bears the cost."
+      ),
+      notes: strOrNull("Anything worth remembering about the trip."),
+    }),
+  },
+  {
+    name: "update_trip",
+    bucket: "autonomous",
+    description:
+      "Update a trip: its title, dates, who reimburses it, or where it sits on the trail (planned, underway, done, billed). Undo restores the previous values.",
+    input_schema: schema({
+      trip_id: str("The trip id from lifeos_list_trips."),
+      title: strOrNull("New title. Omit to keep the current one."),
+      status: enumOrNull(
+        ["planned", "booked", "underway", "done", "billed", "cancelled"],
+        "Where the trip sits. Omit to keep the current one."
+      ),
+      start_date: { ...strOrNull(DATE_DESC + " Omit to keep.") },
+      end_date: { ...strOrNull(DATE_DESC + " Omit to keep.") },
+      billable_to: strOrNull("Who reimburses it. Omit to keep."),
+      notes: strOrNull("New notes. Omit to keep."),
+    }),
+  },
+  {
     name: "log_trip_leg",
-    bucket: "stub",
-    description: "Log a travel leg of a trip. Arrives with the Trips milestone.",
-    input_schema: schema({ summary: str("What to log.") }),
+    bucket: "autonomous",
+    description:
+      "Add one journey to a trip: from, to, date and mode. Tapas's transport preference runs Vande Bharat, then Tejas, then AC sleeper, then cab; suggest in that order unless he says otherwise. Undo removes the leg again.",
+    input_schema: schema({
+      trip_id: str("The trip id from lifeos_list_trips."),
+      from_city: str("Where the journey starts."),
+      to_city: str("Where the journey ends."),
+      date: str("Journey date as YYYY-MM-DD (IST)."),
+      mode: enumOf(
+        ["vande_bharat", "tejas", "ac_sleeper", "cab", "flight", "other"],
+        "How he travels, in his order of preference."
+      ),
+      cost: numOrNull("Fare in rupees. Omit when it is not known yet."),
+    }),
   },
   {
     name: "add_trip_expense",
-    bucket: "stub",
-    description: "Record a trip expense. Arrives with the Trips milestone.",
-    input_schema: schema({ summary: str("What to record.") }),
+    bucket: "autonomous",
+    description:
+      "Record one expense against a trip. Mark it billable when the institute or client reimburses it; billable expenses are what the bill is built from. Undo removes it.",
+    input_schema: schema({
+      trip_id: str("The trip id from lifeos_list_trips."),
+      category: enumOf(
+        ["transport", "hotel", "per_diem", "other"],
+        "What kind of expense."
+      ),
+      amount: { type: "number", description: "Amount in rupees." },
+      date: str("Date of the expense as YYYY-MM-DD (IST)."),
+      billable: boolOrNull("True when it is reimbursed. Defaults to false."),
+      receipt_ref: strOrNull(
+        "Where the receipt lives, as a short note, e.g. 'physical file' or a link he gave. Never the document itself."
+      ),
+    }),
   },
   {
     name: "create_bill_draft",
-    bucket: "stub",
-    description: "Draft a bill. Arrives with the Trips milestone.",
-    input_schema: schema({ summary: str("What to draft.") }),
+    bucket: "autonomous",
+    description:
+      "Draft a reimbursement bill from a trip's billable expenses. It is ALWAYS a draft: nothing is sent, and no tool can mark a bill sent or paid. Tapas prints it and sends it himself.",
+    input_schema: schema({
+      trip_id: str("The trip id from lifeos_list_trips."),
+      bill_to: enumOrNull(
+        ["institute", "client", "other"],
+        "Who is billed. Defaults to institute."
+      ),
+      bill_to_address: strOrNull(
+        "The payer's name and address as it should print. Omit to use the trip's billable_to."
+      ),
+      number: strOrNull(
+        "Bill number. Omit to take the next one in the financial year series."
+      ),
+      date: { ...strOrNull(DATE_DESC + " Omit for today.") },
+    }),
   },
 ];
 
@@ -495,9 +578,6 @@ export function toolByName(name: string): ToolDef | undefined {
 
 export const STUB_REPLIES: Record<string, string> = {
   lookup_gst_wiki: "The GST wiki is not connected yet.",
-  log_trip_leg: "Trip logging arrives with the Trips milestone.",
-  add_trip_expense: "Trip expenses arrive with the Trips milestone.",
-  create_bill_draft: "Bill drafting arrives with the Trips milestone.",
 };
 
 // Belt for attack A3: even if a model smuggles an attendees-like key into a
@@ -588,6 +668,8 @@ export const MCP_READ_TOOLS = [
   "lifeos_list_obligations",
   "lifeos_list_finance_items",
   "lifeos_list_projects",
+  "lifeos_list_trips",
+  "lifeos_list_bills",
   "lifeos_list_pending_actions",
   "lifeos_list_action_history",
 ] as const;

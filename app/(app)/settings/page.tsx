@@ -10,6 +10,7 @@ import PersonaPanel, {
   type PersonaVersionView,
 } from "@/components/settings/persona-panel";
 import ModelsPanel from "@/components/settings/models-panel";
+import LetterheadPanel from "@/components/settings/letterhead-panel";
 import ConnectionsPanel, {
   type ConnectionView,
 } from "@/components/settings/connections-panel";
@@ -95,6 +96,7 @@ export default async function SettingsPage({
     { data: modelSettings },
     { data: mcpClients },
     { data: mcpGrants },
+    { data: billingProfile },
   ] =
     await Promise.all([
       supabase
@@ -127,6 +129,10 @@ export default async function SettingsPage({
         .from("mcp_grants")
         .select("client_id, kind, expires_at, revoked_at")
         .is("revoked_at", null),
+      supabase
+        .from("billing_profile")
+        .select("name, address, email, phone, footer, bill_prefix")
+        .maybeSingle(),
     ]);
 
   // Shaping the rows for display is where a render throws if any value is not
@@ -226,6 +232,24 @@ export default async function SettingsPage({
           scan={{
             provider: modelSettings?.scan_provider ?? null,
             model: modelSettings?.scan_model ?? null,
+          }}
+        />
+      </div>
+
+      <h2 className="mt-8 text-base font-semibold tracking-tight">Bill letterhead</h2>
+      <p className="mt-1 text-sm text-secondary">
+        Printed at the top of every reimbursement bill, and the prefix of the
+        bill number series.
+      </p>
+      <div className="mt-2">
+        <LetterheadPanel
+          profile={{
+            name: billingProfile?.name ?? "",
+            address: billingProfile?.address ?? "",
+            email: billingProfile?.email ?? "",
+            phone: billingProfile?.phone ?? "",
+            footer: billingProfile?.footer ?? "",
+            bill_prefix: billingProfile?.bill_prefix ?? "AICA",
           }}
         />
       </div>
