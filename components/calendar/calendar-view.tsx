@@ -267,7 +267,11 @@ export default function CalendarView({
         </p>
       )}
 
-      <div className="mt-4">
+      {/* Keyed so a week step or a view switch remounts the panel and replays
+          the ease: without the key React reuses the same elements and the new
+          week simply appears. The drawers below are this div's siblings, so
+          the transform never becomes an ancestor of a fixed element. */}
+      <div key={view + anchorKey} className="rise-in mt-4">
         {view === "month" && (
           <MonthGrid
             anchor={anchor}

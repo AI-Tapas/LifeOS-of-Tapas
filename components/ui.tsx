@@ -289,7 +289,10 @@ export function Drawer({
 }) {
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center sm:items-center">
-      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div
+        className="fade-in absolute inset-0 bg-black/40"
+        onClick={onClose}
+      />
       <div className="rise-in relative z-50 max-h-[85vh] w-full max-w-md overflow-y-auto rounded-t-2xl border border-border bg-surface p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:rounded-2xl">
         <div className="sticky top-0 z-10 -mx-4 -mt-4 mb-2 flex items-center justify-between border-b border-border bg-surface px-4 py-3">
           <h2 className="text-base font-semibold">{title}</h2>

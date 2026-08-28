@@ -267,6 +267,19 @@ body {
   .rise-in {
     animation: rise-in var(--dur) var(--ease);
   }
+  /* The drawer's dark backdrop, so the room dims with the sheet rather than
+     the light going out a beat before it arrives. */
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  .fade-in {
+    animation: fade-in var(--dur) var(--ease);
+  }
   @keyframes pulse-dot {
     0%,
     100% {
