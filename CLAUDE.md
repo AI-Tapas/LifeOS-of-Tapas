@@ -180,6 +180,18 @@ and email-verification rules live in lib/accounts.ts.
   a scanned message id; capped 20 proposals/account/day; deduped on
   external_ref. Tasks land source=email, and context rendering wraps
   source=email rows in the same untrusted framing.
+- Scan feedback loop (found live 31 Aug 2026, fixed; do not regress): the
+  7 AM brief is sent from ca_tapasnr to itself, so it lands in the inbox the
+  3 AM scan reads. The scanner re-filed the tasks the brief was reporting,
+  one fresh copy per day, because each morning is a new message id and the
+  external_ref dedup only catches the same message twice. lib/assistant/
+  scan-filters.ts holds both belts, pure and tested in scripts/m5.test.ts:
+  isAppGeneratedMail drops anything carrying the X-Life-OS header the brief
+  now sets, or a self-addressed message whose subject starts with the brief
+  prefix (for briefs predating the header); isAlreadyOpen refuses a proposal
+  whose normalised title already matches an open task. Never widen the first
+  to "ignore all mail from myself": mailing yourself a reminder must still
+  become a task, and a test pins that.
 - Persona: assistant_persona versions, seeded v1 by migration. System prompt
   order is fixed: hard rules (with the precedence line), app context, then
   the persona inside a labelled tone-only block. Persona writes happen only
