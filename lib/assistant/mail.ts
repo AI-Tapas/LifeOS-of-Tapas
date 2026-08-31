@@ -15,6 +15,9 @@ export interface MailMeta {
   snippet: string;
   // Gmail only: used to spot calendar invitations structurally.
   contentType?: string;
+  // X-Life-OS when present: the app stamps its own outgoing mail so the scan
+  // can refuse to read it back in (lib/assistant/scan-filters.ts).
+  appTag?: string;
 }
 
 const LOOKBACK_DAYS = 3;
@@ -42,7 +45,7 @@ export async function listRecentGmail(accountId: string): Promise<MailMeta[]> {
             format: "metadata",
             metadataHeaders: "From",
           }) +
-          "&metadataHeaders=Subject&metadataHeaders=Date&metadataHeaders=Content-Type",
+          "&metadataHeaders=Subject&metadataHeaders=Date&metadataHeaders=Content-Type&metadataHeaders=X-Life-OS",
         { headers: { authorization: `Bearer ${token}` } }
       )
     );
@@ -62,6 +65,7 @@ export async function listRecentGmail(accountId: string): Promise<MailMeta[]> {
       date: header("Date"),
       snippet: j.snippet ?? "",
       contentType: header("Content-Type"),
+      appTag: header("X-Life-OS"),
     });
   }
   return out;

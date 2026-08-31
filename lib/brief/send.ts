@@ -26,6 +26,10 @@ export async function sendBriefEmail(
     `From: ${email}`,
     `To: ${email}`,
     `Subject: ${subject}`,
+    // Stamps the brief as the app's own output. The 3 AM mail scan reads this
+    // very inbox, and without the stamp it treated the brief as ordinary mail
+    // and re-filed every task the brief was reporting, one fresh copy a day.
+    "X-Life-OS: brief",
     "MIME-Version: 1.0",
     `Content-Type: multipart/alternative; boundary="${boundary}"`,
     "",

@@ -21,6 +21,7 @@ import {
 } from "@/lib/assistant/core";
 import { loadLlmOverride } from "@/lib/assistant/settings";
 import { listRecentGmail, listRecentGraph } from "@/lib/assistant/mail";
+import { isAppGeneratedMail, isAlreadyOpen } from "@/lib/assistant/scan-filters";
 import { createTask } from "@/lib/tasks/write";
 import { istInstant } from "@/lib/datetime";
 import type { Json } from "@/lib/database.types";
@@ -53,7 +54,7 @@ export async function runMailScan(actor?: Actor): Promise<ScanSummary> {
 
   const { data: accounts } = await supabase
     .from("accounts")
-    .select("id, slot, provider, status, connect_mode")
+    .select("id, slot, provider, status, connect_mode, email")
     .eq("status", "connected")
     .eq("connect_mode", "direct");
 
@@ -87,6 +88,21 @@ export async function runMailScan(actor?: Actor): Promise<ScanSummary> {
       summary.notes.push(
         `${account.slot}: skipped ${invites} calendar ${
           invites === 1 ? "invitation" : "invitations"
+        }`
+      );
+    }
+    if (!mails.length) continue;
+
+    // The app's own mail, above all the morning brief, which is sent from this
+    // account to itself and so lands in the inbox being scanned. Reading it
+    // back turned the brief's own task list into fresh tasks, one copy per
+    // day, for ever.
+    const ownMail = mails.filter((m) => isAppGeneratedMail(m, account.email)).length;
+    if (ownMail) {
+      mails = mails.filter((m) => !isAppGeneratedMail(m, account.email));
+      summary.notes.push(
+        `${account.slot}: skipped ${ownMail} Life OS ${
+          ownMail === 1 ? "message" : "messages"
         }`
       );
     }
@@ -156,7 +172,24 @@ export async function runMailScan(actor?: Actor): Promise<ScanSummary> {
 
     const streamName = SLOT_STREAM[account.slot] ?? "Personal";
     const workStreamId = await resolveStreamId(supabase, streamName);
+
+    // Second belt, on meaning rather than message id: two AWS budget alerts,
+    // or two chasers on one thread, are different messages saying the same
+    // thing, so external_ref alone lets both through. Compare against what is
+    // already open (done and dropped tasks do not block a genuine repeat).
+    const { data: openRows } = await supabase
+      .from("tasks")
+      .select("title")
+      .eq("user_id", userId)
+      .in("status", ["inbox", "todo", "doing"]);
+    const openTitles = (openRows ?? []).map((r) => r.title);
+
     for (const p of accepted) {
+      if (isAlreadyOpen(p.title, openTitles)) {
+        summary.skipped += 1;
+        summary.notes.push(`${account.slot}: already on the list, "${p.title}"`);
+        continue;
+      }
       const r = await createTask(supabase, userId, {
         title: p.title,
         notes: p.note,
@@ -170,6 +203,8 @@ export async function runMailScan(actor?: Actor): Promise<ScanSummary> {
         summary.notes.push(`${account.slot}: ${r.message}`);
         continue;
       }
+      // So two proposals in the same run cannot both land the same title.
+      openTitles.push(p.title);
       summary.created += 1;
       await supabase.from("assistant_actions").insert({
         user_id: userId,

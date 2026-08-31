@@ -11,6 +11,12 @@ import assert from "node:assert/strict";
 import { composeBrief, type BriefTask, type BriefEvent } from "../lib/brief/compose.ts";
 import { cronAuthorized, alreadyRanToday } from "../lib/cron/guard.ts";
 import { civilKey, civilToday } from "../lib/datetime.ts";
+import {
+  addressOf,
+  isAppGeneratedMail,
+  isAlreadyOpen,
+  normaliseTitle,
+} from "../lib/assistant/scan-filters.ts";
 
 const APP_BASE_URL = "https://life-os-of-tapas.vercel.app";
 
@@ -338,4 +344,76 @@ test("civilToday resolves the IST calendar day, not the UTC one, across the midn
   // The instant named explicitly in the M5 brief: 23:30 UTC (05:00 IST),
   // well inside the new IST day.
   assert.equal(civilKey(civilToday(Date.parse("2026-08-28T23:30:00Z"))), "2026-08-29");
+});
+
+// --- the brief-feedback loop (found live, 31 August 2026) -------------------
+// The 7 AM brief is sent from ca_tapasnr to itself, so it lands in the inbox
+// the 3 AM scan reads. Four copies of "File reply to SCN issued to R N PEB"
+// reached the real task list, one per brief, because each morning is a new
+// message id and the external_ref dedup only recognises the same message.
+
+const OWN = "ca.tapasnr@gmail.com";
+
+test("the morning brief is recognised as the app's own mail, by tag and by subject", () => {
+  // Briefs sent from now on carry the X-Life-OS stamp.
+  assert.equal(
+    isAppGeneratedMail(
+      { from: `Tapas <${OWN}>`, subject: "Your day: File reply to SCN issued to R N PEB", appTag: "brief" },
+      OWN
+    ),
+    true
+  );
+  // Briefs already sitting in the inbox predate the stamp: the fixed subject
+  // prefix on a message the account sent to itself catches those.
+  assert.equal(
+    isAppGeneratedMail(
+      { from: `Tapas <${OWN}>`, subject: "Your day: File reply to SCN issued to R N PEB" },
+      OWN
+    ),
+    true
+  );
+  assert.equal(isAppGeneratedMail({ from: OWN, subject: "Your day: desk clear" }, OWN), true);
+});
+
+test("mailing yourself a reminder still becomes a task", () => {
+  // The fix must not be "ignore anything from myself": mailing himself a note
+  // is a real habit and has to keep working.
+  assert.equal(
+    isAppGeneratedMail({ from: `Tapas <${OWN}>`, subject: "Remember to file the SCN reply" }, OWN),
+    false
+  );
+});
+
+test("ordinary mail from other people is never treated as the app's own", () => {
+  assert.equal(
+    isAppGeneratedMail({ from: "ICAI <noreply@icai.org>", subject: "Your day at the branch" }, OWN),
+    false
+  );
+  assert.equal(
+    isAppGeneratedMail({ from: "AWS <no-reply@amazon.com>", subject: "Budget alert" }, OWN),
+    false
+  );
+  // No account email known: fail open rather than silently swallowing mail.
+  assert.equal(isAppGeneratedMail({ from: OWN, subject: "Your day: anything" }, null), false);
+});
+
+test("addressOf reads the address out of either header shape", () => {
+  assert.equal(addressOf("Tapas Ruparelia <Ca.Tapasnr@Gmail.com>"), "ca.tapasnr@gmail.com");
+  assert.equal(addressOf("  ca.tapasnr@gmail.com "), "ca.tapasnr@gmail.com");
+});
+
+// --- same task, different email --------------------------------------------
+
+test("a proposal already open on the list is refused, whatever the message id", () => {
+  const open = ["Review AWS cost budget alert for Nami Realties account"];
+  // AWS sent two separate notifications: different messages, one real task.
+  assert.equal(isAlreadyOpen("Review AWS cost budget alert for Nami Realties account", open), true);
+  assert.equal(isAlreadyOpen("review aws cost budget alert for  Nami Realties account.", open), true);
+  assert.equal(isAlreadyOpen("Review AWS cost budget alert for Sunrise Traders account", open), false);
+});
+
+test("normaliseTitle ignores case, padding and a trailing full stop only", () => {
+  assert.equal(normaliseTitle("  File  reply to SCN issued to R N PEB. "), "file reply to scn issued to r n peb");
+  // Not so aggressive that two genuinely different tasks collapse into one.
+  assert.notEqual(normaliseTitle("Book onward ticket, Rajkot"), normaliseTitle("Book return ticket, Rajkot"));
 });
