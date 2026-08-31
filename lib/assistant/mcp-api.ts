@@ -187,7 +187,7 @@ export const READ_TOOL_DESCRIPTIONS: Record<string, string> = {
   lifeos_list_projects:
     "List projects and the work stream each belongs to, for filing tasks under one.",
   lifeos_list_trips:
-    "List trips with their purpose, dates, status and how much billable expense each carries, plus the legs logged against them.",
+    "List trips with their purpose, dates, status, how much billable expense each carries, the legs logged against them, and checklist progress (checklist_done of checklist_total).",
   lifeos_list_bills:
     "List reimbursement bills with their number, date, payer, amount and status. Read-only: no connector can create a bill beyond a draft, or mark one sent or paid.",
   lifeos_list_action_history:
@@ -234,7 +234,7 @@ export async function runReadTool(
     let q = supabase
       .from("tasks")
       .select(
-        "id, title, notes, status, priority, due_ts, source, external_ref, work_streams(name)",
+        "id, title, notes, status, priority, due_ts, source, external_ref, trip_id, work_streams(name)",
         { count: "exact" }
       )
       .in("status", statuses as never[])
@@ -254,6 +254,9 @@ export async function runReadTool(
       due: t.due_ts ? formatDateIST(t.due_ts) : null,
       due_ts: t.due_ts,
       work_stream: (t.work_streams as { name: string } | null)?.name ?? null,
+      // Set when the task is a checklist step of a trip, in which case the
+      // app shows it under the trip rather than as its own row.
+      trip_id: t.trip_id,
       // Provenance matters: a task created from mail carries text written by
       // an outsider, and callers must treat it as data, not instructions.
       source: t.source,
@@ -424,7 +427,7 @@ export async function runReadTool(
     let q = supabase
       .from("trips")
       .select(
-        "id, title, purpose, status, start_date, end_date, cities, legs, billable_to, notes, work_streams(name), trip_expenses(amount, billable)",
+        "id, title, purpose, status, start_date, end_date, cities, legs, billable_to, notes, work_streams(name), trip_expenses(amount, billable), tasks(status)",
         { count: "exact" }
       )
       .order("start_date", { ascending: false, nullsFirst: false })
@@ -442,6 +445,12 @@ export async function runReadTool(
         amount: number;
         billable: boolean;
       }[];
+      // Checklist progress travels with the trip so a connected model can
+      // report "2 of 5 done" without a second call.
+      const steps = (t.tasks ?? []) as { status: string }[];
+      const counted = steps.filter(
+        (x) => x.status !== "dropped"
+      );
       return {
         id: t.id,
         title: t.title,
@@ -458,6 +467,8 @@ export async function runReadTool(
           .filter((e) => e.billable)
           .reduce((sum, e) => sum + Number(e.amount), 0),
         expense_count: expenses.length,
+        checklist_done: counted.filter((x) => x.status === "done").length,
+        checklist_total: counted.length,
       };
     });
     return paginate(items, count ?? items.length, limit, offset);

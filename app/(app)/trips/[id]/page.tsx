@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import TripDetail, {
   type BillSummary,
+  type ChecklistRow,
   type ExpenseRow,
 } from "@/components/trips/trip-detail";
 import { parseLegs } from "@/lib/trips/bill";
@@ -29,13 +30,19 @@ export default async function TripDetailPage({
   if (!trip) notFound();
 
   const today = civilKey(civilToday());
-  const [{ data: expenses }, { data: bills }, { data: streams }, suggestedNumber] =
+  const [{ data: expenses }, { data: checklist }, { data: bills }, { data: streams }, suggestedNumber] =
     await Promise.all([
       supabase
         .from("trip_expenses")
         .select("id, category, amount, date, billable, receipt_ref")
         .eq("trip_id", id)
         .order("date"),
+      // The trip's checklist steps: ordinary tasks carrying this trip's id.
+      supabase
+        .from("tasks")
+        .select("id, title, notes, status, due_ts")
+        .eq("trip_id", id)
+        .order("due_ts", { ascending: true, nullsFirst: false }),
       supabase
         .from("bills")
         .select("id, number, date, bill_to, amount, status")
@@ -68,6 +75,7 @@ export default async function TripDetailPage({
         trip={values}
         streamName={(trip.work_streams as { name: string } | null)?.name ?? ""}
         legs={parseLegs(trip.legs)}
+        checklist={(checklist ?? []) as ChecklistRow[]}
         expenses={((expenses ?? []) as ExpenseRow[]).map((e) => ({
           ...e,
           amount: Number(e.amount),

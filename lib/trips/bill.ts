@@ -169,6 +169,22 @@ export function dayLabel(dateOnly: string | null, short = false): string {
   return short ? formatDateShortIST(iso) : formatDateIST(iso);
 }
 
+// The date line a trip is known by: "17 to 19 May 2026". Lives here rather
+// than in a component so a server render (Home, the Tasks overview, the
+// brief) can call it too; components/trips/bits.tsx re-exports nothing, it
+// imports from here.
+export function tripDatesLabel(start: string | null, end: string | null): string {
+  if (!start && !end) return "No dates yet";
+  if (start && end && start !== end) {
+    // Same month reads better trimmed: "17 to 19 May 2026".
+    const sameMonth = start.slice(0, 7) === end.slice(0, 7);
+    return sameMonth
+      ? `${Number(start.slice(8, 10))} to ${dayLabel(end)}`
+      : `${dayLabel(start)} to ${dayLabel(end)}`;
+  }
+  return dayLabel(start ?? end);
+}
+
 function formatDate(dateOnly: string): string {
   return dayLabel(dateOnly);
 }

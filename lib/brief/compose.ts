@@ -13,6 +13,7 @@ import {
   weekendGuard,
   type TriageTask,
 } from "../tasks/triage.ts";
+import { rollUpTrips, type TripStep } from "../tasks/trip-rollup.ts";
 import {
   addDays,
   civilKey,
@@ -46,6 +47,10 @@ export interface BriefTask extends TriageTask {
   stream: string;
   source: string; // task_source: 'manual' | 'email' | 'assistant'
   created_at: string;
+  // Set when the task is a trip checklist step. Those never appear as their
+  // own line here; the trip's rollup row stands in for them, or the email is
+  // thirty-six lines long again and the whole exercise is wasted.
+  trip_id?: string | null;
 }
 
 export interface BriefEvent {
@@ -66,6 +71,9 @@ export interface BriefAccountIssue {
 export interface ComposeBriefInput {
   nowMs: number;
   tasks: BriefTask[]; // open tasks: status in inbox/todo/doing
+  // Every task carrying a trip_id, whatever its status, with its trip. Used
+  // for the rollup rows and for the honest "2 of 5 done" count.
+  tripSteps?: TripStep[];
   events: BriefEvent[]; // today's events, all connected accounts, pre-sorted by start_ts (this does not re-sort, same contract as the events query's own .order("start_ts"))
   // ext_event_ids of the app's own task/obligation reminder events. A task
   // with a due date writes a reminder event onto the calendar, so without
@@ -118,7 +126,22 @@ export function composeBrief(input: ComposeBriefInput): ComposedBrief {
     (e) => !e.ext_event_id || !reminderIds.has(e.ext_event_id)
   );
 
-  const bands = triage(tasks, nowMs);
+  // One line per trip, ranked by its most urgent incomplete step, exactly as
+  // Home and the Tasks overview rank it (lib/tasks/trip-rollup.ts).
+  const rollups: BriefTask[] = rollUpTrips(input.tripSteps ?? [], nowMs).map((r) => ({
+    id: r.id,
+    title: r.label,
+    priority: r.priority,
+    due_ts: r.due_ts,
+    status: r.status,
+    stream: `${r.progress}, next: ${r.next_title}`,
+    source: "manual",
+    created_at: "",
+    trip_id: r.trip_id,
+  }));
+  const standalone = tasks.filter((t) => !t.trip_id);
+
+  const bands = triage([...standalone, ...rollups], nowMs);
   const topItem = bands.do_first[0] ?? bands.important[0] ?? bands.urgent[0] ?? null;
 
   const saturday = addDays(startOfWeek(today), 5);
@@ -127,14 +150,14 @@ export function composeBrief(input: ComposeBriefInput): ComposedBrief {
     civilKey(addDays(saturday, 1)),
     civilKey(addDays(saturday, 2)),
   ];
-  const weekendRisk = weekendGuard(tasks, weekday, guardKeys);
+  const weekendRisk = weekendGuard(standalone, weekday, guardKeys);
 
   // "Last night's mail scan" = the one automated scan, which runs at 03:00
   // IST. Tasks it proposed all land with source 'email' and a created_at
   // after today's IST midnight, so that's the whole filter: no run id
   // exists to join on instead (see prompts/M5-scan-mail-followups...).
   const todayMidnightIso = istInstant(today, 0, 0).toISOString();
-  const scannedTasks = tasks.filter(
+  const scannedTasks = standalone.filter(
     (t) => t.source === "email" && t.created_at >= todayMidnightIso
   );
 

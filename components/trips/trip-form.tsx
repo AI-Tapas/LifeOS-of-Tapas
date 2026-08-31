@@ -66,6 +66,10 @@ export default function TripForm({
   const [status, setStatus] = useState<TripStatus>(trip?.status ?? "planned");
   const [billableTo, setBillableTo] = useState(trip?.billable_to ?? "");
   const [notes, setNotes] = useState(trip?.notes ?? "");
+  // Checked by default on a new trip: the five steps are what he runs every
+  // time, and each one carries its own reminder. Never offered on an edit,
+  // where the trip screen's Checklist section adds them instead.
+  const [withChecklist, setWithChecklist] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [armed, setArmed] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -86,6 +90,7 @@ export default function TripForm({
       status,
       billable_to: billableTo.trim() || null,
       notes: notes.trim() || null,
+      with_checklist: !isEdit && withChecklist,
     };
     startTransition(async () => {
       const r = isEdit
@@ -233,6 +238,26 @@ export default function TripForm({
             rows={2}
           />
         </Field>
+
+        {!isEdit && (
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={withChecklist}
+              onChange={(e) => setWithChecklist(e.target.checked)}
+              className="mt-1"
+            />
+            <span>
+              Add the standard travel checklist
+              <span className="block text-xs text-secondary">
+                Book onward, book return, confirm the hotel, collect the
+                receipts, build the bill. Dated from this trip, each with its
+                own reminder, all under the trip rather than in the task list.
+                Needs a start date.
+              </span>
+            </span>
+          </label>
+        )}
 
         {err && <p className="text-sm text-overdue">{err}</p>}
 

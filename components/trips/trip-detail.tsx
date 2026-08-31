@@ -19,7 +19,7 @@ import {
   drawerFooterCls,
   inputCls,
 } from "@/components/ui";
-import { formatINR } from "@/lib/datetime";
+import { formatDateIST, formatINR } from "@/lib/datetime";
 import {
   CATEGORY_LABELS,
   EXPENSE_CATEGORIES,
@@ -28,6 +28,7 @@ import {
   TRANSPORT_MODES,
   billableTotal,
   dayLabel,
+  tripDatesLabel,
   type ExpenseCategory,
   type TransportMode,
   type TripLeg,
@@ -35,7 +36,6 @@ import {
 import {
   PurposeChip,
   StatusTrail,
-  tripDatesLabel,
   type TripStatus,
 } from "@/components/trips/bits";
 import TripForm, {
@@ -43,7 +43,9 @@ import TripForm, {
   type WorkStreamRow,
 } from "@/components/trips/trip-form";
 import BillBuilder from "@/components/trips/bill-builder";
+import { setTaskStatusAction } from "@/app/(app)/tasks/actions";
 import {
+  addChecklistAction,
   addExpenseAction,
   deleteExpenseAction,
   setBillStatusAction,
@@ -64,6 +66,16 @@ export interface ExpenseRow {
   receipt_ref: string | null;
 }
 
+// A checklist step: an ordinary task carrying this trip's id, shown here so
+// travel admin has one home instead of five rows in the task list.
+export interface ChecklistRow {
+  id: string;
+  title: string;
+  notes: string | null;
+  status: "inbox" | "todo" | "doing" | "done" | "dropped";
+  due_ts: string | null;
+}
+
 export interface BillSummary {
   id: string;
   number: string;
@@ -77,6 +89,7 @@ export default function TripDetail({
   trip,
   streamName,
   legs,
+  checklist,
   expenses,
   bills,
   workStreams,
@@ -86,6 +99,7 @@ export default function TripDetail({
   trip: TripFormValues;
   streamName: string;
   legs: TripLeg[];
+  checklist: ChecklistRow[];
   expenses: ExpenseRow[];
   bills: BillSummary[];
   workStreams: WorkStreamRow[];
@@ -223,6 +237,9 @@ export default function TripDetail({
           </div>
         )}
       </section>
+
+      {/* --- checklist ------------------------------------------------- */}
+      <Checklist trip={trip} items={checklist} onError={setErr} />
 
       {/* --- expenses -------------------------------------------------- */}
       <section className="mt-6">
@@ -690,5 +707,108 @@ function ExpenseForm({
         </div>
       </div>
     </Drawer>
+  );
+}
+
+// One trip's checklist. The steps are ordinary tasks (same due dates, same
+// Google Calendar reminders, same one-tap completion as anywhere else); they
+// simply live here instead of flooding the task list.
+function Checklist({
+  trip,
+  items,
+  onError,
+}: {
+  trip: TripFormValues;
+  items: ChecklistRow[];
+  onError: (m: string | null) => void;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const live = items.filter((i) => i.status !== "dropped");
+  const done = live.filter((i) => i.status === "done").length;
+
+  function complete(id: string) {
+    startTransition(async () => {
+      const r = await setTaskStatusAction(id, "done");
+      if (!r.ok) onError(r.message ?? "Could not complete the step.");
+      router.refresh();
+    });
+  }
+
+  function seed() {
+    startTransition(async () => {
+      const r = await addChecklistAction(trip.id!);
+      if (!r.ok) onError(r.message);
+      router.refresh();
+    });
+  }
+
+  return (
+    <section className="mt-6">
+      <div className="mb-2">
+        <BandHead
+          title="Checklist"
+          action={
+            live.length > 0 ? (
+              <span className="text-[11px] font-bold text-muted">
+                {done} of {live.length} done
+              </span>
+            ) : undefined
+          }
+        />
+      </div>
+      {live.length === 0 ? (
+        <Empty title="No checklist yet.">
+          The standard travel checklist is five steps: book onward, book
+          return, confirm the hotel, collect the receipts, build the bill. Each
+          becomes a task dated from this trip, with its own reminder.
+          <span className="mt-3 block">
+            <button onClick={seed} disabled={pending} className={btnSmall}>
+              {pending ? "Adding" : "Add the standard checklist"}
+            </button>
+          </span>
+        </Empty>
+      ) : (
+        <div className="space-y-2">
+          {live.map((step) => {
+            const isDone = step.status === "done";
+            return (
+              <div
+                key={step.id}
+                className="flex items-center gap-1 rounded-lg border border-border bg-surface p-1.5 shadow-[var(--shadow-card)]"
+              >
+                <button
+                  onClick={() => complete(step.id)}
+                  disabled={pending || isDone}
+                  aria-label={`Mark done: ${step.title}`}
+                  className="press flex h-11 w-11 shrink-0 items-center justify-center rounded-full disabled:opacity-60"
+                >
+                  <span
+                    className={
+                      "h-5 w-5 rounded-full border-2 " +
+                      (isDone ? "border-ok bg-ok" : "border-border-strong")
+                    }
+                  />
+                </button>
+                <div className="min-w-0 flex-1 py-1.5">
+                  <p
+                    className={
+                      "truncate text-sm " + (isDone ? "text-neutral-400 line-through" : "")
+                    }
+                  >
+                    {step.title}
+                  </p>
+                  {step.due_ts && (
+                    <p className="mt-0.5 text-[11px] text-neutral-500">
+                      due {formatDateIST(step.due_ts)}
+                    </p>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }

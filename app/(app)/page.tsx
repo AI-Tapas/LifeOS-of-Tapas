@@ -15,6 +15,11 @@ import {
   startOfWeek,
 } from "@/lib/datetime";
 import { triage, needsDeadline, weekendGuard } from "@/lib/tasks/triage";
+import {
+  rollUpTrips,
+  type TripRollup,
+  type TripStep,
+} from "@/lib/tasks/trip-rollup";
 
 export const dynamic = "force-dynamic";
 
@@ -60,12 +65,12 @@ export default async function DashboardPage() {
   const dayStart = istInstant(today, 0, 0).toISOString();
   const dayEnd = istInstant(today, 23, 59).toISOString();
 
-  // Four independent reads in parallel. The stream name is fetched as its own
+  // Five independent reads in parallel. The stream name is fetched as its own
   // small table and joined in memory rather than through an embedded
   // work_streams(name) select: measured against the live database, the
   // embedded join cost about 870ms where two plain queries cost about 390ms
   // in total, and this runs on the first screen of every visit.
-  const [{ data: events }, { data: tasks }, { data: streams }, { count: pendingCount }] =
+  const [{ data: events }, { data: tasks }, { data: tripStepRows }, { data: streams }, { count: pendingCount }] =
     await Promise.all([
       supabase
         .from("events")
@@ -75,8 +80,15 @@ export default async function DashboardPage() {
         .order("start_ts"),
       supabase
         .from("tasks")
-        .select("id, title, status, priority, due_ts, work_stream_id")
+        .select("id, title, status, priority, due_ts, work_stream_id, trip_id")
         .in("status", ["inbox", "todo", "doing"]),
+      // Trip checklist steps, every status, with their trip. Travel admin
+      // does not stand in this list as five rows per trip; one rolled-up
+      // trip line stands for it, ranked by its most urgent open step.
+      supabase
+        .from("tasks")
+        .select("id, title, status, priority, due_ts, trip_id, trips(id, title, start_date, end_date)")
+        .not("trip_id", "is", null),
       supabase.from("work_streams").select("id, name"),
       supabase
         .from("assistant_actions")
@@ -85,15 +97,49 @@ export default async function DashboardPage() {
     ]);
 
   type Row = NonNullable<typeof tasks>[number];
-  const open = (tasks ?? []) as Row[];
+  // Checklist steps come out of the flat list and go back in as one row per
+  // trip, ranked by the step that ranks highest (lib/tasks/trip-rollup.ts).
+  const open = ((tasks ?? []) as Row[]).filter((t) => !t.trip_id);
+  const tripSteps: TripStep[] = (tripStepRows ?? [])
+    .filter((t) => t.trips)
+    .map((t) => ({
+      id: t.id,
+      title: t.title,
+      priority: t.priority,
+      due_ts: t.due_ts,
+      status: t.status,
+      trip: t.trips as NonNullable<typeof t.trips>,
+    }));
   const streamName = new Map((streams ?? []).map((s) => [s.id, s.name]));
-  const bandsRaw = triage(open, nowMs);
-  const toRow = (t: Row) => ({
+
+  type Ranked = Pick<Row, "id" | "title" | "priority" | "due_ts"> & {
+    status: string;
+    work_stream_id: string;
+    rollup?: TripRollup;
+  };
+  const rankable: Ranked[] = [
+    ...open,
+    ...rollUpTrips(tripSteps, nowMs).map((r) => ({
+      id: r.id,
+      title: r.label,
+      status: r.status,
+      priority: r.priority,
+      due_ts: r.due_ts,
+      work_stream_id: "",
+      rollup: r,
+    })),
+  ];
+
+  const bandsRaw = triage(rankable, nowMs);
+  const toRow = (t: Ranked) => ({
     id: t.id,
     title: t.title,
-    stream: streamName.get(t.work_stream_id) ?? "No stream",
+    stream: t.rollup
+      ? `${t.rollup.progress}, next: ${t.rollup.next_title}`
+      : (streamName.get(t.work_stream_id) ?? "No stream"),
     due_ts: t.due_ts,
-    needs_deadline: needsDeadline(t),
+    needs_deadline: t.rollup ? false : needsDeadline(t),
+    trip_id: t.rollup ? t.rollup.trip_id : null,
   });
   const bands: NextUpBands = {
     do_first: bandsRaw.do_first.map(toRow),

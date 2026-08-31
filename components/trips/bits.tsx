@@ -4,7 +4,6 @@
 // trail and the date line. Kept in one file so the list, the detail screen
 // and the bill builder all speak the same visual language.
 
-import { dayLabel } from "@/lib/trips/bill";
 import type { Database } from "@/lib/database.types";
 
 export type TripPurpose = Database["public"]["Enums"]["trip_purpose"];
@@ -31,21 +30,6 @@ export const STATUS_LABELS: Record<TripStatus, string> = {
   billed: "Billed",
   cancelled: "Cancelled",
 };
-
-export function tripDatesLabel(
-  start: string | null,
-  end: string | null
-): string {
-  if (!start && !end) return "No dates yet";
-  if (start && end && start !== end) {
-    // Same month reads better trimmed: "17 to 19 May 2026".
-    const sameMonth = start.slice(0, 7) === end.slice(0, 7);
-    return sameMonth
-      ? `${Number(start.slice(8, 10))} to ${dayLabel(end)}`
-      : `${dayLabel(start)} to ${dayLabel(end)}`;
-  }
-  return dayLabel(start ?? end);
-}
 
 export function PurposeChip({ purpose }: { purpose: TripPurpose }) {
   const tone =

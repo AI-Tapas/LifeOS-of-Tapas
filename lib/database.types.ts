@@ -848,6 +848,7 @@ export type Database = {
           source: Database["public"]["Enums"]["task_source"]
           status: Database["public"]["Enums"]["task_status"]
           title: string
+          trip_id: string | null
           user_id: string
           work_stream_id: string
         }
@@ -866,6 +867,7 @@ export type Database = {
           source?: Database["public"]["Enums"]["task_source"]
           status?: Database["public"]["Enums"]["task_status"]
           title: string
+          trip_id?: string | null
           user_id?: string
           work_stream_id: string
         }
@@ -884,6 +886,7 @@ export type Database = {
           source?: Database["public"]["Enums"]["task_source"]
           status?: Database["public"]["Enums"]["task_status"]
           title?: string
+          trip_id?: string | null
           user_id?: string
           work_stream_id?: string
         }
@@ -893,6 +896,13 @@ export type Database = {
             columns: ["project_id"]
             isOneToOne: false
             referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tasks_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: false
+            referencedRelation: "trips"
             referencedColumns: ["id"]
           },
           {

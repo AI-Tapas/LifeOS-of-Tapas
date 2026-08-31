@@ -8,6 +8,7 @@
 // reachable from the Trips screen alone. No assistant or connector tool calls
 // it, and nothing in this file sends anything to anybody.
 
+import { buildChecklist } from "./checklist.ts";
 import {
   deriveLineItems,
   lineItemsTotal,
@@ -17,7 +18,8 @@ import {
   type BillableExpense,
   type TripLeg,
 } from "./bill.ts";
-import { civilKey, civilToday } from "@/lib/datetime";
+import { createTask } from "@/lib/tasks/write";
+import { civilKey, civilToday, istInstant } from "@/lib/datetime";
 import type { Database, Json } from "@/lib/database.types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -29,7 +31,7 @@ type BillRecipient = Database["public"]["Enums"]["bill_recipient"];
 type BillStatus = Database["public"]["Enums"]["bill_status"];
 
 export type WriteResult =
-  | { ok: true; id: string; note?: string }
+  | { ok: true; id: string; note?: string; checklistTaskIds?: string[] }
   | { ok: false; message: string };
 
 export interface TripInput {
@@ -43,6 +45,10 @@ export interface TripInput {
   status?: TripStatus;
   billable_to?: string | null;
   notes?: string | null;
+  // Not a column: when true, createTrip also seeds the standard travel
+  // checklist against the new trip. The add-trip drawer sets it, and so does
+  // the connector's with_checklist flag, through this one code path.
+  with_checklist?: boolean;
 }
 
 export interface ExpenseInput {
@@ -87,7 +93,64 @@ export async function createTrip(
   if (error || !data) {
     return { ok: false, message: error?.message ?? "Could not save the trip." };
   }
+
+  if (input.with_checklist) {
+    const seeded = await seedTripChecklist(supabase, userId, data.id, {
+      title: input.title.trim(),
+      purpose: input.purpose,
+      start_date: input.start_date ?? null,
+      end_date: input.end_date ?? null,
+      billable_to: input.billable_to ?? null,
+      work_stream_id: input.work_stream_id,
+    });
+    return {
+      ok: true,
+      id: data.id,
+      note: seeded.length
+        ? `${seeded.length} checklist ${seeded.length === 1 ? "step" : "steps"} added.`
+        : "No checklist: the trip has no start date to count back from.",
+      checklistTaskIds: seeded,
+    };
+  }
   return { ok: true, id: data.id };
+}
+
+// Seeds the standard travel checklist as ordinary tasks carrying trip_id.
+// The ONE seeding path: the drawer, the assistant and both connectors all
+// arrive here, so the steps and their dates can never differ between them.
+// Each step goes through createTask, so each gets its calendar reminder like
+// any other dated task.
+export async function seedTripChecklist(
+  supabase: Db,
+  userId: string,
+  tripId: string,
+  trip: {
+    title: string;
+    purpose: TripPurpose;
+    start_date: string | null;
+    end_date: string | null;
+    billable_to: string | null;
+    work_stream_id: string;
+  }
+): Promise<string[]> {
+  const steps = buildChecklist(trip, civilKey(civilToday()));
+  const ids: string[] = [];
+  for (const step of steps) {
+    const r = await createTask(supabase, userId, {
+      title: step.title,
+      notes: step.note,
+      status: "todo",
+      priority: "medium",
+      // Travel admin is a morning job, so it falls due at 9:30 am IST like
+      // every other task due date in the app.
+      due_ts: dueAt(step.due_date),
+      work_stream_id: trip.work_stream_id,
+      trip_id: tripId,
+      source: "manual",
+    });
+    if (r.ok) ids.push(r.id);
+  }
+  return ids;
 }
 
 export async function updateTrip(
@@ -403,6 +466,12 @@ function checkDates(
   }
   if (start && end && end < start) return "The end date is before the start date.";
   return null;
+}
+
+// A YYYY-MM-DD checklist date at 9:30 am IST, the app's standard due time.
+function dueAt(dateOnly: string): string {
+  const [y, m, d] = dateOnly.split("-").map(Number);
+  return istInstant({ y, m, d }, 9, 30).toISOString();
 }
 
 // Today's IST calendar date as YYYY-MM-DD.

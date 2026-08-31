@@ -97,6 +97,9 @@ export const TOOLS: ToolDef[] = [
       due_date: { ...strOrNull(DATE_DESC) },
       priority: enumOrNull(["low", "medium", "high"], "Task priority."),
       billable: boolOrNull("Whether the work is billable."),
+      trip_id: strOrNull(
+        "Attach the task to a trip as a checklist step, using a trip id from lifeos_list_trips. The Tasks screen then shows one line for the trip instead of a row per step. Use it for travel admin (booking, hotel, receipts, the reimbursement bill), never for client work."
+      ),
     }),
   },
   {
@@ -114,6 +117,9 @@ export const TOOLS: ToolDef[] = [
       ),
       priority: enumOrNull(["low", "medium", "high"], "New priority. Omit to keep the current one."),
       due_date: { ...strOrNull(DATE_DESC + " Omit to keep the current due date.") },
+      trip_id: strOrNull(
+        "Move the task under a trip as a checklist step, using a trip id from lifeos_list_trips. Omit to leave it where it is."
+      ),
     }),
   },
   {
@@ -480,6 +486,9 @@ export const TOOLS: ToolDef[] = [
         "Who reimburses it, e.g. ICAI Rajkot branch. Omit when he bears the cost."
       ),
       notes: strOrNull("Anything worth remembering about the trip."),
+      with_checklist: boolOrNull(
+        "Also add the standard travel checklist (book onward, book return, confirm hotel, collect receipts, build the bill), dated from the trip's own dates. Defaults to false. Needs a start date."
+      ),
     }),
   },
   {

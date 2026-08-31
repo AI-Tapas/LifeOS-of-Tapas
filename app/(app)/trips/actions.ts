@@ -7,6 +7,7 @@ import {
   createBillDraft,
   createTrip,
   deleteBill,
+  seedTripChecklist,
   deleteTrip,
   deleteTripExpense,
   setBillStatus,
@@ -30,6 +31,10 @@ export async function createTripAction(input: TripInput): Promise<WriteResult> {
   const { supabase, user } = await requireUser("/trips");
   const r = await createTrip(supabase, user.id, input);
   revalidatePath("/trips");
+  if (input.with_checklist) {
+    revalidatePath("/tasks");
+    revalidatePath("/");
+  }
   return r;
 }
 
@@ -42,6 +47,31 @@ export async function updateTripAction(
   revalidatePath("/trips");
   revalidatePath(`/trips/${id}`);
   return r;
+}
+
+// Adds the standard travel checklist to a trip that does not have it yet
+// (the add-trip drawer offers it at creation; this is the same code path for
+// a trip already in the list).
+export async function addChecklistAction(tripId: string): Promise<WriteResult> {
+  const { supabase, user } = await requireUser("/trips");
+  const { data: trip } = await supabase
+    .from("trips")
+    .select("title, purpose, start_date, end_date, billable_to, work_stream_id")
+    .eq("id", tripId)
+    .maybeSingle();
+  if (!trip) return { ok: false, message: "Trip not found." };
+  const ids = await seedTripChecklist(supabase, user.id, tripId, trip);
+  revalidatePath("/trips");
+  revalidatePath(`/trips/${tripId}`);
+  revalidatePath("/tasks");
+  revalidatePath("/");
+  if (!ids.length) {
+    return {
+      ok: false,
+      message: "Set a start date on the trip first: the checklist counts back from it.",
+    };
+  }
+  return { ok: true, id: tripId, note: `${ids.length} steps added.` };
 }
 
 export async function deleteTripAction(

@@ -21,6 +21,10 @@ export interface NextUpRow {
   stream: string;
   due_ts: string | null;
   needs_deadline: boolean;
+  // Set when the row stands for a whole trip's checklist rather than one
+  // task. It ranks by its most urgent open step, and opens the trip: there
+  // is nothing here to tick, because the steps live on that screen.
+  trip_id?: string | null;
 }
 
 export interface NextUpBands {
@@ -71,6 +75,34 @@ function deadlineChoices(): { label: string; iso: string }[] {
       iso: istInstant(addDays(today, nextMondayOffset), 9, 30).toISOString(),
     },
   ];
+}
+
+// A trip's rolled-up line. Same rank, same due badge, same place in the
+// band as the step that earned it, so nothing is hidden: only the four other
+// steps are folded away, one tap from here.
+function TripRow({
+  row,
+  nowIso,
+  arriveIndex,
+}: {
+  row: NextUpRow;
+  nowIso: string;
+  arriveIndex: number;
+}) {
+  return (
+    <li className="arrive py-2 first:pt-0 last:pb-0" style={{ ["--i" as string]: arriveIndex }}>
+      <Link href={`/trips/${row.trip_id}`} className="press flex items-center gap-3">
+        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand-soft text-[9px] font-bold uppercase tracking-[0.08em] text-brand-deep">
+          Trip
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block break-words text-sm font-medium">{row.title}</span>
+          <span className="block text-[11px] text-neutral-500">{row.stream}</span>
+        </span>
+        <DueBadge dueTs={row.due_ts} nowIso={nowIso} flagMissing={false} />
+      </Link>
+    </li>
+  );
 }
 
 function Row({
@@ -228,9 +260,13 @@ export default function NextUp({
               <BandHead title={s.label} count={rows.length} />
               <p className="mt-1.5 text-[11px] text-muted">{s.hint}</p>
               <ul className="mt-1 divide-y divide-border">
-                {shown.map((r) => (
-                  <Row key={r.id} row={r} nowIso={nowIso} arriveIndex={next()} />
-                ))}
+                {shown.map((r) =>
+                  r.trip_id ? (
+                    <TripRow key={r.id} row={r} nowIso={nowIso} arriveIndex={next()} />
+                  ) : (
+                    <Row key={r.id} row={r} nowIso={nowIso} arriveIndex={next()} />
+                  )
+                )}
               </ul>
               {rows.length > shown.length && (
                 <Link

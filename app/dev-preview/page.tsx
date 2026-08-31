@@ -24,6 +24,8 @@ import TripDetail, {
 } from "@/components/trips/trip-detail";
 import BillSheet from "@/components/trips/bill-sheet";
 import { deriveLineItems, parseLegs } from "@/lib/trips/bill";
+import type { TripStep } from "@/lib/tasks/trip-rollup";
+import type { ChecklistRow } from "@/components/trips/trip-detail";
 
 // The timeline demo hangs off the real clock, so this page must not be
 // prerendered at build time.
@@ -102,6 +104,7 @@ const tasks: TaskRow[] = [
     due_ts: "2026-08-12T03:30:00Z",
     work_stream_id: "w1",
     project_id: null,
+    trip_id: null,
     recurring_rule: "monthly:1",
     is_billable: false,
     remind_offsets: [7, 3, 1, 0],
@@ -115,6 +118,7 @@ const tasks: TaskRow[] = [
     due_ts: "2026-08-14T03:30:00Z",
     work_stream_id: "w2",
     project_id: null,
+    trip_id: null,
     recurring_rule: "daily:1",
     is_billable: false,
     remind_offsets: [7, 3, 1, 0],
@@ -123,6 +127,14 @@ const tasks: TaskRow[] = [
 
 const nextUpBands: NextUpBands = {
   do_first: [
+    {
+      id: "trip:t1",
+      title: "AICA session, Rajkot branch, 3 to 4 September 2026",
+      stream: "2 of 5 done, next: Book onward ticket",
+      due_ts: "2026-08-20T04:00:00Z",
+      needs_deadline: false,
+      trip_id: "t1",
+    },
     {
       id: "n1",
       title: "Reply to GST notice for Sunrise Traders",
@@ -195,6 +207,8 @@ const trips: TripRow[] = [
     billable_total: 6550,
     expense_count: 5,
     bill_count: 0,
+    checklist_done: 2,
+    checklist_total: 5,
   },
   {
     id: "t2",
@@ -211,6 +225,8 @@ const trips: TripRow[] = [
     billable_total: 0,
     expense_count: 0,
     bill_count: 0,
+    checklist_done: 0,
+    checklist_total: 5,
   },
   {
     id: "t3",
@@ -227,6 +243,8 @@ const trips: TripRow[] = [
     billable_total: 0,
     expense_count: 0,
     bill_count: 0,
+    checklist_done: 0,
+    checklist_total: 0,
   },
   {
     id: "t4",
@@ -243,7 +261,35 @@ const trips: TripRow[] = [
     billable_total: 6550,
     expense_count: 5,
     bill_count: 1,
+    checklist_done: 5,
+    checklist_total: 5,
   },
+];
+
+// A part-done checklist with one overdue step, which is the case that must
+// drag the whole trip line into the top band rather than hiding in a folder.
+// Fixed clock for these screens: 25 August 2026.
+const rajkot = {
+  id: "t1",
+  title: "AICA session, Rajkot branch",
+  start_date: "2026-09-03",
+  end_date: "2026-09-04",
+};
+
+const tripSteps: TripStep[] = [
+  { id: "c1", title: "Book onward ticket", priority: "medium", due_ts: "2026-08-20T04:00:00Z", status: "todo", trip: rajkot },
+  { id: "c2", title: "Book return ticket", priority: "medium", due_ts: "2026-08-27T04:00:00Z", status: "done", trip: rajkot },
+  { id: "c3", title: "Confirm hotel with the branch", priority: "medium", due_ts: "2026-08-29T04:00:00Z", status: "done", trip: rajkot },
+  { id: "c4", title: "Collect and keep travel receipts", priority: "medium", due_ts: "2026-09-04T04:00:00Z", status: "todo", trip: rajkot },
+  { id: "c5", title: "Build the reimbursement bill", priority: "medium", due_ts: "2026-09-06T04:00:00Z", status: "todo", trip: rajkot },
+];
+
+const tripChecklist: ChecklistRow[] = [
+  { id: "c1", title: "Book onward ticket", notes: null, status: "done", due_ts: "2026-05-10T04:00:00Z" },
+  { id: "c2", title: "Book return ticket", notes: null, status: "done", due_ts: "2026-05-10T04:00:00Z" },
+  { id: "c3", title: "Confirm hotel with the branch", notes: null, status: "done", due_ts: "2026-05-12T04:00:00Z" },
+  { id: "c4", title: "Collect and keep travel receipts", notes: null, status: "todo", due_ts: "2026-05-19T04:00:00Z" },
+  { id: "c5", title: "Build the reimbursement bill", notes: null, status: "todo", due_ts: "2026-05-21T04:00:00Z" },
 ];
 
 const tripExpenses: ExpenseRow[] = [
@@ -375,6 +421,7 @@ export default async function DevPreviewPage() {
       <p className="mb-4 rounded bg-amber-100 p-1 text-center text-xs">dev preview: tasks</p>
       <TasksView
         tasks={tasks}
+        tripSteps={tripSteps}
         projects={projects}
         workStreams={workStreams}
         nowIso="2026-08-25T06:00:00Z"
@@ -400,6 +447,7 @@ export default async function DevPreviewPage() {
         }}
         streamName="ICAI"
         legs={tripLegs}
+        checklist={tripChecklist}
         expenses={tripExpenses}
         bills={tripBills}
         workStreams={workStreams}

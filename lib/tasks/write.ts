@@ -25,6 +25,9 @@ export interface TaskInput {
   due_ts?: string | null;
   work_stream_id: string;
   project_id?: string | null;
+  // A checklist step belongs to a trip. Loose link: deleting the trip leaves
+  // the task behind as an ordinary one (on delete set null).
+  trip_id?: string | null;
   recurring_rule?: string | null;
   is_billable?: boolean;
   remind_offsets?: number[];
@@ -66,6 +69,7 @@ export async function createTask(
       due_ts: input.due_ts ?? null,
       work_stream_id: input.work_stream_id,
       project_id: input.project_id ?? null,
+      trip_id: input.trip_id ?? null,
       recurring_rule: input.recurring_rule ?? null,
       is_billable: input.is_billable ?? false,
       remind_offsets: input.remind_offsets ?? [7, 3, 1, 0],
@@ -105,6 +109,7 @@ export async function updateTask(
         ? { work_stream_id: patch.work_stream_id }
         : {}),
       ...(patch.project_id !== undefined ? { project_id: patch.project_id } : {}),
+      ...(patch.trip_id !== undefined ? { trip_id: patch.trip_id } : {}),
       ...(patch.recurring_rule !== undefined
         ? { recurring_rule: patch.recurring_rule }
         : {}),
@@ -177,7 +182,7 @@ async function spawnNextOccurrence(
   const { data: t } = await supabase
     .from("tasks")
     .select(
-      "title, notes, priority, due_ts, work_stream_id, project_id, recurring_rule, is_billable, remind_offsets"
+      "title, notes, priority, due_ts, work_stream_id, project_id, trip_id, recurring_rule, is_billable, remind_offsets"
     )
     .eq("id", taskId)
     .single();
@@ -196,6 +201,7 @@ async function spawnNextOccurrence(
       due_ts: next,
       work_stream_id: t.work_stream_id,
       project_id: t.project_id,
+      trip_id: t.trip_id,
       recurring_rule: t.recurring_rule,
       is_billable: t.is_billable,
       remind_offsets: t.remind_offsets,

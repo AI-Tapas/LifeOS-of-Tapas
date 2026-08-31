@@ -8,10 +8,10 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { BandHead, Empty, PageHeader, SectionLabel, btnPrimary } from "@/components/ui";
 import { formatINR, formatMonthYear } from "@/lib/datetime";
+import { tripDatesLabel } from "@/lib/trips/bill";
 import {
   PurposeChip,
   StatusTrail,
-  tripDatesLabel,
   type TripPurpose,
   type TripStatus,
 } from "@/components/trips/bits";
@@ -33,6 +33,9 @@ export interface TripRow {
   stream_name: string;
   billable_total: number;
   expense_count: number;
+  // Checklist progress: steps done and steps still owed, dropped ones aside.
+  checklist_done: number;
+  checklist_total: number;
   bill_count: number;
 }
 
@@ -171,6 +174,11 @@ function TripCard({ trip }: { trip: TripRow }) {
         </div>
         <PurposeChip purpose={trip.purpose} />
       </div>
+      {trip.checklist_total > 0 && (
+        <p className="mt-1.5 text-xs text-secondary">
+          Checklist: {trip.checklist_done} of {trip.checklist_total} done
+        </p>
+      )}
       <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
         <StatusTrail status={trip.status} />
         <span className="text-sm font-semibold">

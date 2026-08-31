@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 export default async function TripsPage() {
   const supabase = await createClient();
-  const [{ data: trips }, { data: expenses }, { data: bills }, { data: streams }] =
+  const [{ data: trips }, { data: expenses }, { data: steps }, { data: bills }, { data: streams }] =
     await Promise.all([
       supabase
         .from("trips")
@@ -18,6 +18,8 @@ export default async function TripsPage() {
         )
         .order("start_date", { ascending: true, nullsFirst: false }),
       supabase.from("trip_expenses").select("trip_id, amount, billable"),
+      // Checklist steps, so each trip line can say how far through it is.
+      supabase.from("tasks").select("trip_id, status").not("trip_id", "is", null),
       supabase.from("bills").select("trip_id, status"),
       supabase
         .from("work_streams")
@@ -30,6 +32,11 @@ export default async function TripsPage() {
   // worth in reimbursement, which is the number he actually scans for.
   const rows: TripRow[] = (trips ?? []).map((t) => {
     const mine = (expenses ?? []).filter((e) => e.trip_id === t.id);
+    // Dropped steps leave the denominator: he decided one was not owed, so
+    // counting it would leave the trip looking permanently unfinished.
+    const mySteps = (steps ?? []).filter(
+      (x) => x.trip_id === t.id && x.status !== "dropped"
+    );
     return {
       id: t.id,
       purpose: t.purpose,
@@ -47,6 +54,8 @@ export default async function TripsPage() {
         .reduce((sum, e) => sum + Number(e.amount), 0),
       expense_count: mine.length,
       bill_count: (bills ?? []).filter((b) => b.trip_id === t.id).length,
+      checklist_done: mySteps.filter((x) => x.status === "done").length,
+      checklist_total: mySteps.length,
     };
   });
 

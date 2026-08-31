@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useMemo, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   BandHead,
@@ -17,6 +18,7 @@ import {
 } from "@/components/ui";
 import { formatDateIST, formatTimeIST, istInstant, istDayKey } from "@/lib/datetime";
 import { triage, needsDeadline } from "@/lib/tasks/triage";
+import { rollUpTrips, type TripRollup, type TripStep } from "@/lib/tasks/trip-rollup";
 import {
   createTaskAction,
   updateTaskAction,
@@ -38,6 +40,9 @@ export interface TaskRow {
   due_ts: string | null;
   work_stream_id: string;
   project_id: string | null;
+  // A checklist step of a trip. It keeps its own due date and reminder, but
+  // the overview shows the trip's rolled-up line in its place.
+  trip_id: string | null;
   recurring_rule: string | null;
   is_billable: boolean;
   remind_offsets: number[];
@@ -79,6 +84,8 @@ const PRIORITY_DOT: Record<TaskRow["priority"], string> = {
 
 interface TasksViewProps {
   tasks: TaskRow[];
+  // Every task carrying a trip_id, whatever its status, with its trip.
+  tripSteps: TripStep[];
   projects: ProjectRow[];
   workStreams: WorkStreamRow[];
 }
@@ -94,7 +101,7 @@ export default function TasksView({
   );
 }
 
-function TasksBody({ tasks, projects, workStreams }: TasksViewProps) {
+function TasksBody({ tasks, tripSteps, projects, workStreams }: TasksViewProps) {
   const [tab, setTab] = useState<Tab>("overview");
   const [editing, setEditing] = useState<TaskRow | "new" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -146,6 +153,7 @@ function TasksBody({ tasks, projects, workStreams }: TasksViewProps) {
         {tab === "overview" && (
           <OverviewTab
             tasks={tasks}
+            tripSteps={tripSteps}
             workStreams={workStreams}
             wsById={wsById}
             projById={projById}
@@ -295,8 +303,43 @@ function TaskItem({
   );
 }
 
+// A task row, or a trip standing in for its checklist. Both are ranked by
+// the same triage call, so a trip lands where its most urgent step would.
+type OverviewItem =
+  | (TaskRow & { rollup?: undefined })
+  | (TripRollup & { rollup: TripRollup });
+
+// One trip, one line: the count, the step it is waiting on, and the due badge
+// of that step. Nothing to tick here; the steps live on the trip screen, one
+// tap away.
+function TripRollupItem({ rollup }: { rollup: TripRollup }) {
+  const nowIso = useContext(NowContext);
+  return (
+    <Link
+      href={`/trips/${rollup.trip_id}`}
+      className="press flex items-center gap-1 rounded-lg border border-border bg-surface p-1.5 shadow-[var(--shadow-card)]"
+    >
+      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-brand-soft text-[9px] font-bold uppercase tracking-[0.08em] text-brand-deep">
+        Trip
+      </span>
+      <span className="min-w-0 flex-1 py-1.5">
+        <span className="flex items-center gap-2">
+          <span className="truncate text-sm">{rollup.label}</span>
+          <span className="ml-auto pl-1">
+            <DueBadge dueTs={rollup.due_ts} nowIso={nowIso} flagMissing={false} />
+          </span>
+        </span>
+        <span className="mt-0.5 block text-[11px] text-neutral-500">
+          {rollup.progress}, next: {rollup.next_title}
+        </span>
+      </span>
+    </Link>
+  );
+}
+
 function OverviewTab({
   tasks,
+  tripSteps,
   workStreams,
   wsById,
   projById,
@@ -305,6 +348,7 @@ function OverviewTab({
   onGoTo,
 }: {
   tasks: TaskRow[];
+  tripSteps: TripStep[];
   workStreams: WorkStreamRow[];
   wsById: Map<string, string>;
   projById: Map<string, string>;
@@ -314,12 +358,22 @@ function OverviewTab({
 }) {
   const now = Date.parse(useContext(NowContext));
 
+  // Travel admin does not stand here as five rows per trip. Each trip that
+  // still owes a step becomes one line, ranked exactly where its most urgent
+  // step would have ranked, naming that step and counting the rest.
   const open = tasks.filter(
-    (t) => t.status === "inbox" || t.status === "todo" || t.status === "doing"
+    (t) =>
+      !t.trip_id &&
+      (t.status === "inbox" || t.status === "todo" || t.status === "doing")
   );
-  const bands = triage(open, now);
-  const starved = bands.important.filter((t) => needsDeadline(t));
-  const inboxCount = tasks.filter((t) => t.status === "inbox").length;
+  const rollups = useMemo(() => rollUpTrips(tripSteps, now), [tripSteps, now]);
+  const ranked: OverviewItem[] = [
+    ...open,
+    ...rollups.map((r) => ({ ...r, rollup: r })),
+  ];
+  const bands = triage(ranked, now);
+  const starved = bands.important.filter((t) => !t.rollup && needsDeadline(t));
+  const inboxCount = tasks.filter((t) => !t.trip_id && t.status === "inbox").length;
 
   const stats: { label: string; value: number; tone: string; go: Tab }[] = [
     { label: "Do first", value: bands.do_first.length, tone: bands.do_first.length ? "text-overdue" : "", go: "board" },
@@ -335,7 +389,7 @@ function OverviewTab({
     }))
     .filter((s) => s.count > 0);
 
-  const sections: { title: string; hint?: string; items: TaskRow[] }[] = [
+  const sections: { title: string; hint?: string; items: OverviewItem[] }[] = [
     { title: "Do first", hint: "Urgent and important.", items: bands.do_first },
     {
       title: "Important, not urgent",
@@ -383,16 +437,20 @@ function OverviewTab({
               {s.hint && <p className="mt-1.5 text-[11px] text-muted">{s.hint}</p>}
             </div>
             <div className="space-y-2">
-              {s.items.map((t) => (
-                <TaskItem
-                  key={t.id}
-                  task={t}
-                  wsById={wsById}
-                  projById={projById}
-                  onEdit={onEdit}
-                  onNotice={onNotice}
-                />
-              ))}
+              {s.items.map((t) =>
+                t.rollup ? (
+                  <TripRollupItem key={t.id} rollup={t.rollup} />
+                ) : (
+                  <TaskItem
+                    key={t.id}
+                    task={t as TaskRow}
+                    wsById={wsById}
+                    projById={projById}
+                    onEdit={onEdit}
+                    onNotice={onNotice}
+                  />
+                )
+              )}
             </div>
           </section>
         )

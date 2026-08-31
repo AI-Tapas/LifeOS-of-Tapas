@@ -340,6 +340,9 @@ const performers: Record<string, Performer> = {
       priority: priority ?? "medium",
       due_ts: due ? dueIso(due) : null,
       work_stream_id: workStreamId,
+      // A trip id attaches the task as a checklist step, so it rolls up under
+      // the trip instead of standing on its own in every ranked list.
+      trip_id: s(input.trip_id),
       is_billable: input.billable === true,
       source: "assistant",
     });
@@ -355,7 +358,7 @@ const performers: Record<string, Performer> = {
     if (!taskId) throw new Error("task_id is required.");
     const { data: prev } = await supabase
       .from("tasks")
-      .select("title, notes, status, priority, due_ts, remind_offsets")
+      .select("title, notes, status, priority, due_ts, remind_offsets, trip_id")
       .eq("id", taskId)
       .single();
     if (!prev) throw new Error("Task not found.");
@@ -365,6 +368,7 @@ const performers: Record<string, Performer> = {
     if (s(input.status)) patch.status = s(input.status) as TaskInput["status"];
     if (s(input.priority)) patch.priority = s(input.priority) as TaskInput["priority"];
     if (s(input.due_date)) patch.due_ts = dueIso(s(input.due_date)!);
+    if (s(input.trip_id)) patch.trip_id = s(input.trip_id);
     const r = await updateTask(supabase, _userId, taskId, patch);
     if (!r.ok) throw new Error(r.message);
     return {
@@ -826,9 +830,15 @@ const performers: Record<string, Performer> = {
         : [],
       billable_to: s(input.billable_to),
       notes: s(input.notes),
+      // Same seeding path as the add-trip drawer: one implementation, so the
+      // steps and their dates cannot differ between the app and a connector.
+      with_checklist: input.with_checklist === true,
     });
     if (!r.ok) throw new Error(r.message);
-    return { summary: `Trip created: ${title}.`, undo: { trip_id: r.id } };
+    return {
+      summary: `Trip created: ${title}.${r.note ? ` ${r.note}` : ""}`,
+      undo: { trip_id: r.id, checklist_task_ids: r.checklistTaskIds ?? [] },
+    };
   },
 
   async update_trip(supabase, userId, input) {
@@ -1276,6 +1286,7 @@ async function performUndo(
         priority: prev.priority as TaskInput["priority"],
         due_ts: (prev.due_ts as string | null | undefined) ?? null,
         remind_offsets: prev.remind_offsets as number[] | undefined,
+        trip_id: (prev.trip_id as string | null | undefined) ?? null,
       });
       if (!r.ok) throw new Error(r.message);
       return;
@@ -1401,6 +1412,15 @@ async function performUndo(
       return;
     }
     case "create_trip": {
+      // The seeded checklist goes with it. The FK is set null so a real trip
+      // deletion leaves the steps behind as ordinary tasks, which is right,
+      // but undoing the creation must leave no trace at all.
+      const seeded = Array.isArray(undo.checklist_task_ids)
+        ? (undo.checklist_task_ids as unknown[]).filter(
+            (v): v is string => typeof v === "string"
+          )
+        : [];
+      for (const taskId of seeded) await deleteTask(supabase, userId, taskId);
       const r = await deleteTrip(supabase, userId, String(undo.trip_id));
       if (!r.ok) throw new Error(r.message ?? "Could not delete the trip.");
       return;

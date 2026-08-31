@@ -303,3 +303,38 @@ and email-verification rules live in lib/accounts.ts.
   lifeos_list_bills.
 - Tests: npm run test:m6 (offline). app/dev-preview renders the three trips
   screens with mock data for visual checks without a database.
+
+## Trip checklists (Milestone 6b)
+
+- tasks.trip_id (migration 20260831000100) makes a task a trip's checklist
+  step. on delete set null, the house rule for loose links: deleting a trip
+  turns its steps back into ordinary tasks rather than destroying work.
+- A step is an ordinary task on purpose. It keeps its due date, priority,
+  undo path and Google Calendar reminder; only where it is SHOWN changes.
+- lib/tasks/trip-rollup.ts is the one ranking implementation, beside
+  triage.ts. Home, the Tasks overview and the morning brief all call
+  rollUpTrips, so they cannot drift. A rollup row inherits the priority and
+  due date of the trip's most urgent incomplete step, so it lands in exactly
+  the band that step would have earned alone; it names that step, counts
+  honestly ("2 of 5 done", dropped steps out of the denominator), and a trip
+  with no open steps produces no row at all. The rollup id is `trip:<uuid>`,
+  never a task id.
+- The rollup applies to the ranked surfaces only. The Tasks Board, Inbox and
+  Projects tabs still list every step as its own row, so nothing is
+  unreachable from the task list itself.
+- lib/trips/checklist.ts is the one definition of the five standard steps and
+  their dates (onward and return 7 days before the start, hotel 5 days
+  before, receipts on the end date, the bill 2 days after). A date that would
+  land in the past is clamped to today. No start date means no checklist
+  rather than guessed dates. Non-AICA trips lose the branch wording, and the
+  reimbursement step only appears when somebody actually pays.
+- Seeding runs through lib/trips/write.ts seedTripChecklist, called by
+  createTrip when with_checklist is set. The add-trip drawer defaults it on,
+  the connector tool defaults it off, and both go through that one function.
+- create_task and update_task take an optional trip_id, so the assistant and
+  both connectors can attach travel admin to a trip (including the 36 tasks
+  already in the live database). lifeos_list_trips returns checklist_done and
+  checklist_total. No new tool, no bucket change, no new approval path.
+- Tests: npm run test:m6b (26 offline tests: rollup counts and rank
+  inheritance, checklist date derivation and the past-date clamp, the brief
+  ranking the same rows, and the tool-schema rules).
