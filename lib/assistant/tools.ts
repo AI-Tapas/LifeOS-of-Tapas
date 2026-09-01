@@ -830,7 +830,8 @@ export function assertNoAttendees(input: Record<string, unknown>): void {
 // `strict` is deliberately OFF unless asked for. It makes the provider compile
 // a grammar for the tool set, which carries hard structural limits: at most 16
 // union-typed and at most 24 optional parameters across all tools. This tool
-// set has 60 parameters, 31 of them optional, so strict mode refuses the whole
+// set has 147 parameters, 92 of them optional (M8 census; it was 60 and 31
+// when M4 wrote this line), so strict mode refuses the whole
 // request. Nothing about the security model depends on it: every argument is
 // validated server-side in lib/assistant/execute.ts (recipients parsed and
 // checked, attendee keys refused, required fields enforced), and no tool can

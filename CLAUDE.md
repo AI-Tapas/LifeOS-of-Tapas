@@ -156,9 +156,13 @@ and email-verification rules live in lib/accounts.ts.
 - Tool registry: lib/assistant/tools.ts is the fixed tool list and the
   security boundary. Buckets enforced in lib/assistant/execute.ts:
   autonomous (tasks, reminders, notes, people, obligations, solo events,
-  app-DB email drafts) execute immediately and are undoable; confirm
-  (send_email, propose_event_with_invites) only ever insert a proposed
-  assistant_actions row. Stub: gst wiki. There is no tool that mutates
+  trips) execute immediately and are undoable; confirm (draft_email,
+  send_email, propose_event_with_invites) only ever insert a proposed
+  assistant_actions row. draft_email is in the confirm list because the
+  executor has always turned it into a proposed send_email row, and G1/B11
+  made the declared bucket agree with what happens; the M4 line that called
+  it autonomous was stale from 1 September 2026 and is corrected here.
+  Stub: gst wiki. There is no tool that mutates
   assistant_actions.status, fetches URLs, or reads documents, and since M6d
   no tool bills or invoices anything.
 - Approval gate: approve happens only in the owner-session server action
@@ -210,7 +214,9 @@ and email-verification rules live in lib/accounts.ts.
   type; the OpenAI strict idiom (all-required plus nullable) is therefore
   off by default and opt-in via LLM_STRICT=on. Strict mode itself is off on
   BOTH dialects: Anthropic strict compiles a grammar capped at 16 union-typed
-  and 24 optional parameters, and this tool set has 31 optional ones. Nothing
+  and 24 optional parameters, and this tool set has 92 optional ones (147
+  parameters in all, counted at M8; the number grows every milestone, so read
+  the census rather than this line). Nothing
   in the security model depends on strict; lib/assistant/execute.ts validates
   every argument server-side and the approval gate is independent of it.
   scripts/m4.test.ts walks every schema, fails on any union, and records the
@@ -238,16 +244,22 @@ and email-verification rules live in lib/accounts.ts.
   outside model. Approve, reject, execute and undo are deliberately NOT on
   that surface. lib/assistant/actor.ts supplies the identity: cookieActor for
   the browser, serviceActor for token-authenticated callers. Task writes moved
-  to lib/tasks/write.ts so all three callers share one implementation. The
+  to lib/tasks/write.ts so all three callers share one implementation, with ONE
+  deliberate exception: undoing a delete_task re-inserts the kept snapshot
+  directly (lib/assistant/execute.ts), original id and all, because routing it
+  through createTask would mint a new id and make the undo a copy rather than a
+  reversal. It restores priority_source and priority_reason verbatim, so the
+  B3 rule is honoured by restoring his hand rather than by re-deciding it. The
   server itself lives in mcp-server/ (its own package, excluded from the Next
   tsconfig and eslint; stdio transport, and it fetches its tool list from the
   app so it cannot drift).
 - Tool surface (31 registry tools, shared by the in-app assistant and both
-  connectors): create/update/delete for tasks, notes, people, obligations,
-  finance items and projects; solo calendar events including edit and delete
+  connectors): create/update/delete for tasks, notes, people, obligations and
+  finance items; add_project only, with no update or delete for a project;
+  create, update and log for trips; solo calendar events including edit and delete
   (delete_event refuses anything with source other than 'app', so a synced
   event is never removed); draft_email; scan_mail; undo_action;
-  reject_queued_action. Ten read tools mirror them, so nothing writable is
+  reject_queued_action. Eleven read tools mirror them, so nothing writable is
   invisible. send_email and propose_event_with_invites stay confirm-bucket,
   and NO tool approves: approval is owner-session only, in the app.
 - Remote MCP connector (ChatGPT, Claude web and mobile): POST /api/mcp/http
@@ -264,8 +276,9 @@ and email-verification rules live in lib/accounts.ts.
   a live owner session and a two-tap consent screen at /connect, so a token
   exists only because Tapas approved it. Settings lists connections and can
   revoke them. Rules are pure in lib/mcp/oauth-core.ts and tested offline.
-- Tests: npm run test:m4 (offline, the R6 red-team controls). rls.test.mjs
-  adds audit_log append-only and payload-immutability trigger proofs.
+- Tests: npm run test:m4 (63 offline, the R6 red-team controls and the four
+  G1 governance controls). rls.test.mjs adds audit_log append-only and
+  payload-immutability trigger proofs.
 
 ## Travel Desk (Milestones 6 and 6d)
 
@@ -275,17 +288,16 @@ and email-verification rules live in lib/accounts.ts.
   20260901000300_m6d_invoice_feed.sql replaced trips.billable_to (free text)
   with trips.bills_to, enum trip_bills_to: icai_monthly (the default),
   chapter_aed, none.
-- The bills and billing_profile TABLES are UNUSED. Nothing in the app reads
-  or writes them since M6d; they are left in place only because dropping a
-  table is irreversible. A later migration can remove them, along with the
-  bill_recipient and bill_status enums and the billing_profile insert in
-  seed_new_user.
+- The bills and billing_profile TABLES, and the bill_recipient and bill_status
+  enums, were dropped in M8 (migration 20260901000800). Nothing had read or
+  written them since M6d. Do not reintroduce them: see "Billing: what this app
+  does NOT do" below.
 - receipt_ref stays a reference string. There is no upload path, no storage
   bucket and no attachment UI anywhere in this module, and scripts/m6.test.ts
   fails if any tool grows a file-shaped parameter.
-- lib/trips/bill.ts is pure trip logic despite its name (M6d emptied it of
-  bills): transport modes, leg parsing, the billable rollup, and the date
-  labels. Renaming it was left out of M6d to keep that diff small.
+- lib/trips/core.ts is the pure trip logic: transport modes, leg parsing, the
+  billable rollup, the date labels and the session line. It was called bill.ts
+  until M8, which had not been true since M6d emptied it of bills.
 - lib/trips/month.ts is the month pack, pure: which month a trip belongs to,
   what the ICAI claim excludes, the receipt gaps, and the plain text the Copy
   button puts on the clipboard.
@@ -305,7 +317,7 @@ and email-verification rules live in lib/accounts.ts.
 - Assistant tools: create_trip, update_trip, log_trip_leg, add_trip_expense,
   all autonomous and undoable, mirrored by the read tool lifeos_list_trips
   (which now reports bills_to and receipts_missing).
-- Tests: npm run test:m6 (25 offline). app/dev-preview renders the trips
+- Tests: npm run test:m6 (29 offline). app/dev-preview renders the trips
   screens and the month pack with mock data for visual checks without a
   database.
 
@@ -371,7 +383,7 @@ What the app does instead:
   is open. No script means light, which is the primary theme by design.
 - `@custom-variant dark` in globals.css repoints Tailwind's `dark:` utilities
   at the same attribute. Without it an explicit choice half-applies: the
-  tokens flip and the ~37 `dark:` classes do not. Do not remove it.
+  tokens flip and the ~44 `dark:` classes do not. Do not remove it.
 - The Settings control reads the value through `useSyncExternalStore`, not an
   effect: localStorage is external state, and reading it in an effect both
   trips react-hooks/set-state-in-effect and paints the wrong option briefly.
@@ -409,9 +421,10 @@ What the app does instead:
   both connectors can attach travel admin to a trip (including the 36 tasks
   already in the live database). lifeos_list_trips returns checklist_done and
   checklist_total. No new tool, no bucket change, no new approval path.
-- Tests: npm run test:m6b (26 offline tests: rollup counts and rank
-  inheritance, checklist date derivation and the past-date clamp, the brief
-  ranking the same rows, and the tool-schema rules).
+- Tests: npm run test:m6b (34 offline tests: rollup counts and rank
+  inheritance, the city in the label, checklist date derivation and the
+  past-date clamp, the chapter_aed reminder, the brief ranking the same rows,
+  and the tool-schema rules).
 
 ## Hotel arrangement (Milestone 6c)
 
@@ -455,9 +468,10 @@ What the app does instead:
 - Expenses: on relative and same_day the hotel category is ordered last in
   the expense drawer, never removed. Plans change, and a night he did pay for
   must still be recordable.
-- Tests: npm run test:m6c (21 offline tests: the four checklists, the
+- Tests: npm run test:m6c (22 offline tests: the four checklists, the
   night-before line, the branch default and the same-dates exception, null
   rows resolving to branch, and the tool-schema rules).
+
 ## Priority provenance (B3)
 
 - The problem B3 fixes: Home ranks urgent-and-important first, then
@@ -498,11 +512,7 @@ What the app does instead:
   /assistant?ask=priorities, which types (never sends) "Review my task
   priorities" into the chat box. No batch UI and no scheduled re-prioritising:
   a chat pass is a conversation he can argue with, which is the point.
-- Tests: npm run test:b3 (17 offline).
-- Tests: npm run test:m6b (31 offline tests: rollup counts and rank
-  inheritance, the city in the label, checklist date derivation and the
-  past-date clamp, the chapter_aed reminder, the brief ranking the same
-  rows, and the tool-schema rules).
+- Tests: npm run test:b3 (20 offline).
 
 ## Reminder mode: the calendar is for interrupts (Milestone 7a)
 
@@ -610,14 +620,15 @@ no migration: B12 reuses the meta jsonb audit_log has always had.
   prints them as the level).
 - session_date is the teaching day. It is NOT start_date, and often not
   end_date either.
-- sessionLine() and travelDiffersFromSession() in lib/trips/bill.ts are pure
+- sessionLine() and travelDiffersFromSession() in lib/trips/core.ts are pure
   and drive the card: "L1D2 - 4 Sept - Bangalore" leads, the descriptive
   title sits under it, and the travel span is labelled "Travel ..." and only
   shown when it says something the session date does not (a day return
   would just repeat itself). A trip with neither field reads exactly as it
   did before.
 - Both fields are on create_trip and update_trip, so a schedule import fills
-  them. prompts/RECIPE-aica-schedule-intake.md carries the mapping.
+  them. `prompts/RECIPE-aica-schedule-intake.md` carries the mapping; it lives
+  in the project folder, not in this repo.
 
 ## Money completed (M7b: investments, B2, B4)
 
@@ -766,3 +777,54 @@ applied to the cloud database.
   Nothing writes that key any more.
 - Tests: `npm run test:m7c` (39 offline). app/dev-preview renders the notes
   and people panels and the recovery-day card with mock data.
+
+## Closeout (M8)
+
+Two migrations, `20260901000800_m8_drop_billing_remnants.sql` and
+`20260901000900_m8_persona_refresh.sql`. No new screen, no new tool, no new
+column.
+
+- The GST wiki hook, `lookup_gst_wiki`, is present and INACTIVE by design:
+  bucket `stub`, disclosure `none`, and one fixed sentence saying the wiki is
+  not connected. An inactive stub reads nothing, which is why `none` is the
+  honest class; connecting the wiki later needs a class Tapas approves by
+  name, and that is a decision rather than a diff.
+  `scripts/m8.test.ts` is what keeps that true: the registry module imports
+  nothing at all, the executor answers a stub before it builds an owner client
+  and without awaiting anything, no shipped file outside the registry may even
+  name the tool, and the tool carries no parameter that could address a URL,
+  a path or a file. Routing is by tool NAME (B11), so a hostile argument still
+  lands on the same sentence.
+- The quarterly persona refresh is one recurring task in the Personal stream,
+  `recurring_rule` 'monthly:3' on the M1 machinery, first due on the first day
+  of the next quarter at 09:30 IST. `reminder_mode` is 'calendar': four
+  entries a year is not the clutter M7a removed, and this is the same case as
+  the chapter AED invoice step, rare enough that nothing else in his week
+  raises it. Priority is 'medium', not 'high', because B3 makes a seeded row
+  count as his own hand and a permanent 'high' would dilute the Do-first band.
+  SQL cannot call Google Calendar, so the migration also writes the `reminders`
+  row in the pending state (`channel` 'gcal', `created` false) the writer
+  already uses when ca.tapasnr is unreachable; `retryPendingReminders`, which
+  runs on every calendar sync, then creates the event.
+- The M6d debt is cleared: `lib/trips/bill.ts` is now `lib/trips/core.ts`, and
+  the `bills` and `billing_profile` tables, the `bill_recipient` and
+  `bill_status` enums and the `billing_profile` insert in `seed_new_user` are
+  dropped. The drop migration RAISES rather than running if any bills row
+  exists or any billing_profile row holds typed content, so a surprise stops
+  the deploy instead of destroying data. If it ever fails, read the rows with
+  Tapas; do not weaken the guard.
+- `components/placeholder.tsx` ("This module arrives in a later milestone")
+  was deleted: nothing had imported it since Brain and Money were built. So
+  were three exported functions nothing imported: `renderUntrustedNote`
+  (mcp-api.ts), `newestStaleness` (events/sync.ts, superseded by the inline
+  `isStale` on the calendar page) and `sameCivil` (datetime.ts).
+- The month pack's Copy button no longer fails silently. `navigator.clipboard`
+  is refused outright on an insecure origin and can be denied by the browser,
+  and the old catch set a flag nothing rendered, so a failure looked exactly
+  like a success on the app's ONLY handover to his invoice run. It now says the
+  copy failed and renders the text in a read-only box to select by hand. Do not
+  reduce this back to a silent catch.
+- The V1 acceptance walk-through, and the list of everything the closeout
+  sweep found, live in `checkpoints/M8-v1-acceptance.md` in the project folder
+  (not in this repo).
+- Tests: `npm run test:m8` (15 offline).

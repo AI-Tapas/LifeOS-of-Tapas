@@ -74,10 +74,6 @@ export function startOfWeek(c: CivilDate, weekStartsOn = 1): CivilDate {
   return addDays(c, -diff);
 }
 
-export function sameCivil(a: CivilDate, b: CivilDate): boolean {
-  return a.y === b.y && a.m === b.m && a.d === b.d;
-}
-
 // The instant for an IST wall-clock time on a civil date.
 export function istInstant(c: CivilDate, hour = 0, minute = 0): Date {
   return new Date(Date.UTC(c.y, c.m - 1, c.d, hour, minute) - IST_OFFSET_MS);

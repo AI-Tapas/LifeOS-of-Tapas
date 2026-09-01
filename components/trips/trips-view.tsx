@@ -19,7 +19,7 @@ import {
   btnSmall,
 } from "@/components/ui";
 import { formatINR } from "@/lib/datetime";
-import { sessionLine, tripDatesLabel, travelDiffersFromSession } from "@/lib/trips/bill";
+import { sessionLine, tripDatesLabel, travelDiffersFromSession } from "@/lib/trips/core";
 import {
   BillsToChip,
   PurposeChip,

@@ -4,7 +4,7 @@ import TripDetail, {
   type ChecklistRow,
   type ExpenseRow,
 } from "@/components/trips/trip-detail";
-import { parseLegs } from "@/lib/trips/bill";
+import { parseLegs } from "@/lib/trips/core";
 import { civilKey, civilToday } from "@/lib/datetime";
 import type { TripFormValues } from "@/components/trips/trip-form";
 

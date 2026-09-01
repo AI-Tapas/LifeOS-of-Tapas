@@ -25,7 +25,7 @@ import {
   tripDatesLabel,
   type ExpenseCategory,
   type TripLeg,
-} from "./bill.ts";
+} from "./core.ts";
 
 // trip_bills_to. Kept as a plain union so this file stays importable by
 // node --test without the generated database types.

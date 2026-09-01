@@ -13,7 +13,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { BandHead, Card, Empty, PageHeader, SectionLabel, btnSmall } from "@/components/ui";
 import { formatINR } from "@/lib/datetime";
-import { MODE_LABELS, dayLabel, type TransportMode } from "@/lib/trips/bill";
+import { MODE_LABELS, dayLabel, type TransportMode } from "@/lib/trips/core";
 import {
   buildMonthPack,
   categoryLabel,
@@ -39,6 +39,7 @@ export default function MonthPack({
 }) {
   const [month, setMonth] = useState(defaultMonth);
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
 
   const pack = useMemo(
     () => buildMonthPack(trips, expenses, month),
@@ -49,13 +50,20 @@ export default function MonthPack({
   const tripTitle = (id: string) =>
     trips.find((t) => t.id === id)?.title ?? "Trip";
 
+  // The clipboard is refused outright on an insecure origin and can be denied
+  // by the browser, and this button is the app's ONLY handover to his invoice
+  // run. A silent failure here looks exactly like a successful copy, so he
+  // would paste last month's clipboard into the workbook. Say so instead, and
+  // put the text on screen to select by hand.
   async function copy() {
+    setCopyFailed(false);
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 2500);
     } catch {
       setCopied(false);
+      setCopyFailed(true);
     }
   }
 
@@ -90,6 +98,20 @@ export default function MonthPack({
           {copied ? "Copied" : "Copy for the invoice run"}
         </button>
       </div>
+
+      {copyFailed && (
+        <div className="mt-3 rounded-xl border border-overdue/30 bg-overdue-soft p-3">
+          <p className="text-sm text-overdue">
+            This browser would not let the app write to the clipboard. Nothing
+            was copied. Select the text below and copy it by hand.
+          </p>
+          <textarea
+            readOnly
+            value={text}
+            className="mt-2 h-64 w-full rounded-lg border border-border bg-surface p-2 font-mono text-xs"
+          />
+        </div>
+      )}
 
       <p className="mt-3 rounded-xl border border-border bg-surface-2 p-3 text-xs text-secondary">
         Life OS does not raise the invoice. It holds the month accurately and

@@ -22,7 +22,8 @@
     "test:b3": "node --test scripts/b3.test.ts",
     "test:m7a": "node --test scripts/m7a.test.ts",
     "test:m7b": "node --test scripts/m7b.test.ts",
-    "test:m7c": "node --test scripts/m7c.test.ts"
+    "test:m7c": "node --test scripts/m7c.test.ts",
+    "test:m8": "node --test scripts/m8.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",

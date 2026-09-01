@@ -11,13 +11,16 @@ import { createClient } from "@supabase/supabase-js";
 const ALLOWED_EMAIL = "tapas.tnr@gmail.com";
 const TABLES = [
   "accounts", "calendars", "events", "work_streams", "projects", "tasks",
-  "trips", "trip_expenses", "bills", "people", "notes", "finance_items",
+  "trips", "trip_expenses", "people", "notes", "finance_items",
   "recurring_obligations", "reminders", "assistant_actions",
   "assistant_persona", "audit_log",
   // M4 and the connector: assistant_settings holds model choices, and the two
   // mcp_ tables hold OAuth registrations and hashed token material, so anon
   // must be shut out of them exactly as firmly.
   "assistant_settings", "mcp_clients", "mcp_grants",
+  // M7c: the chat transcript is his own words about his own work, in the same
+  // sensitivity class as assistant_persona. It was missing from this list.
+  "assistant_chat_turns",
 ];
 
 function localEnv() {
