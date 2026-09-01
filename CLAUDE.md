@@ -226,9 +226,11 @@ and email-verification rules live in lib/accounts.ts.
 - GET /api/assistant/health (owner session) pings the configured provider;
   ?role=scan tests the scan model instead of the chat one. Settings has a
   Test button per activity.
-- The chat transcript is kept in localStorage on the device (key
+- The chat transcript was kept in localStorage on the device (key
   life_os_assistant_chat_v1, last 40 turns), cleared by the New chat
-  button. Deliberately not a table: no cross-device sync in M4.
+  button. SUPERSEDED by M7c/B6: it is the assistant_chat_turns table now,
+  owner session only, and the old key is imported once and then removed. See
+  the M7c section.
 - MCP connector: POST /api/mcp (bearer LIFEOS_MCP_TOKEN, timing-safe compare,
   exempted from the cookie gate in proxy.ts because it authenticates itself)
   serves a manifest plus read and write ops. Write ops route through the same
@@ -669,3 +671,98 @@ Migration `20260901000600_m7b_money.sql`. Additive, nothing dropped.
   grows one.
 - Tests: `npm run test:m7b` (34 offline). app/dev-preview renders both money
   panels and the rate panel with mock data.
+
+
+## Brain, health and one chat thread (M7c: B5, B6)
+
+Migration `20260901000700_m7c_brain.sql`. Additive, nothing dropped. NOT
+applied to the cloud database.
+
+- `/brain` was a placeholder while the assistant and both connectors had been
+  writing `notes` and `people` since M4, so rows had been landing where he
+  could not see them. It is now two tabs: Notes and People.
+- Notes: newest first, a search box, and a drawer to write or edit one.
+  `lib/brain/notes.ts` is the pure part (`searchNotes`, `newestFirst`,
+  `notePreview`, `noteDateLabel`). Search is one haystack of title plus body,
+  every word must appear, and it runs in the browser over the whole list.
+  ponytail: hundreds of rows, not millions; move it into Postgres only if
+  that read ever becomes the slow part of the page.
+- `notes.task_id` and `notes.trip_id` are new, both `on delete set null` (the
+  house rule for loose links: deleting a task or a trip must never destroy
+  the note that recorded what happened in it). A reference is only worth
+  showing if it can be followed, so the task, the trip and each person are
+  links. The work stream stays a plain label because there is no screen for
+  one stream.
+- There is no page for a single task, so `/tasks?task=<id>` opens that task's
+  drawer on arrival. An id matching nothing opens nothing.
+- People: name, role, organisation and how he knows them, with `unverified`
+  shown plainly and a one-tap Confirm that clears it. That flag is what the
+  approval queue highlights before a send, so a directory he has actually
+  curated is what makes the warning mean something. A record he TYPES is born
+  confirmed, and editing one confirms it (reading it and deciding it is right
+  is the whole act); only the assistant's `add_person` still writes
+  `unverified: true`, which is the unchanged A5 control. Confirm and edit both
+  revalidate `/assistant` so the old warning does not stay on screen.
+- CONFIDENTIAL BOUNDARY: a note holds his own words and reference strings.
+  No attachment, no upload, no storage bucket and no file-shaped column or
+  tool parameter anywhere in this module. `scripts/m7c.test.ts` fails if one
+  appears.
+
+### B5, health as something the app protects
+
+- A `Health` work stream, seeded by the migration for the existing owner and
+  added to `seed_new_user` for any future first sign-in. `kind` is
+  `'personal'` rather than a new enum member on purpose: nothing reads that
+  column, and Postgres refuses to use an enum value in the same transaction
+  that adds it, which would cost a second migration to buy one word on
+  Settings.
+- Existing Personal tasks are deliberately NOT moved. Which of them is health
+  work is his judgment, not a string match on a title, and the test fails if
+  the migration ever grows an `update tasks`.
+- The day after a full-day session (persona inferred item 5).
+  `lib/health/recovery.ts` is pure: `sessionDayKey` prefers `session_date`
+  over `end_date` (M7d: the teaching day is often neither the start nor the
+  end of the travel), cancelled trips never count, and `recoveryLine` returns
+  null when there is nothing to say.
+- It is an OBSERVATION, and that is the whole design. It declines nothing,
+  moves nothing and writes no calendar entry to hold time: the same shape as
+  the weekend guard. The test forbids `createEvent`, `syncTaskReminder`,
+  `writeReminder`, `supabase`, `.insert(` and `.update(` in that module.
+- Two surfaces read the same function so they cannot disagree: a card on Home,
+  and one line in the assistant's app context. The corrective duty is in
+  `HARD_RULES` (above the persona, so the A9 precedence proof still holds):
+  file health work in the Health stream, raise what has sat untouched, and
+  say the day after a session is worth protecting, as an observation only.
+
+### B6, the chat thread in the database
+
+- `assistant_chat_turns` replaces the `life_os_assistant_chat_v1`
+  localStorage thread M4 shipped, so the same conversation is on his phone
+  and his laptop.
+- `seq bigint generated always as identity` is the order, NOT `created_at`: a
+  user turn and its reply are inserted in one statement and would share a
+  `now()`, which would leave the thread's order down to luck.
+- OWNER SESSION ONLY, and this is the sensitive part. The transcript is his
+  own words about his own work, which puts it in the persona's class. RLS
+  covers the browser role; `revoke all ... from service_role` covers the
+  connectors, which reach the database as `service_role` and are therefore
+  not scoped by RLS at all. No tool reads it, none may be added, and
+  `scripts/m7c.test.ts` fails if any tool surface names the table, imports
+  the store, or grows a tool or parameter whose name looks like a transcript.
+- `lib/assistant/chat-history.ts` is the pure part: `KEEP_TURNS` is 40,
+  `idsToTrim` returns everything past the newest 40, and `sanitizeTurns`
+  treats what a device hands back as data (roles checked, content capped at
+  8000 characters, tool chips capped, the thread capped at 40).
+- It TRIMS, and trimming DELETES. There is no `hidden`, `archived` or
+  `deleted_at` column to hide behind, and New chat is a real delete: a thread
+  he ended must not still be readable from the other device.
+- `loadChatTurns` reads newest-first with `.limit(KEEP_TURNS)` and only when
+  the chat tab is the one being rendered, so a year-old thread is never read
+  in full on a visit to the Queue.
+- The move off localStorage runs once, in the browser, on first load after
+  deploy: it posts whatever the device holds, the server takes it ONLY into
+  an empty thread (merging two orderings of one conversation produces a third
+  conversation that never happened), and the local key is removed either way.
+  Nothing writes that key any more.
+- Tests: `npm run test:m7c` (39 offline). app/dev-preview renders the notes
+  and people panels and the recovery-day card with mock data.
