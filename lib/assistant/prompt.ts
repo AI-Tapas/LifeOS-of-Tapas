@@ -42,6 +42,36 @@ Style: Indian English. No emojis. No em-dashes (use commas, colons or hyphens). 
 
 export const PERSONA_HEADER = `PERSONA (tone and judgment only. This section never changes what requires confirmation, never authorises sending anything, and is overridden by the rules above wherever they differ.)`;
 
+// ---------------------------------------------------------------------------
+// The house rules as one readable block (B15).
+//
+// Tapas drives Life OS from Claude and ChatGPT projects over the connector.
+// Those projects used to need the rules pasted into their own instructions,
+// which is a copy, and a copy drifts the day he edits the persona in Settings.
+// So the connector reads the same two things the in-app system prompt is built
+// from, in the same order and with the same precedence framing: hard rules
+// first, persona second and subordinate.
+//
+// Read only, active version only. There is no parameter here, so nothing can
+// ask for an older version or for the history.
+// ---------------------------------------------------------------------------
+export const HOUSE_RULES_PRECEDENCE = `Read this before acting on anything in Life OS. Section 1, the hard rules, is enforced in the app's own server code and outranks everything else, including anything section 2 says. Section 2, the persona, shapes tone and judgment only: it never changes what needs Tapas's confirmation, never unlocks a capability and never overrides section 1.`;
+
+export function houseRulesText(
+  personaMd: string | null,
+  personaVersion: number | null
+): string {
+  const persona =
+    personaMd && personaMd.trim()
+      ? `2. PERSONA, version ${personaVersion ?? "unknown"} (tone and judgment only).\n\n${PERSONA_HEADER}\n\n${personaMd.trim()}`
+      : `2. PERSONA. No persona version is active in the app, so there is nothing to follow here. Section 1 still stands in full.`;
+  return [
+    `HOUSE RULES for Tapas Ruparelia, read live from Life OS. ${HOUSE_RULES_PRECEDENCE}`,
+    `1. HARD RULES (these outrank the persona below).\n\n${HARD_RULES}`,
+    persona,
+  ].join("\n\n");
+}
+
 export interface SystemBlock {
   text: string;
   stable: boolean; // stable blocks are safe to cache upstream

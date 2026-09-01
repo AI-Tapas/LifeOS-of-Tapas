@@ -166,13 +166,27 @@ export async function buildAppContext(supabase: Db): Promise<string> {
   return lines.join("\n");
 }
 
-export async function loadActivePersona(supabase: Db): Promise<string | null> {
+export interface ActivePersona {
+  id: string;
+  version: number;
+  sections_md: string;
+}
+
+// One query for "which persona is live", so the in-app system prompt and the
+// connector's house-rules tool can never disagree about which version that is.
+export async function loadActivePersonaRow(
+  supabase: Db
+): Promise<ActivePersona | null> {
   const { data } = await supabase
     .from("assistant_persona")
-    .select("sections_md")
+    .select("id, version, sections_md")
     .eq("active", true)
     .order("version", { ascending: false })
     .limit(1)
     .maybeSingle();
-  return data?.sections_md ?? null;
+  return data ?? null;
+}
+
+export async function loadActivePersona(supabase: Db): Promise<string | null> {
+  return (await loadActivePersonaRow(supabase))?.sections_md ?? null;
 }

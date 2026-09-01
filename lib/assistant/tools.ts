@@ -36,6 +36,14 @@ export type ToolBucket = "autonomous" | "confirm" | "stub";
 //   app_data       reads rows Life OS itself owns
 //   mail_metadata  sender, subject, timestamps, calendar invite fields
 //   mail_body      message bodies, previews and snippets
+//   persona        the active persona version, his own words about how he
+//                  thinks. Owner-session data everywhere else in this app, so
+//                  it is not app_data: this class exists so that a read of it
+//                  is never anonymous, and so every audit row says plainly
+//                  that the persona was read over a connector. Tapas widened
+//                  the union to add it by name on 1 September 2026 (B15), so
+//                  his Claude and ChatGPT projects can read the house rules
+//                  from the app instead of carrying a pasted copy that drifts.
 // The type is DERIVED from this list rather than written alongside it, so the
 // only way to widen the union is to add a member here, and the test that reads
 // this list is therefore a test of the type itself.
@@ -44,6 +52,7 @@ export const TOOL_DISCLOSURES = [
   "app_data",
   "mail_metadata",
   "mail_body",
+  "persona",
 ] as const;
 
 export type ToolDisclosure = (typeof TOOL_DISCLOSURES)[number];
@@ -800,11 +809,14 @@ export function toolByName(name: string): ToolDef | undefined {
   return TOOLS.find((t) => t.name === name);
 }
 
-// The disclosure class of any tool the executor may be asked to run, the scan
-// pipeline's single tool included. An unknown name gets the most restrictive
-// answer rather than a permissive default.
+// The disclosure class of any tool that can be asked to run: the write
+// registry, the scan pipeline's single tool, and the connector's read tools.
+// An unknown name gets the most restrictive answer rather than a permissive
+// default.
 export function disclosureOf(name: string): ToolDisclosure {
   if (name === SCAN_TOOL.name) return SCAN_TOOL.disclosure;
+  const read = READ_TOOL_DISCLOSURES[name as McpReadTool];
+  if (read) return read;
   return toolByName(name)?.disclosure ?? "none";
 }
 
@@ -893,6 +905,7 @@ export function schemaStats(defs: ToolDef[] = TOOLS): {
 // those stay owner-session acts inside the app.
 // ---------------------------------------------------------------------------
 export const MCP_READ_TOOLS = [
+  "lifeos_get_house_rules",
   "lifeos_get_context",
   "lifeos_list_tasks",
   "lifeos_list_events",
@@ -905,6 +918,32 @@ export const MCP_READ_TOOLS = [
   "lifeos_list_pending_actions",
   "lifeos_list_action_history",
 ] as const;
+
+export type McpReadTool = (typeof MCP_READ_TOOLS)[number];
+
+// The name of the house-rules tool, in one place, because the disclosure gate,
+// the connector surface and the audit row all have to mean the same tool.
+export const HOUSE_RULES_TOOL = "lifeos_get_house_rules";
+
+// What each read tool is entitled to SEE. A write tool carries its class on
+// its own ToolDef; the read surface is a list of names, so it carries the same
+// declaration here. The record is keyed by the read-tool union, so a new read
+// tool does not compile until somebody has said what it may see, and exactly
+// one entry may say 'persona'.
+export const READ_TOOL_DISCLOSURES: Record<McpReadTool, ToolDisclosure> = {
+  lifeos_get_house_rules: "persona",
+  lifeos_get_context: "app_data",
+  lifeos_list_tasks: "app_data",
+  lifeos_list_events: "app_data",
+  lifeos_list_notes: "app_data",
+  lifeos_list_people: "app_data",
+  lifeos_list_obligations: "app_data",
+  lifeos_list_finance_items: "app_data",
+  lifeos_list_projects: "app_data",
+  lifeos_list_trips: "app_data",
+  lifeos_list_pending_actions: "app_data",
+  lifeos_list_action_history: "app_data",
+};
 
 export function mcpWriteTools(): ToolDef[] {
   return TOOLS.filter((t) => t.bucket !== "stub");
