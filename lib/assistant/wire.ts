@@ -186,7 +186,7 @@ export function applyOpenAIChunk(
 export function finishOpenAIStream(state: OpenAIStreamState): {
   text: string;
   calls: ToolCall[];
-  stop: "end" | "tool_use" | "refusal";
+  stop: "end" | "tool_use" | "refusal" | "length";
 } {
   // A turn that spent its whole budget thinking leaves no visible answer;
   // say so rather than returning an empty bubble.
@@ -203,7 +203,9 @@ export function finishOpenAIStream(state: OpenAIStreamState): {
     ? ("refusal" as const)
     : state.finish === "tool_calls" || calls.length
       ? ("tool_use" as const)
-      : ("end" as const);
+      : state.finish === "length"
+        ? ("length" as const)
+        : ("end" as const);
   return {
     text: spentOnThinking
       ? "The model used its whole reply budget on internal reasoning and returned no answer. Try a shorter question, or raise LLM_MAX_TOKENS."

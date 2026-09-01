@@ -90,6 +90,16 @@ export async function POST(req: Request): Promise<Response> {
             emit({ t: "notice", d: "The model declined this request." });
             break;
           }
+          if (result.stop === "length") {
+            // The reply hit the token ceiling. With adaptive thinking the
+            // whole budget can go on reasoning, so without this line the
+            // bubble arrives blank and looks like the app failed.
+            emit({
+              t: "notice",
+              d: "The reply ran out of room before it finished. Ask again, or ask for a shorter answer.",
+            });
+            break;
+          }
           if (result.stop !== "tool_use") break;
 
           conv.push({ kind: "tool_use", text: result.text, calls: result.calls });

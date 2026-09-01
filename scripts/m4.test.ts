@@ -582,7 +582,9 @@ test("a reasoning-only turn explains itself instead of returning an empty reply"
   wire.applyOpenAIChunk(s, { delta: { reasoning_content: "thinking hard" } });
   wire.applyOpenAIChunk(s, { delta: {}, finish_reason: "length" });
   const done = wire.finishOpenAIStream(s);
-  assert.equal(done.stop, "end");
+  // "length", not "end": the turn was cut off by the token ceiling, and the
+  // chat route now tells the user so instead of painting a blank bubble.
+  assert.equal(done.stop, "length");
   assert.match(done.text, /internal reasoning/);
 
   // Reasoning followed by a real answer keeps the answer, not the notice.

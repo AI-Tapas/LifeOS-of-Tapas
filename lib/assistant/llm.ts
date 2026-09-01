@@ -27,7 +27,7 @@ import {
 export interface LlmTurn {
   text: string;
   calls: ToolCall[];
-  stop: "end" | "tool_use" | "refusal";
+  stop: "end" | "tool_use" | "refusal" | "length";
 }
 
 export interface LlmTurnRequest {
@@ -90,7 +90,9 @@ async function runAnthropicTurn(
       ? ("refusal" as const)
       : final.stop_reason === "tool_use" && calls.length
         ? ("tool_use" as const)
-        : ("end" as const);
+        : final.stop_reason === "max_tokens"
+          ? ("length" as const)
+          : ("end" as const);
   return { text, calls, stop };
 }
 

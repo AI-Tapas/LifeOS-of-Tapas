@@ -175,7 +175,11 @@ export function llmConfig(
       (override?.model || "").trim() ||
       firstSet([preset.modelVar, "LLM_MODEL"], env) ||
       preset.model,
-    maxTokens: Number(env.LLM_MAX_TOKENS || 4096),
+    // 16000, not 4096: adaptive thinking spends from this same budget, and a
+    // hard question can burn a small cap entirely on thinking, leaving zero
+    // tokens for the visible answer (seen live 1 Sept 2026 as blank chat
+    // bubbles). The runner streams, so a large cap costs nothing up front.
+    maxTokens: Number(env.LLM_MAX_TOKENS || 16000),
     thinking: env.LLM_THINKING === "off" ? "off" : "adaptive",
     strictTools: env.LLM_STRICT === "on",
     timeoutMs: Number(env.LLM_TIMEOUT_MS || 90000),
