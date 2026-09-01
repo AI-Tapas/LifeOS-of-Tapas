@@ -52,7 +52,7 @@ export async function GET(req: Request): Promise<Response> {
         // shows one rolled-up line per trip instead of a row per step.
         supabase
           .from("tasks")
-          .select("id, title, status, priority, due_ts, trip_id, trips(id, title, start_date, end_date, cities)")
+          .select("id, title, status, priority, due_ts, trip_id, trips(id, title, start_date, end_date, cities, session_label, session_date)")
           .eq("user_id", userId)
           .not("trip_id", "is", null),
         supabase.from("work_streams").select("id, name").eq("user_id", userId),
@@ -114,6 +114,8 @@ export async function GET(req: Request): Promise<Response> {
           ...(t.trips as NonNullable<typeof t.trips>),
           // cities is jsonb, so it arrives as Json; the rollup wants strings.
           cities: Array.isArray(t.trips!.cities) ? (t.trips!.cities as string[]) : [],
+        session_label: t.trips!.session_label,
+        session_date: t.trips!.session_date,
         },
       }));
     const briefEvents: BriefEvent[] = (events ?? []).map((e) => {

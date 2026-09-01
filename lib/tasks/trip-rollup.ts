@@ -17,7 +17,7 @@
 // morning brief all call this, so they cannot drift apart.
 
 import { triage, type TriageTask } from "./triage.ts";
-import { tripDatesLabel } from "../trips/bill.ts";
+import { sessionLine, travelDiffersFromSession, tripDatesLabel } from "../trips/bill.ts";
 
 // The statuses that mean "still owed". Matches Home's own task query.
 export const OPEN_STATUSES = ["inbox", "todo", "doing"] as const;
@@ -34,6 +34,11 @@ export interface RollupTrip {
   // The city is what he reads to know which session a line is, now that no
   // branch name is recorded against a trip (M6d).
   cities?: string[] | null;
+  // Which session, and the day he actually teaches (M7d). The dates above are
+  // the travel span, arrive-the-night-before included, which is precisely
+  // what he could not decode at a glance.
+  session_label?: string | null;
+  session_date?: string | null;
 }
 
 // A checklist step as the callers load it: an ordinary task plus the trip it
@@ -89,7 +94,18 @@ export function rollUpTrips(steps: TripStep[], nowMs: number): TripRollup[] {
     if (!lead) continue;
     const trip = all[0].trip;
     const dates = tripDatesLabel(trip.start_date, trip.end_date);
-    const city = tripCityLabel(trip);
+    // When the session leads, the long title is not in the label at all, so
+    // the city is never a repeat and is always worth showing. Only the
+    // title-led fallback needs the de-duplication tripCityLabel does.
+    const session = sessionLine(trip.session_label ?? null, trip.session_date ?? null);
+    const showTravel = travelDiffersFromSession(
+      trip.start_date,
+      trip.end_date,
+      trip.session_date ?? null
+    );
+    const city = session
+      ? (trip.cities ?? []).filter(Boolean).join(", ")
+      : tripCityLabel(trip);
 
     out.push({
       kind: "trip",
@@ -98,7 +114,16 @@ export function rollUpTrips(steps: TripStep[], nowMs: number): TripRollup[] {
       id: `trip:${tripId}`,
       trip_id: tripId,
       title: trip.title,
-      label: [trip.title, city, dates === "No dates yet" ? "" : dates]
+      // Same order as the trips list: the session first, then the city, then
+      // the travel span only when it says something the session date does
+      // not. "L1D2 - 4 Sept, Bangalore" beats the old
+      // "AICA Level 1 batch 912, KPMG Bangalore, 3 to 5 September 2026",
+      // which made him stop and work out which day he was teaching.
+      label: [
+        session || trip.title,
+        city,
+        session && !showTravel ? "" : dates === "No dates yet" ? "" : dates,
+      ]
         .filter(Boolean)
         .join(", "),
       // Rank inherited whole from the leading step, so the trip sits in the
