@@ -499,3 +499,62 @@ test("the scan request lists the real streams, and says the mailbox is not the a
   );
   assert.ok(!bare.toLowerCase().includes("available streams"));
 });
+
+// --- recovery day in the brief (B5 follow-up) --------------------------
+
+test("the morning after a session, the brief carries the recovery note", () => {
+  const { text, html } = composeBrief({
+    nowMs: NOW, // 25 Aug 2026 IST, so yesterday is the 24th
+    tasks: [],
+    events: [],
+    recentTrips: [
+      {
+        id: "t1",
+        title: "AICA Level 1 batch 912, KPMG Bangalore",
+        status: "planned",
+        session_label: "L1D2",
+        session_date: "2026-08-24",
+        end_date: "2026-08-25",
+        cities: ["Bangalore"],
+      },
+    ],
+    pendingApprovalsCount: 0,
+    accountsNeedingReconnect: [],
+    appBaseUrl: APP_BASE_URL,
+  });
+  assert.ok(text.includes("Yesterday was a full day on stage: L1D2, Bangalore."));
+  assert.ok(text.includes("Today is a recovery day."));
+  assert.ok(html.includes("Today is a recovery day."));
+});
+
+test("no session yesterday means no recovery note, and old fixtures need no field", () => {
+  const withoutField = composeBrief({
+    nowMs: NOW,
+    tasks: [],
+    events: [],
+    pendingApprovalsCount: 0,
+    accountsNeedingReconnect: [],
+    appBaseUrl: APP_BASE_URL,
+  });
+  const wrongDay = composeBrief({
+    nowMs: NOW,
+    tasks: [],
+    events: [],
+    recentTrips: [
+      {
+        id: "t1",
+        title: "Rajkot",
+        status: "planned",
+        session_label: "L2D5",
+        session_date: "2026-08-20",
+        end_date: "2026-08-21",
+        cities: ["Rajkot"],
+      },
+    ],
+    pendingApprovalsCount: 0,
+    accountsNeedingReconnect: [],
+    appBaseUrl: APP_BASE_URL,
+  });
+  assert.ok(!withoutField.text.includes("recovery day"));
+  assert.ok(!wrongDay.text.includes("recovery day"));
+});

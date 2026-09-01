@@ -11,7 +11,7 @@ import type { TripStep } from "@/lib/tasks/trip-rollup";
 import type { MonthExpense } from "@/lib/trips/month";
 import type { Holding } from "@/lib/money/investments";
 import { cronAuthorized, alreadyRanToday } from "@/lib/cron/guard";
-import { civilKey, civilToday, istInstant } from "@/lib/datetime";
+import { addDays, civilKey, civilToday, istInstant } from "@/lib/datetime";
 import type { Json } from "@/lib/database.types";
 
 export const runtime = "nodejs";
@@ -42,7 +42,7 @@ export async function GET(req: Request): Promise<Response> {
     const dayStart = istInstant(today, 0, 0).toISOString();
     const dayEnd = istInstant(today, 23, 59).toISOString();
 
-    const [{ data: tasks }, { data: tripStepRows }, { data: streams }, { data: events }, { count: pendingCount }, { data: needsReauth }, { data: briefAccount }, { data: reminderRows }, { data: expenseRows }, { data: holdingRows }] =
+    const [{ data: tasks }, { data: tripStepRows }, { data: streams }, { data: events }, { count: pendingCount }, { data: needsReauth }, { data: briefAccount }, { data: reminderRows }, { data: expenseRows }, { data: holdingRows }, { data: recentTripRows }] =
       await Promise.all([
         supabase
           .from("tasks")
@@ -97,6 +97,15 @@ export async function GET(req: Request): Promise<Response> {
           .eq("user_id", userId)
           .eq("key_date_type", "review")
           .not("key_date", "is", null),
+        // Trips whose session or travel day was yesterday: the brief lands at
+        // 7 am on exactly the recovery morning (B5). Same query Home uses.
+        supabase
+          .from("trips")
+          .select("id, title, status, session_label, session_date, end_date, cities")
+          .eq("user_id", userId)
+          .or(
+            `session_date.eq.${civilKey(addDays(today, -1))},end_date.eq.${civilKey(addDays(today, -1))}`
+          ),
       ]);
 
     const streamName = new Map((streams ?? []).map((s) => [s.id, s.name]));
@@ -164,6 +173,16 @@ export async function GET(req: Request): Promise<Response> {
         })
       ),
       holdings: (holdingRows ?? []) as Holding[],
+      recentTrips: (recentTripRows ?? []).map((t) => ({
+        id: t.id,
+        title: t.title,
+        status: t.status,
+        session_label: t.session_label,
+        session_date: t.session_date,
+        end_date: t.end_date,
+        // cities is jsonb, so it arrives as Json.
+        cities: Array.isArray(t.cities) ? (t.cities as string[]) : [],
+      })),
       pendingApprovalsCount: pendingCount ?? 0,
       accountsNeedingReconnect,
       appBaseUrl,

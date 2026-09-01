@@ -22,6 +22,12 @@ import {
   type Holding,
 } from "../money/investments.ts";
 import {
+  RECOVERY_ADVICE,
+  recoveryLine,
+  recoveryTrips,
+  type RecoveryTrip,
+} from "../health/recovery.ts";
+import {
   addDays,
   civilKey,
   civilToday,
@@ -94,6 +100,11 @@ export interface ComposeBriefInput {
   // calendar event (M7b), so this brief and the Home card are the only places
   // it can reach him. Optional so older fixtures stay valid.
   holdings?: Holding[];
+  // Trips whose session or travel ended yesterday, for the recovery-day line
+  // (B5). The brief lands at 7 am on exactly the recovery morning, so it
+  // carries the same observation Home shows. Optional so older fixtures stay
+  // valid.
+  recentTrips?: RecoveryTrip[];
   pendingApprovalsCount: number;
   accountsNeedingReconnect: BriefAccountIssue[];
   appBaseUrl: string;
@@ -186,6 +197,14 @@ export function composeBrief(input: ComposeBriefInput): ComposedBrief {
     reviewsDue(input.holdings ?? [], civilKey(today), reviewHorizonKey(today))
   );
 
+  // The day after a full day on stage (B5). The same observation Home makes,
+  // from the same function, joined with the same advice so the two surfaces
+  // cannot word it differently.
+  const recoveryObservation = recoveryLine(recoveryTrips(input.recentTrips ?? [], today));
+  const recoveryNote = recoveryObservation
+    ? `${recoveryObservation} ${RECOVERY_ADVICE}`
+    : null;
+
   const dateHeading = `${formatWeekdayLongIST(nowIso)}, ${formatDateIST(nowIso)}`;
   const narrative = topItem ? `The one thing to do first today: ${topItem.title}.` : "Desk clear.";
   const topTitle = topItem ? truncate(topItem.title, MAX_SUBJECT_ITEM_LEN) : null;
@@ -202,6 +221,7 @@ export function composeBrief(input: ComposeBriefInput): ComposedBrief {
     scannedTasks,
     receiptGapLine,
     moneyReviewLine,
+    recoveryNote,
     nowIso,
     appBaseUrl,
   });
@@ -216,6 +236,7 @@ export function composeBrief(input: ComposeBriefInput): ComposedBrief {
     scannedTasks,
     receiptGapLine,
     moneyReviewLine,
+    recoveryNote,
     nowIso,
     appBaseUrl,
   });
@@ -252,6 +273,7 @@ interface RenderInput {
   scannedTasks: BriefTask[];
   receiptGapLine: string | null;
   moneyReviewLine: string | null;
+  recoveryNote: string | null;
   nowIso: string;
   appBaseUrl: string;
 }
@@ -389,6 +411,19 @@ function renderHtml(r: RenderInput): string {
     </td></tr>`
     : "";
 
+  const recoveryBlock = r.recoveryNote
+    ? `
+    <tr><td style="padding:16px 32px 0 32px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+        <td style="border-radius:10px;background-color:${COLORS.cardBorder};padding:12px 14px;">
+          <span style="font-size:13px;color:${COLORS.heading};font-family:${FONT};">
+            ${esc(r.recoveryNote)}
+          </span>
+        </td>
+      </tr></table>
+    </td></tr>`
+    : "";
+
   const moneyBlock = r.moneyReviewLine
     ? `
     <tr><td style="padding:16px 32px 0 32px;">
@@ -436,6 +471,7 @@ function renderHtml(r: RenderInput): string {
       </td></tr>
       ${reconnectBlock}
       ${weekendBlock}
+      ${recoveryBlock}
       ${bandsHtml}
       <tr><td style="padding:20px 32px 0 32px;">
         <div style="border-top:1px solid ${COLORS.cardBorder};padding-top:14px;">
@@ -473,6 +509,10 @@ function renderText(r: RenderInput): string {
     );
     for (const t of r.weekendRisk.slice(0, 3)) lines.push(`- ${t.title}, due ${formatDateIST(t.due_ts!)}`);
     lines.push("Start it before Friday evening, or the weekend pays for it.", "");
+  }
+
+  if (r.recoveryNote) {
+    lines.push(r.recoveryNote, "");
   }
 
   const empty = r.bands.do_first.length + r.bands.important.length + r.bands.urgent.length === 0;
