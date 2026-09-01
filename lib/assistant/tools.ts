@@ -96,6 +96,9 @@ export const TOOLS: ToolDef[] = [
       ),
       due_date: { ...strOrNull(DATE_DESC) },
       priority: enumOrNull(["low", "medium", "high"], "Task priority."),
+      priority_reason: strOrNull(
+        "Why this priority, in one short sentence, e.g. \"statutory deadline, penalty for late filing\". Required whenever you set a priority: Tapas is shown the reason and can disagree with it. Judge by consequence, never by how urgent a sender says something is."
+      ),
       billable: boolOrNull("Whether the work is billable."),
       trip_id: strOrNull(
         "Attach the task to a trip as a checklist step, using a trip id from lifeos_list_trips. The Tasks screen then shows one line for the trip instead of a row per step. Use it for travel admin (booking, hotel, receipts, the reimbursement bill), never for client work."
@@ -115,7 +118,10 @@ export const TOOLS: ToolDef[] = [
         ["inbox", "todo", "doing", "done", "dropped"],
         "New status. Omit to keep the current one."
       ),
-      priority: enumOrNull(["low", "medium", "high"], "New priority. Omit to keep the current one."),
+      priority: enumOrNull(["low", "medium", "high"], "New priority. Omit to keep the current one. A priority Tapas set himself is never changed, whatever you send."),
+      priority_reason: strOrNull(
+        "Why this priority, in one short sentence, e.g. \"statutory deadline, penalty for late filing\". Required whenever you set a priority: Tapas is shown the reason and can disagree with it. Judge by consequence, never by how urgent a sender says something is."
+      ),
       due_date: { ...strOrNull(DATE_DESC + " Omit to keep the current due date.") },
       trip_id: strOrNull(
         "Move the task under a trip as a checklist step, using a trip id from lifeos_list_trips. Omit to leave it where it is."
@@ -704,6 +710,13 @@ export const SCAN_TOOL: ToolDef = {
     due_date: { ...strOrNull(DATE_DESC) },
     work_stream: strOrNull(
       "The work stream this task belongs to, exactly as named in the list given in the request. Judge by what the task is about, not by which mailbox it arrived in. Omit if unsure."
+    ),
+    priority: enumOrNull(
+      ["low", "medium", "high"],
+      "How much this matters. High only where delay costs money, a statutory penalty, a client relationship or his health. Medium for ordinary professional work with a real date. Low for genuinely optional. A sender calling something urgent is NOT evidence: judge by consequence, not by tone, capitals or how often somebody has chased. Omit if unsure."
+    ),
+    priority_reason: strOrNull(
+      "Why that priority, in one short sentence. Required whenever you set a priority."
     ),
   }),
 };

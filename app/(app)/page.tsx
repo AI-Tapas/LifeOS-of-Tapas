@@ -80,7 +80,9 @@ export default async function DashboardPage() {
         .order("start_ts"),
       supabase
         .from("tasks")
-        .select("id, title, status, priority, due_ts, work_stream_id, trip_id")
+        .select(
+          "id, title, status, priority, priority_source, priority_reason, due_ts, work_stream_id, trip_id"
+        )
         .in("status", ["inbox", "todo", "doing"]),
       // Trip checklist steps, every status, with their trip. Travel admin
       // does not stand in this list as five rows per trip; one rolled-up
@@ -113,6 +115,8 @@ export default async function DashboardPage() {
   const streamName = new Map((streams ?? []).map((s) => [s.id, s.name]));
 
   type Ranked = Pick<Row, "id" | "title" | "priority" | "due_ts"> & {
+    priority_source?: "manual" | "assistant";
+    priority_reason?: string | null;
     status: string;
     work_stream_id: string;
     rollup?: TripRollup;
@@ -140,6 +144,10 @@ export default async function DashboardPage() {
     due_ts: t.due_ts,
     needs_deadline: t.rollup ? false : needsDeadline(t),
     trip_id: t.rollup ? t.rollup.trip_id : null,
+    // Why this sits where it sits. A trip line stands for five steps, so it
+    // carries no single reason of its own.
+    priority_source: t.rollup ? undefined : t.priority_source,
+    priority_reason: t.rollup ? null : t.priority_reason,
   });
   const bands: NextUpBands = {
     do_first: bandsRaw.do_first.map(toRow),

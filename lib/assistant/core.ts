@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 // Explicit .ts extension so node --test (type stripping, no bundler) can
 // resolve it; allowImportingTsExtensions covers the Next side.
 import { SEND_CLASS } from "./tools.ts";
+import { cleanReason, isPriority, type TaskPriority } from "../tasks/priority.ts";
 
 // Canonical JSON: object keys sorted at every depth, so semantically equal
 // payloads hash equally regardless of key order.
@@ -135,6 +136,13 @@ export interface ScanProposal {
   due_date: string | null;
   // One of the user's real stream names, or null to take the account default.
   work_stream: string | null;
+  // Validated exactly the way work_stream is: one of the three real values or
+  // nothing. The mail this came from is untrusted text, so a priority is only
+  // accepted when it names a real value AND carries a reason. Without a
+  // reason there is nothing for Tapas to disagree with, so the pair is
+  // dropped and the task lands unrated rather than silently rated.
+  priority: TaskPriority | null;
+  priority_reason: string | null;
 }
 
 export interface RawToolCall {
@@ -186,6 +194,18 @@ export function validateScanProposals(
       typeof call.input.due_date === "string" ? call.input.due_date : "";
     const streamRaw =
       typeof call.input.work_stream === "string" ? call.input.work_stream.trim() : "";
+    const priorityRaw = call.input.priority;
+    const reason = cleanReason(
+      typeof call.input.priority_reason === "string" ? call.input.priority_reason : null
+    );
+    const priority = isPriority(priorityRaw) && reason ? priorityRaw : null;
+    if (priorityRaw !== undefined && priorityRaw !== null && !priority) {
+      rejected.push(
+        `priority dropped for ${ref}: ${
+          isPriority(priorityRaw) ? "no reason given" : "not one of low, medium, high"
+        }`
+      );
+    }
     seenRefs.add(ref);
     accepted.push({
       title: title.slice(0, 140),
@@ -193,6 +213,8 @@ export function validateScanProposals(
       external_ref: ref,
       due_date: /^\d{4}-\d{2}-\d{2}$/.test(dueRaw) ? dueRaw : null,
       work_stream: streamByKey.get(streamRaw.toLowerCase()) ?? null,
+      priority,
+      priority_reason: priority ? reason : null,
     });
   }
   return { accepted, rejected };

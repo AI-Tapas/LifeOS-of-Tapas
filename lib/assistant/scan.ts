@@ -226,9 +226,13 @@ export async function runMailScan(actor?: Actor): Promise<ScanSummary> {
         status: "inbox",
         due_ts: p.due_date ? dueAt930(p.due_date) : null,
         work_stream_id: await streamIdFor(p.work_stream),
+        // A priority proposed from scanned mail is still the assistant's
+        // judgment, never his: validateScanProposals has already dropped any
+        // priority arriving without a reason.
+        ...(p.priority ? { priority: p.priority, priority_reason: p.priority_reason } : {}),
         source: "email",
         external_ref: p.external_ref,
-      });
+      }, "assistant");
       if (!r.ok) {
         summary.notes.push(`${account.slot}: ${r.message}`);
         continue;

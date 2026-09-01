@@ -842,6 +842,8 @@ export type Database = {
           is_billable: boolean
           notes: string | null
           priority: Database["public"]["Enums"]["task_priority"]
+          priority_reason: string | null
+          priority_source: Database["public"]["Enums"]["priority_source"]
           project_id: string | null
           recurring_rule: string | null
           remind_offsets: number[]
@@ -861,6 +863,8 @@ export type Database = {
           is_billable?: boolean
           notes?: string | null
           priority?: Database["public"]["Enums"]["task_priority"]
+          priority_reason?: string | null
+          priority_source?: Database["public"]["Enums"]["priority_source"]
           project_id?: string | null
           recurring_rule?: string | null
           remind_offsets?: number[]
@@ -880,6 +884,8 @@ export type Database = {
           is_billable?: boolean
           notes?: string | null
           priority?: Database["public"]["Enums"]["task_priority"]
+          priority_reason?: string | null
+          priority_source?: Database["public"]["Enums"]["priority_source"]
           project_id?: string | null
           recurring_rule?: string | null
           remind_offsets?: number[]
@@ -1112,6 +1118,7 @@ export type Database = {
         | "quarterly"
         | "half_yearly"
         | "yearly"
+      priority_source: "manual" | "assistant"
       project_status: "active" | "on_hold" | "done" | "dropped"
       reminder_channel: "gcal" | "in_app"
       task_priority: "low" | "medium" | "high"
@@ -1308,6 +1315,7 @@ export const Constants = {
         "half_yearly",
         "yearly",
       ],
+      priority_source: ["manual", "assistant"],
       project_status: ["active", "on_hold", "done", "dropped"],
       reminder_channel: ["gcal", "in_app"],
       task_priority: ["low", "medium", "high"],

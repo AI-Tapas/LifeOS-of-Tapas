@@ -118,6 +118,19 @@ function dueIso(dateOnly: string): string {
   return istInstant(civil(dateOnly), 9, 30).toISOString();
 }
 
+// Never change a priority quietly. When one is set, the reply says so and
+// says why, in the same words that are written to the task and shown on the
+// row, so the chat and the screen cannot disagree.
+function priorityLine(
+  priority: string | null | undefined,
+  reason: string | null | undefined
+): string {
+  if (!priority) return "";
+  return reason
+    ? ` Priority ${priority}: ${reason}.`
+    : ` Priority ${priority}.`;
+}
+
 async function resolveWorkStream(
   supabase: Db,
   name: string | null
@@ -337,7 +350,11 @@ const performers: Record<string, Performer> = {
       title,
       notes: s(input.note),
       status: "todo",
-      priority: priority ?? "medium",
+      // Left out entirely when the model named no priority, so the row takes
+      // the default and stays visibly unrated rather than silently "medium,
+      // decided". A priority WITH no reason is refused inside createTask.
+      ...(priority ? { priority } : {}),
+      priority_reason: s(input.priority_reason),
       due_ts: due ? dueIso(due) : null,
       work_stream_id: workStreamId,
       // A trip id attaches the task as a checklist step, so it rolls up under
@@ -345,10 +362,12 @@ const performers: Record<string, Performer> = {
       trip_id: s(input.trip_id),
       is_billable: input.billable === true,
       source: "assistant",
-    });
+    }, "assistant");
     if (!r.ok) throw new Error(r.message);
     return {
-      summary: `Task created: ${title}${due ? `, due ${formatDateIST(dueIso(due))}` : ""}.`,
+      summary:
+        `Task created: ${title}${due ? `, due ${formatDateIST(dueIso(due))}` : ""}.` +
+        priorityLine(priority, s(input.priority_reason)),
       undo: { task_id: r.id },
     };
   },
@@ -358,7 +377,9 @@ const performers: Record<string, Performer> = {
     if (!taskId) throw new Error("task_id is required.");
     const { data: prev } = await supabase
       .from("tasks")
-      .select("title, notes, status, priority, due_ts, remind_offsets, trip_id")
+      .select(
+        "title, notes, status, priority, priority_source, priority_reason, due_ts, remind_offsets, trip_id"
+      )
       .eq("id", taskId)
       .single();
     if (!prev) throw new Error("Task not found.");
@@ -367,12 +388,20 @@ const performers: Record<string, Performer> = {
     if (input.note !== null && input.note !== undefined) patch.notes = s(input.note);
     if (s(input.status)) patch.status = s(input.status) as TaskInput["status"];
     if (s(input.priority)) patch.priority = s(input.priority) as TaskInput["priority"];
+    if (s(input.priority_reason)) patch.priority_reason = s(input.priority_reason);
     if (s(input.due_date)) patch.due_ts = dueIso(s(input.due_date)!);
     if (s(input.trip_id)) patch.trip_id = s(input.trip_id);
-    const r = await updateTask(supabase, _userId, taskId, patch);
+    const r = await updateTask(supabase, _userId, taskId, patch, "assistant");
     if (!r.ok) throw new Error(r.message);
     return {
-      summary: `Task updated: ${patch.title ?? prev.title}.`,
+      // r.priorityNote appears when the row already carried his own rating:
+      // the rest of the update landed, the priority did not, and the reply
+      // says so rather than claiming a change that never happened.
+      summary:
+        `Task updated: ${patch.title ?? prev.title}.` +
+        (r.priorityNote
+          ? ` ${r.priorityNote}`
+          : priorityLine(patch.priority ?? null, patch.priority_reason ?? null)),
       undo: { task_id: taskId, prev },
     };
   },
@@ -383,7 +412,7 @@ const performers: Record<string, Performer> = {
     if (!taskId || !due) throw new Error("task_id and due_date are required.");
     const { data: prev } = await supabase
       .from("tasks")
-      .select("title, notes, status, priority, due_ts, remind_offsets")
+      .select("title, notes, status, priority, priority_source, priority_reason, due_ts, remind_offsets")
       .eq("id", taskId)
       .single();
     if (!prev) throw new Error("Task not found.");
@@ -393,7 +422,7 @@ const performers: Record<string, Performer> = {
     const r = await updateTask(supabase, _userId, taskId, {
       due_ts: dueIso(due),
       ...(offsets ? { remind_offsets: offsets } : {}),
-    });
+    }, "assistant");
     if (!r.ok) throw new Error(r.message);
     return {
       summary: `Reminder set on "${prev.title}" for ${formatDateIST(dueIso(due))}${
@@ -1279,15 +1308,19 @@ async function performUndo(
     case "update_task":
     case "set_reminder": {
       const prev = (undo.prev ?? {}) as Record<string, unknown>;
+      // "undo" puts the snapshot back exactly as it was, priority provenance
+      // included, and is still refused if he has rated the task by hand since.
       const r = await updateTask(supabase, userId, String(undo.task_id), {
         title: prev.title as string | undefined,
         notes: (prev.notes as string | null | undefined) ?? null,
         status: prev.status as TaskInput["status"],
         priority: prev.priority as TaskInput["priority"],
+        priority_source: prev.priority_source as TaskInput["priority_source"],
+        priority_reason: (prev.priority_reason as string | null | undefined) ?? null,
         due_ts: (prev.due_ts as string | null | undefined) ?? null,
         remind_offsets: prev.remind_offsets as number[] | undefined,
         trip_id: (prev.trip_id as string | null | undefined) ?? null,
-      });
+      }, "undo");
       if (!r.ok) throw new Error(r.message);
       return;
     }

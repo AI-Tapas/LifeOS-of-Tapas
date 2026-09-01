@@ -355,3 +355,45 @@ and email-verification rules live in lib/accounts.ts.
 - Tests: npm run test:m6b (26 offline tests: rollup counts and rank
   inheritance, checklist date derivation and the past-date clamp, the brief
   ranking the same rows, and the tool-schema rules).
+
+## Priority provenance (B3)
+
+- The problem B3 fixes: Home ranks urgent-and-important first, then
+  important, then urgent, and importance is tasks.priority. Tapas had never
+  set it, so all fifty live tasks were 'medium' and the "Do first" band
+  ranked on the clock alone, which is the method he named as his problem.
+  The ranking was sound and its input was empty.
+- Migration 20260901000100 adds tasks.priority_source (enum manual |
+  assistant, default 'manual', so every pre-existing row counts as his) and
+  tasks.priority_reason text.
+- THE RULE, and it is not negotiable: his hand always wins, permanently. No
+  assistant path may overwrite a priority whose priority_source is 'manual',
+  in either direction. Enforced once in lib/tasks/write.ts so the browser,
+  the chat, the mail scanner and both MCP connectors all inherit it.
+- createTask and updateTask now take a fourth argument, the origin:
+  "app" (his own forms, the ONLY origin that writes 'manual'), "assistant"
+  (chat, scan, connectors), or "undo" (restoring a pre-write snapshot,
+  provenance included, and still refused over a manual priority). The
+  decision is pure in lib/tasks/priority.ts; scripts/b3.test.ts also reads
+  the call sites and fails if an assistant path ever passes "app".
+- An assistant priority with no reason is REFUSED, not silently written. The
+  reason is the whole point: it is what lets him disagree. Reasons are
+  collapsed to one line and capped at 200 characters (cleanReason) before
+  storage, so a reason derived from untrusted mail cannot reshape a row, and
+  they render as plain text only, never markup or a link.
+- No tool schema declares priority_source, at any spelling, and b3.test.ts
+  fails if one ever does. propose_task, create_task and update_task gained
+  priority_reason; propose_task also gained priority, validated the same way
+  work_stream is (one of the three real values or nothing, and a priority
+  without a reason is dropped while the task still lands).
+- On his own form, a CHANGED priority becomes his and clears the reason; an
+  unchanged one is left alone, so saving a title edit does not silently erase
+  a reason he has not read. A recurring task's next occurrence inherits both
+  columns.
+- "Unrated by anyone" is priority 'medium' with no reason: he moved nothing
+  off the default and the assistant has said nothing. The Tasks overview adds
+  one line when that is 60% or more of at least five open tasks, linking to
+  /assistant?ask=priorities, which types (never sends) "Review my task
+  priorities" into the chat box. No batch UI and no scheduled re-prioritising:
+  a chat pass is a conversation he can argue with, which is the point.
+- Tests: npm run test:b3 (17 offline).

@@ -17,7 +17,8 @@
     "test:triage": "node --test scripts/triage.test.ts",
     "test:m5": "node --test scripts/m5.test.ts",
     "test:m6": "node --test scripts/m6.test.ts",
-    "test:m6b": "node --test scripts/m6b.test.ts"
+    "test:m6b": "node --test scripts/m6b.test.ts",
+    "test:b3": "node --test scripts/b3.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",
