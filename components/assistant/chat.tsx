@@ -3,46 +3,31 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { btnGhost, btnPrimary, inputCls } from "@/components/ui";
-import { scanMailAction } from "@/app/(app)/assistant/actions";
+import {
+  clearChatAction,
+  importChatFromDeviceAction,
+  saveChatTurnsAction,
+  scanMailAction,
+} from "@/app/(app)/assistant/actions";
+import type { ChatTurn } from "@/lib/assistant/chat-history";
 
-interface Turn {
-  role: "user" | "assistant";
-  content: string;
-  tools?: { name: string; summary: string; error?: boolean }[];
-}
+type Turn = ChatTurn;
 
-// The conversation survives navigation and reloads on this device by living
-// in localStorage. ponytail: device-local on purpose, no table and no sync;
-// move it into the database if the same thread is ever needed on the phone
-// and the laptop at once. Only the last 40 turns are kept.
-const STORE_KEY = "life_os_assistant_chat_v1";
-const KEEP_TURNS = 40;
+// B6: the thread lives in assistant_chat_turns now, so the same conversation
+// is on the phone and the laptop. The server hands the newest turns in as a
+// prop; nothing here reads or writes localStorage except the one-time move
+// below, which runs while a device still holds an M4 thread and then deletes
+// its own copy so it never runs again.
+const LEGACY_KEY = "life_os_assistant_chat_v1";
 
-function loadTurns(): Turn[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(STORE_KEY);
-    const parsed = raw ? (JSON.parse(raw) as Turn[]) : [];
-    return Array.isArray(parsed) ? parsed.slice(-KEEP_TURNS) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveTurns(turns: Turn[]): void {
-  try {
-    window.localStorage.setItem(
-      STORE_KEY,
-      JSON.stringify(turns.slice(-KEEP_TURNS))
-    );
-  } catch {
-    // storage full or blocked; the chat still works for this visit
-  }
-}
-
-export default function AssistantChat({ prefill }: { prefill?: string }) {
-  const [turns, setTurns] = useState<Turn[]>([]);
-  const [restored, setRestored] = useState(false);
+export default function AssistantChat({
+  prefill,
+  initialTurns = [],
+}: {
+  prefill?: string;
+  initialTurns?: Turn[];
+}) {
+  const [turns, setTurns] = useState<Turn[]>(initialTurns);
   // Typed in for him, never sent for him: the point of this pass is that he
   // can argue with every proposal, which starts with him hitting send.
   const [input, setInput] = useState(prefill ?? "");
@@ -52,25 +37,48 @@ export default function AssistantChat({ prefill }: { prefill?: string }) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
-  // Restore after mount (localStorage does not exist during server render),
-  // then persist every change once the restore has happened, so the initial
-  // empty state never overwrites a saved conversation.
+  // The move off the device, once. It only ever fills an empty thread server
+  // side; either way the local copy goes, so this is a no-op from the second
+  // load onward.
   useEffect(() => {
-    setTurns(loadTurns());
-    setRestored(true);
-  }, []);
-
-  useEffect(() => {
-    if (restored) saveTurns(turns);
-  }, [turns, restored]);
+    let raw: string | null = null;
+    try {
+      raw = window.localStorage.getItem(LEGACY_KEY);
+    } catch {
+      return;
+    }
+    if (!raw) return;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      window.localStorage.removeItem(LEGACY_KEY);
+      return;
+    }
+    importChatFromDeviceAction(parsed).then((r) => {
+      if (!r.ok) return;
+      try {
+        window.localStorage.removeItem(LEGACY_KEY);
+      } catch {
+        // nothing to do; the import refuses a second time anyway
+      }
+      if (r.imported > 0) router.refresh();
+    });
+  }, [router]);
 
   async function send() {
     const text = input.trim();
     if (!text || busy) return;
     setInput("");
     setNotice(null);
-    const history = [...turns, { role: "user" as const, content: text }];
-    setTurns([...history, { role: "assistant", content: "", tools: [] }]);
+    const userTurn: Turn = { role: "user", content: text };
+    const history = [...turns, userTurn];
+    // The reply is built here rather than only inside setTurns, so the exact
+    // pair that ended up on screen is the pair that gets stored.
+    const reply: Turn = { role: "assistant", content: "", tools: [] };
+    const paint = () =>
+      setTurns([...history, { ...reply, tools: [...(reply.tools ?? [])] }]);
+    paint();
     setBusy(true);
     try {
       const res = await fetch("/api/assistant/chat", {
@@ -103,39 +111,33 @@ export default function AssistantChat({ prefill }: { prefill?: string }) {
           } catch {
             continue;
           }
-          setTurns((prev) => {
-            const next = [...prev];
-            const last = { ...next[next.length - 1] };
-            if (ev.t === "text") last.content += ev.d ?? "";
-            if (ev.t === "tool") {
-              last.tools = [
-                ...(last.tools ?? []),
-                { name: ev.name ?? "tool", summary: ev.summary ?? "", error: ev.error },
-              ];
-              if (ev.queued) sawQueue = true;
-            }
-            if (ev.t === "notice" || ev.t === "error") {
-              last.content += (last.content ? "\n\n" : "") + (ev.d ?? "");
-            }
-            next[next.length - 1] = last;
-            return next;
-          });
+          if (ev.t === "text") reply.content += ev.d ?? "";
+          if (ev.t === "tool") {
+            reply.tools = [
+              ...(reply.tools ?? []),
+              { name: ev.name ?? "tool", summary: ev.summary ?? "", error: ev.error },
+            ];
+            if (ev.queued) sawQueue = true;
+          }
+          if (ev.t === "notice" || ev.t === "error") {
+            reply.content += (reply.content ? "\n\n" : "") + (ev.d ?? "");
+          }
+          paint();
         }
         bottomRef.current?.scrollIntoView({ block: "end" });
       }
       if (sawQueue) setNotice("An item is waiting in the Queue tab for your approval.");
       router.refresh();
     } catch (e) {
-      setTurns((prev) => {
-        const next = [...prev];
-        const last = { ...next[next.length - 1] };
-        last.content =
-          last.content || (e instanceof Error ? e.message : "The assistant hit an error.");
-        next[next.length - 1] = last;
-        return next;
-      });
+      reply.content =
+        reply.content || (e instanceof Error ? e.message : "The assistant hit an error.");
+      paint();
     } finally {
       setBusy(false);
+      // Stored after the reply is complete, and never blocking it: a thread
+      // that fails to save still reads correctly on this device for this
+      // visit.
+      void saveChatTurnsAction([userTurn, reply]);
     }
   }
 
@@ -176,6 +178,9 @@ export default function AssistantChat({ prefill }: { prefill?: string }) {
                 if (busy) return;
                 setTurns([]);
                 setNotice(null);
+                // Actually deleted on the server, not hidden here: a thread
+                // he ended must not still be readable from the other device.
+                void clearChatAction().then(() => router.refresh());
               }}
               className={btnGhost}
               disabled={busy}
@@ -205,14 +210,15 @@ export default function AssistantChat({ prefill }: { prefill?: string }) {
       </p>
 
       <div className="min-h-[40vh] space-y-3">
-        {restored && turns.length === 0 && (
+        {turns.length === 0 && (
           <div className="rounded-xl border border-dashed border-border-strong p-6 text-center">
             <p className="text-sm font-semibold">Your desk, in one conversation.</p>
             <p className="mt-1 text-sm text-secondary">
               Plan the week, draft a reply, set a reminder, or tap Scan mail
               now. Private lists change straight away and stay undoable;
               anything that reaches another person waits in the Queue for your
-              approval. This conversation stays on this device.
+              approval. The thread follows you between your phone and your
+              laptop, and it goes no further.
             </p>
           </div>
         )}

@@ -11,6 +11,12 @@ import {
   undoExecutedAction,
 } from "@/lib/assistant/execute";
 import { runMailScan, type ScanSummary } from "@/lib/assistant/scan";
+import {
+  appendChatTurns,
+  clearChatTurns,
+  importLocalChatTurns,
+} from "@/lib/assistant/chat-store";
+import type { ChatTurn } from "@/lib/assistant/chat-history";
 
 export type ActionResult = { ok: boolean; message?: string };
 
@@ -30,6 +36,41 @@ export async function undoActionAction(actionId: string): Promise<ActionResult> 
   const r = await undoExecutedAction(actionId);
   revalidatePath("/assistant");
   return r;
+}
+
+// ---------------------------------------------------------------------------
+// The chat thread (B6). Owner session only, like everything else here.
+// ---------------------------------------------------------------------------
+
+export async function saveChatTurnsAction(turns: ChatTurn[]): Promise<ActionResult> {
+  try {
+    await appendChatTurns(turns);
+    return { ok: true };
+  } catch (e) {
+    // A thread that fails to save must not break the conversation on screen.
+    return { ok: false, message: e instanceof Error ? e.message : "Could not save." };
+  }
+}
+
+export async function clearChatAction(): Promise<ActionResult> {
+  try {
+    await clearChatTurns();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : "Could not clear." };
+  }
+}
+
+// Called once by the browser when it still holds an old localStorage thread.
+// The count coming back is what tells it to forget its copy.
+export async function importChatFromDeviceAction(
+  raw: unknown
+): Promise<{ ok: boolean; imported: number }> {
+  try {
+    return { ok: true, imported: await importLocalChatTurns(raw) };
+  } catch {
+    return { ok: false, imported: 0 };
+  }
 }
 
 export async function scanMailAction(): Promise<

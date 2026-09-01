@@ -12,6 +12,7 @@ import {
   type RecipientFlag,
 } from "@/components/assistant/queue";
 import { formatDateTimeIST, formatDateIST } from "@/lib/datetime";
+import { loadChatTurns } from "@/lib/assistant/chat-store";
 
 export const dynamic = "force-dynamic";
 
@@ -61,8 +62,15 @@ export default async function AssistantPage({
   const prefill = rawAsk === "priorities" ? "Review my task priorities" : undefined;
 
   const supabase = await createClient();
-  const [{ data: pendingRows }, { data: historyRows }, { data: auditRows }, { data: accounts }, { data: people }, { data: sentBefore }] =
-    await Promise.all([
+  const [
+    { data: pendingRows },
+    { data: historyRows },
+    { data: auditRows },
+    { data: accounts },
+    { data: people },
+    { data: sentBefore },
+    chatTurns,
+  ] = await Promise.all([
       supabase
         .from("assistant_actions")
         .select("id, kind, title, payload, created_at, account_id")
@@ -87,6 +95,10 @@ export default async function AssistantPage({
         .eq("kind", "send_email")
         .eq("status", "executed")
         .limit(200),
+      // B6: the newest turns only, and only when the chat tab is the one being
+      // rendered. A thread that has run for a year must not be read in full on
+      // every visit to the Queue.
+      tab === "chat" ? loadChatTurns(supabase) : Promise.resolve([]),
     ]);
 
   // Ground-truth recipient flags (A5/A6): unverified person records and
@@ -234,7 +246,9 @@ export default async function AssistantPage({
         ))}
       </div>
 
-      {tab === "chat" && <AssistantChat prefill={prefill} />}
+      {tab === "chat" && (
+        <AssistantChat prefill={prefill} initialTurns={chatTurns} />
+      )}
 
       {tab === "queue" && (
         <div className="space-y-3">
