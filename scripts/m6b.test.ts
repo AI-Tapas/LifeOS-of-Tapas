@@ -302,7 +302,7 @@ test("a leisure trip books its own hotel and raises no invoice", () => {
     // What a leisure trip created since 1 September carries: nobody arranges
     // a hotel for his holiday. A row written before the column existed still
     // reads as 'branch', which scripts/m6c.test.ts pins separately.
-    hotel_arrangement: "self",
+    hotel_arrangement: "self" as const,
   };
   const steps = buildChecklist(leisure, "2026-08-01");
   assert.deepEqual(steps.map((s) => s.key), ["onward", "return", "hotel", "receipts"]);
