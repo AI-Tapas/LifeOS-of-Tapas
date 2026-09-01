@@ -158,6 +158,10 @@ export async function syncHotelStepAction(tripId: string): Promise<WriteResult> 
         work_stream_id: trip.work_stream_id,
         trip_id: tripId,
         source: "manual",
+        // Routine travel admin, so it stays off the calendar (M7a). An
+        // update never touches the mode: if he has changed how this trip
+        // reminds him, that choice stands.
+        reminder_mode: wantHotel.reminder_mode,
       },
       "app"
     );
@@ -195,6 +199,52 @@ export async function syncHotelStepAction(tripId: string): Promise<WriteResult> 
     return { ok: true, id: tripId, note: "The checklist already matches." };
   }
   return { ok: true, id: tripId, note: `Updated: ${done.join(", ")}.` };
+}
+
+// M7a: one control for the whole trip, because that is how he thinks about
+// it. Every step of this trip either interrupts him on the calendar or does
+// not; there is no per-step fiddling. Each step goes through updateTask, so
+// the calendar event is created or deleted by the normal path and neither
+// direction can leave an orphan behind.
+export async function setTripRemindersAction(
+  tripId: string,
+  mode: "calendar" | "in_app"
+): Promise<WriteResult> {
+  const { supabase, user } = await requireUser("/trips");
+  const { data: steps } = await supabase
+    .from("tasks")
+    .select("id, status")
+    .eq("trip_id", tripId);
+  const live = (steps ?? []).filter(
+    (t) => t.status !== "done" && t.status !== "dropped"
+  );
+  if (!live.length) {
+    return { ok: false, message: "This trip has no open steps to change." };
+  }
+  let failed = 0;
+  for (const step of live) {
+    const r = await updateTask(supabase, user.id, step.id, { reminder_mode: mode }, "app");
+    if (!r.ok) failed += 1;
+  }
+  revalidatePath("/trips");
+  revalidatePath(`/trips/${tripId}`);
+  revalidatePath("/tasks");
+  revalidatePath("/");
+  if (failed) {
+    return {
+      ok: false,
+      message: `${failed} of ${live.length} steps could not be changed. Try again.`,
+    };
+  }
+  const count = `${live.length} ${live.length === 1 ? "step" : "steps"}`;
+  return {
+    ok: true,
+    id: tripId,
+    note:
+      mode === "calendar"
+        ? `${count} now remind you on the calendar.`
+        : `${count} now stay in the app and on your morning brief.`,
+  };
 }
 
 export async function deleteTripAction(

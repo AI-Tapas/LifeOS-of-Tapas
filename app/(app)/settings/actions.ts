@@ -7,6 +7,7 @@ import { syncCalendars } from "@/lib/calendars";
 import { TokenRevokedError } from "@/lib/oauth/core";
 import { providerOptions } from "@/lib/assistant/config";
 import { requireUser } from "@/lib/auth/require-user";
+import { sweepInAppReminderEvents } from "@/lib/reminders/writer";
 import { reportable, describeError, recordEvent } from "@/lib/errors";
 
 export type RefreshResult =
@@ -337,3 +338,46 @@ export async function saveAssistantModelsAction(input: {
   return { ok: true };
 }
 
+
+// ---------------------------------------------------------------------------
+// M7a one-off maintenance: clear the calendar entries the routine tasks no
+// longer need.
+// ---------------------------------------------------------------------------
+// The migration switched roughly thirty checklist steps and the monthly
+// invoice task to in_app, but SQL cannot delete a Google Calendar event, so
+// the events they already wrote are still standing. This walks every in_app
+// task whose reminders row still holds an ext_event_id and removes the event
+// through the normal removeReminder path.
+//
+// Owner session only, reached from a button in Settings. It is deliberately
+// on no tool surface, and nothing runs it automatically on deploy. Safe to
+// run twice: the second run finds nothing left to clear.
+export async function clearInAppCalendarEntriesAction(): Promise<{
+  ok: boolean;
+  cleared?: number;
+  skipped?: number;
+  message?: string;
+}> {
+  const { supabase, user } = await requireUser("/settings");
+  try {
+    const { cleared, skipped } = await sweepInAppReminderEvents(user.id);
+    await supabase.from("audit_log").insert({
+      user_id: user.id,
+      actor: "user",
+      action: "reminder_cleanup_run",
+      entity: "reminders",
+      meta: { cleared, skipped },
+    });
+    revalidatePath("/settings");
+    return { ok: true, cleared, skipped };
+  } catch (e) {
+    if (e instanceof TokenRevokedError) {
+      revalidatePath("/settings");
+      return {
+        ok: false,
+        message: "Reconnect ca.tapasnr first: the calendar could not be reached.",
+      };
+    }
+    return { ok: false, message: describeError(e) };
+  }
+}

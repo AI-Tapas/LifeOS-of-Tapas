@@ -15,6 +15,7 @@
 // scripts/b3.test.ts.
 
 import { syncTaskReminder, removeTaskReminder } from "@/lib/reminders/writer";
+import type { ReminderMode } from "@/lib/reminders/core";
 import { nextDueIso, isValidRecurringRule } from "@/lib/tasks/recurring";
 import { runStatusTransition, type TransitionOutcome } from "@/lib/tasks/transitions";
 import {
@@ -44,6 +45,13 @@ export interface TaskInput {
   recurring_rule?: string | null;
   is_billable?: boolean;
   remind_offsets?: number[];
+  // Whether this task interrupts him on the calendar (M7a). 'calendar' is the
+  // default and today's behaviour: one Google Calendar event with the task's
+  // offsets. 'in_app' writes no event; the task still ranks on Home, still
+  // appears in the morning brief and still counts in its trip rollup.
+  // Switching an existing task removes or creates the event through
+  // syncTaskReminder below, so neither direction leaves an orphan.
+  reminder_mode?: ReminderMode;
   source?: Database["public"]["Enums"]["task_source"];
   external_ref?: string | null;
   // One short sentence of why the priority is what it is. Required whenever
@@ -103,6 +111,7 @@ export async function createTask(
       recurring_rule: input.recurring_rule ?? null,
       is_billable: input.is_billable ?? false,
       remind_offsets: input.remind_offsets ?? [7, 3, 1, 0],
+      reminder_mode: input.reminder_mode ?? "calendar",
       source: input.source ?? "manual",
       external_ref: input.external_ref ?? null,
     })
@@ -112,8 +121,12 @@ export async function createTask(
     return { ok: false, message: error?.message ?? "Could not save the task." };
   }
 
+  // An in_app task writes no calendar event, so there is nothing to sync and
+  // no reason to resolve the reminder-home for it.
   let note: string | undefined;
-  if (input.due_ts) note = reminderNote(await syncTaskReminder(userId, data.id));
+  if (input.due_ts && input.reminder_mode !== "in_app") {
+    note = reminderNote(await syncTaskReminder(userId, data.id));
+  }
   return { ok: true, id: data.id, reminderNote: note };
 }
 
@@ -163,6 +176,9 @@ export async function updateTask(
       ...(patch.is_billable !== undefined ? { is_billable: patch.is_billable } : {}),
       ...(patch.remind_offsets !== undefined
         ? { remind_offsets: patch.remind_offsets }
+        : {}),
+      ...(patch.reminder_mode !== undefined
+        ? { reminder_mode: patch.reminder_mode }
         : {}),
     })
     .eq("id", id);
@@ -229,7 +245,7 @@ async function spawnNextOccurrence(
   const { data: t } = await supabase
     .from("tasks")
     .select(
-      "title, notes, priority, priority_source, priority_reason, due_ts, work_stream_id, project_id, trip_id, recurring_rule, is_billable, remind_offsets"
+      "title, notes, priority, priority_source, priority_reason, due_ts, work_stream_id, project_id, trip_id, recurring_rule, is_billable, remind_offsets, reminder_mode"
     )
     .eq("id", taskId)
     .single();
@@ -256,6 +272,9 @@ async function spawnNextOccurrence(
       recurring_rule: t.recurring_rule,
       is_billable: t.is_billable,
       remind_offsets: t.remind_offsets,
+      // The next occurrence reminds him the way this one did, so the monthly
+      // invoice task does not quietly return to the calendar every month.
+      reminder_mode: t.reminder_mode,
       source: "manual",
     })
     .select("id")

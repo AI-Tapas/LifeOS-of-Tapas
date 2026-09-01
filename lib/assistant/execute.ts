@@ -34,6 +34,7 @@ import {
 } from "@/lib/trips/write";
 import { TRANSPORT_MODES, type TransportMode, type TripLeg } from "@/lib/trips/bill";
 import { HOTEL_ARRANGEMENTS, type HotelArrangement } from "@/lib/trips/checklist";
+import { isReminderMode } from "@/lib/reminders/core";
 import {
   AUTONOMOUS_KINDS,
   CONFIRM_KINDS,
@@ -369,6 +370,11 @@ const performers: Record<string, Performer> = {
       // A trip id attaches the task as a checklist step, so it rolls up under
       // the trip instead of standing on its own in every ranked list.
       trip_id: s(input.trip_id),
+      // Validated here, never trusted from the wire: anything but the two
+      // real values is dropped and the row takes the 'calendar' default.
+      ...(isReminderMode(input.reminder_mode)
+        ? { reminder_mode: input.reminder_mode }
+        : {}),
       is_billable: input.billable === true,
       source: "assistant",
     }, "assistant");
@@ -387,7 +393,7 @@ const performers: Record<string, Performer> = {
     const { data: prev } = await supabase
       .from("tasks")
       .select(
-        "title, notes, status, priority, priority_source, priority_reason, due_ts, remind_offsets, trip_id"
+        "title, notes, status, priority, priority_source, priority_reason, due_ts, remind_offsets, reminder_mode, trip_id"
       )
       .eq("id", taskId)
       .single();
@@ -400,6 +406,7 @@ const performers: Record<string, Performer> = {
     if (s(input.priority_reason)) patch.priority_reason = s(input.priority_reason);
     if (s(input.due_date)) patch.due_ts = dueIso(s(input.due_date)!);
     if (s(input.trip_id)) patch.trip_id = s(input.trip_id);
+    if (isReminderMode(input.reminder_mode)) patch.reminder_mode = input.reminder_mode;
     const r = await updateTask(supabase, _userId, taskId, patch, "assistant");
     if (!r.ok) throw new Error(r.message);
     return {
@@ -421,7 +428,7 @@ const performers: Record<string, Performer> = {
     if (!taskId || !due) throw new Error("task_id and due_date are required.");
     const { data: prev } = await supabase
       .from("tasks")
-      .select("title, notes, status, priority, priority_source, priority_reason, due_ts, remind_offsets")
+      .select("title, notes, status, priority, priority_source, priority_reason, due_ts, remind_offsets, reminder_mode")
       .eq("id", taskId)
       .single();
     if (!prev) throw new Error("Task not found.");
@@ -1318,6 +1325,9 @@ async function performUndo(
         priority_reason: (prev.priority_reason as string | null | undefined) ?? null,
         due_ts: (prev.due_ts as string | null | undefined) ?? null,
         remind_offsets: prev.remind_offsets as number[] | undefined,
+        reminder_mode: isReminderMode(prev.reminder_mode)
+          ? prev.reminder_mode
+          : undefined,
         trip_id: (prev.trip_id as string | null | undefined) ?? null,
       }, "undo");
       if (!r.ok) throw new Error(r.message);

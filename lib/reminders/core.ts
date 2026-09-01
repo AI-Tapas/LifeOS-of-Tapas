@@ -218,3 +218,113 @@ export async function runReminderCleanup(
   }
   return { deletedEvents, deletedRows };
 }
+
+// ---------------------------------------------------------------------------
+// M7a: which reminders reach the calendar at all
+// ---------------------------------------------------------------------------
+// The calendar is for interrupts. The app and the morning brief are for the
+// list. A calendar reminder is an interruption aimed at his attention on a
+// particular day, so it is kept for work where missing the date has a real
+// consequence; routine admin is chased perfectly well by the Home ranking,
+// the trip screen and the 7 AM brief.
+//
+// Nothing is hidden by 'in_app': the task keeps its due date, its place in
+// the ranking, its line in the brief and its trip rollup. Only the Google
+// Calendar event stops being written.
+export type ReminderMode = "calendar" | "in_app";
+export const REMINDER_MODES: ReminderMode[] = ["calendar", "in_app"];
+
+export function isReminderMode(v: unknown): v is ReminderMode {
+  return v === "calendar" || v === "in_app";
+}
+
+// What the writer should do with a task's reminder, as one decision instead
+// of three conditions scattered through the writer. "remove" covers both
+// directions, so switching a task from calendar to in_app deletes the event
+// it already had by the same path that a completed task uses; there is no
+// second cleanup route that could leave an orphan behind.
+export interface TaskReminderState {
+  reminder_mode?: ReminderMode | null;
+  due_ts: string | null;
+  status: string;
+}
+
+export function planTaskReminder(task: TaskReminderState): "write" | "remove" {
+  // A null column is a row written before this milestone, which read as a
+  // calendar reminder then and must keep reading as one now.
+  const mode: ReminderMode = task.reminder_mode ?? "calendar";
+  if (mode === "in_app") return "remove";
+  if (!task.due_ts) return "remove";
+  if (task.status === "done" || task.status === "dropped") return "remove";
+  return "write";
+}
+
+// ---------------------------------------------------------------------------
+// One trip, one calendar entry
+// ---------------------------------------------------------------------------
+// With the per-step events gone the calendar would lose sight of the travel
+// itself, which he does want to see. A trip writes ONE all-day event spanning
+// its dates, not one per step.
+
+// Google reminder overrides on an all-day event count back from midnight at
+// the start of the day. 900 minutes is 15 hours, which is 09:00 IST the day
+// before: the same "the day before, in the morning" Google's own all-day
+// default uses. One override, not the four-offset set a due date gets.
+export const TRIP_REMINDER_MINUTES = 900;
+
+export interface GoogleAllDayEvent {
+  summary: string;
+  description?: string;
+  start: { date: string };
+  end: { date: string }; // exclusive, per the Google Calendar API
+  transparency: "transparent";
+  reminders: { useDefault: false; overrides: ReminderOverride[] };
+}
+
+// The title he reads on the phone. The city is what identifies a trip, so it
+// rides along unless the trip title already says it.
+export function tripEventTitle(title: string, cities: string[]): string {
+  const city = cities.find((c) => c && c.trim())?.trim();
+  if (!city) return title;
+  if (title.toLowerCase().includes(city.toLowerCase())) return title;
+  return `${title} (${city})`;
+}
+
+// Google treats an all-day event's end date as exclusive, so a single-day
+// trip ends on the following day and a three-day trip covers three squares
+// rather than two.
+export function nextDateKey(dateOnly: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateOnly);
+  if (!m) throw new Error(`Invalid date: ${dateOnly}`);
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + 1));
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
+}
+
+export interface TripEventInput {
+  title: string;
+  cities: string[];
+  startDate: string; // YYYY-MM-DD
+  endDate?: string | null; // defaults to the start date
+  description?: string;
+}
+
+export function buildTripEvent(input: TripEventInput): GoogleAllDayEvent {
+  const end = input.endDate && input.endDate >= input.startDate
+    ? input.endDate
+    : input.startDate;
+  const event: GoogleAllDayEvent = {
+    summary: tripEventTitle(input.title, input.cities),
+    start: { date: input.startDate },
+    end: { date: nextDateKey(end) },
+    // Travel does not block his working hours the way a meeting does, and the
+    // reminder events already use this.
+    transparency: "transparent",
+    reminders: {
+      useDefault: false,
+      overrides: [{ method: "popup", minutes: TRIP_REMINDER_MINUTES }],
+    },
+  };
+  if (input.description) event.description = input.description;
+  return event;
+}

@@ -340,11 +340,13 @@ const tripSteps: TripStep[] = [
   { id: "c4", title: "Collect and keep travel receipts", priority: "medium", due_ts: "2026-09-04T04:00:00Z", status: "todo", trip: rajkot },
 ];
 
+// Travel admin does not interrupt him on the calendar (M7a), so the harness
+// shows the state a real trip is in.
 const tripChecklist: ChecklistRow[] = [
-  { id: "c1", title: "Book onward ticket", notes: null, status: "done", due_ts: "2026-05-10T04:00:00Z" },
-  { id: "c2", title: "Book return ticket", notes: null, status: "done", due_ts: "2026-05-10T04:00:00Z" },
-  { id: "c3", title: "Confirm hotel with the branch", notes: null, status: "done", due_ts: "2026-05-12T04:00:00Z" },
-  { id: "c4", title: "Collect and keep travel receipts", notes: null, status: "todo", due_ts: "2026-05-19T04:00:00Z" },
+  { id: "c1", title: "Book onward ticket", notes: null, status: "done", due_ts: "2026-05-10T04:00:00Z", reminder_mode: "in_app" },
+  { id: "c2", title: "Book return ticket", notes: null, status: "done", due_ts: "2026-05-10T04:00:00Z", reminder_mode: "in_app" },
+  { id: "c3", title: "Confirm hotel with the branch", notes: null, status: "done", due_ts: "2026-05-12T04:00:00Z", reminder_mode: "in_app" },
+  { id: "c4", title: "Collect and keep travel receipts", notes: null, status: "todo", due_ts: "2026-05-19T04:00:00Z", reminder_mode: "in_app" },
 ];
 
 const tripExpenses: ExpenseRow[] = [

@@ -38,7 +38,7 @@ export default async function TripDetailPage({
       // The trip's checklist steps: ordinary tasks carrying this trip's id.
       supabase
         .from("tasks")
-        .select("id, title, notes, status, due_ts")
+        .select("id, title, notes, status, due_ts, reminder_mode")
         .eq("trip_id", id)
         .order("due_ts", { ascending: true, nullsFirst: false }),
       supabase

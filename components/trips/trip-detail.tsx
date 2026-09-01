@@ -56,6 +56,7 @@ import {
 } from "@/lib/trips/checklist";
 import {
   addChecklistAction,
+  setTripRemindersAction,
   syncHotelStepAction,
   addExpenseAction,
   deleteExpenseAction,
@@ -80,6 +81,9 @@ export interface ChecklistRow {
   notes: string | null;
   status: "inbox" | "todo" | "doing" | "done" | "dropped";
   due_ts: string | null;
+  // Whether this step interrupts him on the calendar (M7a). Travel admin is
+  // in_app by default: the trip screen and the morning brief chase it.
+  reminder_mode?: "calendar" | "in_app";
 }
 
 export default function TripDetail({
@@ -664,8 +668,10 @@ function ExpenseForm({
 }
 
 // One trip's checklist. The steps are ordinary tasks (same due dates, same
-// Google Calendar reminders, same one-tap completion as anywhere else); they
-// simply live here instead of flooding the task list.
+// one-tap completion as anywhere else); they simply live here instead of
+// flooding the task list. Since M7a they do NOT each write a Google Calendar
+// event: the trip has one all-day entry, and the steps are chased here and on
+// the morning brief. One control flips the whole trip if he wants them back.
 function Checklist({
   trip,
   items,
@@ -682,6 +688,11 @@ function Checklist({
   const [note, setNote] = useState<string | null>(null);
   const live = items.filter((i) => i.status !== "dropped");
   const done = live.filter((i) => i.status === "done").length;
+  // "On the calendar" only when every open step is, so the control never
+  // claims a state half the steps are not in.
+  const open = live.filter((i) => i.status !== "done");
+  const onCalendar =
+    open.length > 0 && open.every((i) => (i.reminder_mode ?? "calendar") === "calendar");
 
   // Changing how the hotel is arranged never rewrites a step behind his back.
   // The screen compares what the checklist WOULD be against what is there,
@@ -719,6 +730,18 @@ function Checklist({
     startTransition(async () => {
       const r = await addChecklistAction(trip.id!);
       if (!r.ok) onError(r.message);
+      router.refresh();
+    });
+  }
+
+  // One control for the whole trip, because that is how he thinks about it:
+  // either this trip's admin is worth interrupting him for, or it is not.
+  function setReminders(mode: "calendar" | "in_app") {
+    setNote(null);
+    startTransition(async () => {
+      const r = await setTripRemindersAction(trip.id!, mode);
+      if (r.ok) setNote(r.note ?? "Updated.");
+      else onError(r.message);
       router.refresh();
     });
   }
@@ -762,14 +785,43 @@ function Checklist({
         </div>
       )}
 
+      {live.length > 0 && (
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-surface p-3 shadow-[var(--shadow-card)]">
+          <div className="min-w-0">
+            <p className="text-sm font-medium">
+              {onCalendar
+                ? "These steps remind you on the calendar."
+                : "These steps stay in the app."}
+            </p>
+            <p className="mt-0.5 text-xs text-secondary">
+              {onCalendar
+                ? "Every step puts its own entry on your Google Calendar."
+                : "No calendar entries. This trip has one all-day entry, and the steps are chased here and on your morning brief."}
+            </p>
+          </div>
+          <button
+            onClick={() => setReminders(onCalendar ? "in_app" : "calendar")}
+            disabled={pending}
+            className={btnSmall + " shrink-0"}
+          >
+            {pending
+              ? "Changing"
+              : onCalendar
+                ? "Keep them in the app"
+                : "Put them on the calendar"}
+          </button>
+        </div>
+      )}
+
       {note && <p className="mb-2 text-xs text-secondary">{note}</p>}
 
       {live.length === 0 ? (
         <Empty title="No checklist yet.">
           The standard travel checklist: book onward, book return, collect the
           receipts, and the hotel step this trip calls for. Each becomes a task
-          dated from this trip, with its own reminder. Raising the invoice is
-          one recurring monthly task, not a step per trip.
+          dated from this trip, chased here and on your morning brief rather
+          than by a calendar entry of its own. Raising the invoice is one
+          recurring monthly task, not a step per trip.
           <span className="mt-3 block">
             <button onClick={seed} disabled={pending} className={btnSmall}>
               {pending ? "Adding" : "Add the standard checklist"}

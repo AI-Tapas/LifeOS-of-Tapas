@@ -18,8 +18,10 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { TokenRevokedError } from "@/lib/oauth/core";
 import {
   buildGoogleReminderEvent,
+  buildTripEvent,
   obligationRRule,
   assertReminderHome,
+  planTaskReminder,
   runReminderCleanup,
   nextObligationDate,
   reminderTitle,
@@ -344,13 +346,16 @@ export async function syncTaskReminder(
   const svc = createServiceClient();
   const { data: task } = await svc
     .from("tasks")
-    .select("id, title, due_ts, remind_offsets, status, trips(title)")
+    .select("id, title, due_ts, remind_offsets, status, reminder_mode, trips(title)")
     .eq("id", taskId)
     .single();
   if (!task) return { created: false, reason: "Task not found." };
 
-  // No due date, or the task is finished: there should be no reminder.
-  if (!task.due_ts || task.status === "done" || task.status === "dropped") {
+  // No due date, the task is finished, or he keeps this one in the app: there
+  // should be no calendar event. The same removal path covers all three, so
+  // switching a task to in_app deletes the event it already had and can never
+  // leave an orphan behind. The decision itself is pure (reminders/core.ts).
+  if (planTaskReminder(task) === "remove") {
     await removeReminder(svc, userId, { task_id: taskId });
     return { created: false, removed: true };
   }
@@ -363,7 +368,7 @@ export async function syncTaskReminder(
       // useless on a phone with three trips in flight, so the trip rides
       // along. Ordinary tasks are unchanged.
       title: reminderTitle(task.title, (task.trips as { title: string } | null)?.title),
-      anchorIso: task.due_ts,
+      anchorIso: task.due_ts!,
       offsetsDays: task.remind_offsets ?? [7, 3, 1, 0],
     }
   );
@@ -433,6 +438,130 @@ export async function removeObligationReminder(
 ): Promise<void> {
   const svc = createServiceClient();
   await removeReminder(svc, userId, { obligation_id: obligationId });
+}
+
+// ---------------------------------------------------------------------------
+// Public API: trips (M7a). ONE all-day event per trip, not one per step.
+// ---------------------------------------------------------------------------
+// Same reminder-home resolution, same withResourceAuth, same create/patch/
+// delete calls as every other reminder: there is no second calendar path.
+// The event id lives on the trip row, because this is not a reminder about a
+// due date, it is the trip itself.
+export async function syncTripEvent(
+  userId: string,
+  tripId: string
+): Promise<ReminderWriteOutcome> {
+  const svc = createServiceClient();
+  const { data: trip } = await svc
+    .from("trips")
+    .select("id, title, cities, start_date, end_date, ext_event_id")
+    .eq("id", tripId)
+    .single();
+  if (!trip) return { created: false, reason: "Trip not found." };
+
+  // No start date, nothing to span. If an event was written earlier and the
+  // date has since been cleared, it goes.
+  if (!trip.start_date) {
+    await removeTripEvent(userId, tripId);
+    return { created: false, removed: true };
+  }
+
+  const { home, reason } = await resolveReminderHome(svc, userId);
+  if (!home) return { created: false, reason: reason ?? RECONNECT_REASON };
+  if (home.accountStatus !== "connected") {
+    return { created: false, reason: RECONNECT_REASON };
+  }
+
+  const payload = buildTripEvent({
+    title: trip.title,
+    cities: Array.isArray(trip.cities) ? (trip.cities as string[]) : [],
+    startDate: trip.start_date,
+    endDate: trip.end_date,
+  });
+
+  try {
+    let extEventId: string;
+    if (trip.ext_event_id) {
+      const patched = await gcalPatch(
+        home.accountId,
+        home.calendar.ext_calendar_id,
+        trip.ext_event_id,
+        payload
+      );
+      extEventId = patched
+        ? trip.ext_event_id
+        : await gcalCreate(home.accountId, home.calendar.ext_calendar_id, payload);
+    } else {
+      extEventId = await gcalCreate(
+        home.accountId,
+        home.calendar.ext_calendar_id,
+        payload
+      );
+    }
+    await svc.from("trips").update({ ext_event_id: extEventId }).eq("id", tripId);
+    return { created: true, extEventId };
+  } catch (e) {
+    if (e instanceof TokenRevokedError) return { created: false, reason: RECONNECT_REASON };
+    return {
+      created: false,
+      reason: e instanceof Error ? e.message : "The trip could not be put on the calendar.",
+    };
+  }
+}
+
+export async function removeTripEvent(userId: string, tripId: string): Promise<void> {
+  const svc = createServiceClient();
+  const { data: trip } = await svc
+    .from("trips")
+    .select("id, ext_event_id")
+    .eq("id", tripId)
+    .maybeSingle();
+  if (!trip?.ext_event_id) return;
+  const { home } = await resolveReminderHome(svc, userId);
+  if (home && home.accountStatus === "connected") {
+    await gcalDelete(home.accountId, home.calendar.ext_calendar_id, trip.ext_event_id);
+  }
+  // Cleared either way, so a later sync writes a fresh event rather than
+  // patching one that may already be gone.
+  await svc.from("trips").update({ ext_event_id: null }).eq("id", tripId);
+}
+
+// ---------------------------------------------------------------------------
+// One-off maintenance (M7a). SQL cannot delete a Google Calendar event, so
+// the migration that switched roughly thirty checklist steps to in_app left
+// their events standing on the calendar. This walks every in_app task whose
+// reminders row still holds an ext_event_id and removes the event through the
+// normal removeReminder path.
+//
+// Safe to run twice: the second run finds no rows. Owner-session only (the
+// Settings action), on no tool surface, and never run automatically.
+// ---------------------------------------------------------------------------
+export async function sweepInAppReminderEvents(
+  userId: string
+): Promise<{ cleared: number; skipped: number }> {
+  const svc = createServiceClient();
+  const { data: rows } = await svc
+    .from("reminders")
+    .select("id, task_id, ext_event_id, tasks(reminder_mode)")
+    .eq("user_id", userId)
+    .not("task_id", "is", null)
+    .not("ext_event_id", "is", null);
+
+  let cleared = 0;
+  let skipped = 0;
+  for (const row of rows ?? []) {
+    const mode = (row.tasks as { reminder_mode: string } | null)?.reminder_mode;
+    if (mode !== "in_app" || !row.task_id) continue;
+    try {
+      await removeReminder(svc, userId, { task_id: row.task_id });
+      cleared += 1;
+    } catch {
+      // A single unreachable event must not stop the sweep; the next run
+      // picks it up, because the row is only removed on success.
+      skipped += 1;
+    }
+  }
+  return { cleared, skipped };
 }
 
 // ---------------------------------------------------------------------------

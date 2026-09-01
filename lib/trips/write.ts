@@ -10,6 +10,7 @@
 import { buildChecklist, type HotelArrangement } from "./checklist.ts";
 import { parseLegs, type TripLeg } from "./bill.ts";
 import { createTask } from "@/lib/tasks/write";
+import { syncTripEvent, removeTripEvent } from "@/lib/reminders/writer";
 import { civilKey, civilToday, istInstant } from "@/lib/datetime";
 import type { Database, Json } from "@/lib/database.types";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -90,6 +91,11 @@ export async function createTrip(
     return { ok: false, message: error?.message ?? "Could not save the trip." };
   }
 
+  // M7a: one all-day event spanning the trip's dates, on the reminder-home
+  // calendar. One per trip, never one per step. A failure here (ca.tapasnr
+  // revoked, say) must not fail the trip write: the next save re-syncs it.
+  if (input.start_date) await syncTripEvent(userId, data.id);
+
   const billsTo = input.bills_to ?? "icai_monthly";
   // An overseas chapter trip always gets its AED reminder, checklist asked
   // for or not: that invoice is raised once or twice a year and forgetting it
@@ -161,6 +167,10 @@ export async function seedTripChecklist(
       work_stream_id: trip.work_stream_id,
       trip_id: tripId,
       source: "manual",
+      // Routine travel admin does not interrupt him on the calendar (M7a).
+      // The step decides its own mode: everything is in_app except the
+      // overseas chapter AED invoice.
+      reminder_mode: step.reminder_mode,
       // "app": a checklist step is routine travel admin the app generated,
       // never a judgment call. Recording it as his over-protects it (the
       // assistant will not re-rate it), which is the safe direction.
@@ -172,7 +182,7 @@ export async function seedTripChecklist(
 
 export async function updateTrip(
   supabase: Db,
-  _userId: string,
+  userId: string,
   id: string,
   patch: Partial<TripInput>
 ): Promise<WriteResult> {
@@ -203,14 +213,20 @@ export async function updateTrip(
     })
     .eq("id", id);
   if (error) return { ok: false, message: error.message };
+  // The calendar entry moves with the trip's dates, and goes when the start
+  // date does. Cheap enough to re-sync on any save: it is one patch call.
+  await syncTripEvent(userId, id);
   return { ok: true, id };
 }
 
 export async function deleteTrip(
   supabase: Db,
-  _userId: string,
+  userId: string,
   id: string
 ): Promise<{ ok: boolean; message?: string }> {
+  // Remove the calendar entry first, then the trip, so no orphan event is
+  // left behind: the same order deleteTask uses for a reminder.
+  await removeTripEvent(userId, id);
   // Expenses cascade with the trip. Checklist steps do not: tasks.trip_id is
   // on delete set null, so work he still owes becomes an ordinary task again.
   const { error } = await supabase.from("trips").delete().eq("id", id);

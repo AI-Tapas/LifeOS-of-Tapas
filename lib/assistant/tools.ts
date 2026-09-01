@@ -103,6 +103,10 @@ export const TOOLS: ToolDef[] = [
       trip_id: strOrNull(
         "Attach the task to a trip as a checklist step, using a trip id from lifeos_list_trips. The Tasks screen then shows one line for the trip instead of a row per step. Use it for travel admin (booking, hotel, receipts), never for client work."
       ),
+      reminder_mode: enumOrNull(
+        ["calendar", "in_app"],
+        "Whether this task interrupts him on the Google Calendar. 'calendar' writes one calendar event with its reminders and is the default. 'in_app' writes no calendar event: the task still ranks on Home and still appears in the morning brief. Use 'in_app' for routine admin (booking a ticket, a standing monthly job) and keep 'calendar' for work where missing the date has a real consequence, such as a client deadline or a statutory filing."
+      ),
     }),
   },
   {
@@ -125,6 +129,10 @@ export const TOOLS: ToolDef[] = [
       due_date: { ...strOrNull(DATE_DESC + " Omit to keep the current due date.") },
       trip_id: strOrNull(
         "Move the task under a trip as a checklist step, using a trip id from lifeos_list_trips. Omit to leave it where it is."
+      ),
+      reminder_mode: enumOrNull(
+        ["calendar", "in_app"],
+        "Whether this task interrupts him on the Google Calendar. 'calendar' writes one calendar event with its reminders and is the default. 'in_app' writes no calendar event: the task still ranks on Home and still appears in the morning brief. Use 'in_app' for routine admin (booking a ticket, a standing monthly job) and keep 'calendar' for work where missing the date has a real consequence, such as a client deadline or a statutory filing."
       ),
     }),
   },

@@ -53,6 +53,10 @@ export interface TaskRow {
   recurring_rule: string | null;
   is_billable: boolean;
   remind_offsets: number[];
+  // Whether this task interrupts him on the calendar. Optional so the
+  // dev-preview fixtures stay small; a row without it reads as 'calendar',
+  // which is what every task did before M7a.
+  reminder_mode?: "calendar" | "in_app";
 }
 export interface ProjectRow {
   id: string;
@@ -919,6 +923,7 @@ interface FormFields {
   recurInterval: string;
   isBillable: boolean;
   offsets: number[];
+  onCalendar: boolean;
 }
 
 function taskToFields(t: TaskRow | null, workStreams: WorkStreamRow[]): FormFields {
@@ -941,6 +946,9 @@ function taskToFields(t: TaskRow | null, workStreams: WorkStreamRow[]): FormFiel
     recurInterval: rec[1] ?? "1",
     isBillable: t?.is_billable ?? false,
     offsets: t?.remind_offsets ?? [7, 3, 1, 0],
+    // A new task interrupts him on the calendar unless he says otherwise,
+    // which is what every task did before M7a.
+    onCalendar: (t?.reminder_mode ?? "calendar") === "calendar",
   };
 }
 
@@ -987,6 +995,7 @@ function TaskForm({
       recurring_rule,
       is_billable: f.isBillable,
       remind_offsets: offsets.length ? offsets : [7, 3, 1, 0],
+      reminder_mode: f.onCalendar ? "calendar" : "in_app",
     };
   }
 
@@ -1131,7 +1140,7 @@ function TaskForm({
             checked={f.hasDue}
             onChange={(e) => setF({ ...f, hasDue: e.target.checked })}
           />
-          Has a due date (sets a Google Calendar reminder)
+          Has a due date
         </label>
         {f.hasDue && (
           <>
@@ -1153,9 +1162,24 @@ function TaskForm({
                 />
               </Field>
             </div>
-            <Field label="Remind, days before due">
-              <RemindChips value={f.offsets} onChange={(v) => setF({ ...f, offsets: v })} />
-            </Field>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={f.onCalendar}
+                onChange={(e) => setF({ ...f, onCalendar: e.target.checked })}
+              />
+              Remind me on the calendar
+            </label>
+            <p className="-mt-1 text-xs text-secondary">
+              {f.onCalendar
+                ? "This one interrupts you on your phone on the days below."
+                : "Otherwise it stays in the app and on your morning brief."}
+            </p>
+            {f.onCalendar && (
+              <Field label="Remind, days before due">
+                <RemindChips value={f.offsets} onChange={(v) => setF({ ...f, offsets: v })} />
+              </Field>
+            )}
           </>
         )}
         <div className="flex gap-2">

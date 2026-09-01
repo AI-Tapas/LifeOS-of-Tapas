@@ -847,6 +847,7 @@ export type Database = {
           project_id: string | null
           recurring_rule: string | null
           remind_offsets: number[]
+          reminder_mode: Database["public"]["Enums"]["reminder_mode"]
           source: Database["public"]["Enums"]["task_source"]
           status: Database["public"]["Enums"]["task_status"]
           title: string
@@ -868,6 +869,7 @@ export type Database = {
           project_id?: string | null
           recurring_rule?: string | null
           remind_offsets?: number[]
+          reminder_mode?: Database["public"]["Enums"]["reminder_mode"]
           source?: Database["public"]["Enums"]["task_source"]
           status?: Database["public"]["Enums"]["task_status"]
           title: string
@@ -889,6 +891,7 @@ export type Database = {
           project_id?: string | null
           recurring_rule?: string | null
           remind_offsets?: number[]
+          reminder_mode?: Database["public"]["Enums"]["reminder_mode"]
           source?: Database["public"]["Enums"]["task_source"]
           status?: Database["public"]["Enums"]["task_status"]
           title?: string
@@ -966,6 +969,7 @@ export type Database = {
           bills_to: Database["public"]["Enums"]["trip_bills_to"]
           cities: Json | null
           end_date: string | null
+          ext_event_id: string | null
           hotel_arrangement:
             | Database["public"]["Enums"]["hotel_arrangement"]
             | null
@@ -983,6 +987,7 @@ export type Database = {
           bills_to?: Database["public"]["Enums"]["trip_bills_to"]
           cities?: Json | null
           end_date?: string | null
+          ext_event_id?: string | null
           hotel_arrangement?:
             | Database["public"]["Enums"]["hotel_arrangement"]
             | null
@@ -1000,6 +1005,7 @@ export type Database = {
           bills_to?: Database["public"]["Enums"]["trip_bills_to"]
           cities?: Json | null
           end_date?: string | null
+          ext_event_id?: string | null
           hotel_arrangement?:
             | Database["public"]["Enums"]["hotel_arrangement"]
             | null
@@ -1131,6 +1137,7 @@ export type Database = {
       priority_source: "unset" | "manual" | "assistant"
       project_status: "active" | "on_hold" | "done" | "dropped"
       reminder_channel: "gcal" | "in_app"
+      reminder_mode: "calendar" | "in_app"
       task_priority: "low" | "medium" | "high"
       task_source: "manual" | "email" | "assistant"
       task_status: "inbox" | "todo" | "doing" | "done" | "dropped"

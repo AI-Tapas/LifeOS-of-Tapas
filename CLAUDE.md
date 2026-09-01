@@ -501,3 +501,42 @@ What the app does instead:
   inheritance, the city in the label, checklist date derivation and the
   past-date clamp, the chapter_aed reminder, the brief ranking the same
   rows, and the tool-schema rules).
+
+## Reminder mode: the calendar is for interrupts (Milestone 7a)
+
+- Every dated task used to write its own Google Calendar event at 09:30 IST
+  with four notification overrides. A month of AICA travel is six trips at
+  four checklist steps each, so his calendar carried about twenty-four
+  stacked entries for routine admin and he stopped reading it.
+- tasks.reminder_mode ('calendar' | 'in_app', default 'calendar', migration
+  20260901000400) decides whether a task writes that event. 'in_app' writes
+  no event; the task still ranks on Home, still appears in the 7 AM brief and
+  still counts in its trip rollup. Nothing is hidden.
+- The decision is pure: planTaskReminder in lib/reminders/core.ts, called by
+  syncTaskReminder. Switching a task in either direction goes through the one
+  removeReminder path, so no orphan event is left behind.
+- What the generators choose, by the KIND of work, not by who created it:
+  trip checklist steps in_app (lib/trips/checklist.ts sets it per step); the
+  overseas chapter AED invoice step 'calendar' (once or twice a year, and
+  forgetting it is the risk he named); the recurring monthly invoice task
+  in_app; his own forms and the mail scan 'calendar', as before. A completed
+  recurring occurrence hands its mode to the next one.
+- One trip, one calendar entry: a trip with a start date writes ONE all-day
+  event spanning its dates on the same reminder-home calendar, with a single
+  override the day before (900 minutes back from midnight, which is 9 am the
+  previous day). buildTripEvent is pure; syncTripEvent/removeTripEvent in
+  lib/reminders/writer.ts use the existing reminder-home resolution and
+  withResourceAuth. The id lives in trips.ext_event_id, because a reminders
+  row belongs to exactly one of task/finance_item/obligation.
+- Controls: a "Remind me on the calendar" toggle on the task form, and one
+  control on the trip screen that sets the mode for all of that trip's open
+  steps at once. create_task and update_task carry an optional reminder_mode
+  enum; the executor validates it with isReminderMode rather than trusting
+  the wire.
+- One-off maintenance: SQL cannot delete a Google Calendar event, so the
+  migration leaves the events the now-in_app tasks already wrote. Settings >
+  Calendar reminders has an owner-session button
+  (clearInAppCalendarEntriesAction -> sweepInAppReminderEvents) that removes
+  them through removeReminder and reports the count. Safe to run twice, on no
+  tool surface, and never run automatically on deploy.
+- Tests: npm run test:m7a (27 offline).

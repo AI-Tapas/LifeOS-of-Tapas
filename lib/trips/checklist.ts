@@ -17,6 +17,7 @@
 // them, the same convention lib/tasks/triage.ts and lib/trips/bill.ts use.
 import { addDays, civilKey, type CivilDate } from "../datetime.ts";
 import { TRANSPORT_HELP } from "./bill.ts";
+import type { ReminderMode } from "../reminders/core.ts";
 
 // Mirrors the hotel_arrangement enum (migration 20260901000100).
 export type HotelArrangement = "branch" | "self" | "relative" | "same_day";
@@ -71,6 +72,12 @@ export interface ChecklistStep {
   title: string;
   note: string;
   due_date: string; // YYYY-MM-DD, IST calendar date
+  // Whether this step interrupts him on the calendar (M7a). Travel admin is
+  // routine work he does in a batch, and the trip screen and the morning
+  // brief already chase it, so every ordinary step is 'in_app'. The overseas
+  // chapter AED invoice is the exception: once or twice a year, and
+  // forgetting it is the risk he named.
+  reminder_mode: ReminderMode;
 }
 
 // What a new trip starts on. An ICAI branch arranges his hotel on almost
@@ -146,12 +153,14 @@ export function buildChecklist(
           ? `${context} ${TRANSPORT_HELP} Back the same day, so no overnight stay.`
           : `${context} ${TRANSPORT_HELP} Arrive the night before.`,
       due_date: shift(start, -7, todayKey),
+      reminder_mode: "in_app",
     },
     {
       key: "return",
       title: "Book return ticket",
       note: `${context} ${TRANSPORT_HELP}`,
       due_date: shift(start, -7, todayKey),
+      reminder_mode: "in_app",
     },
   ];
 
@@ -166,6 +175,7 @@ export function buildChecklist(
     title: "Collect and keep travel receipts",
     note: `${context} Keep the receipts themselves wherever you file them; the app records a reference only.`,
     due_date: shift(end, 0, todayKey),
+    reminder_mode: "in_app",
   });
 
   // A monthly ICAI trip ends in no step of its own: it feeds the one
@@ -182,6 +192,9 @@ export function buildChecklist(
         `${context} This trip is NOT on the monthly ICAI claim. ` +
         "It is invoiced separately to the chapter, in AED.",
       due_date: shift(end, 3, todayKey),
+      // The one step that earns a calendar interrupt: once or twice a year,
+      // and he named forgetting it as the specific risk.
+      reminder_mode: "calendar",
     });
   }
 
@@ -204,6 +217,7 @@ export function buildHotelStep(
       note: `${context} The branch usually arranges the hotel, so this is a confirmation, not a booking.`,
       // A confirmation is a chase, not a booking, so it sits closer in.
       due_date: shift(startDate, -5, todayKey),
+      reminder_mode: "in_app",
     };
   }
   if (hotel === "self") {
@@ -213,6 +227,7 @@ export function buildHotelStep(
       note: `${context} Yours to book, so it goes with the tickets: later is dearer. Keep it as a billable expense.`,
       // Alongside the tickets: his own booking, and waiting costs money.
       due_date: shift(startDate, -7, todayKey),
+      reminder_mode: "in_app",
     };
   }
   return null;

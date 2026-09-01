@@ -11,6 +11,7 @@ import PersonaPanel, {
 } from "@/components/settings/persona-panel";
 import ModelsPanel from "@/components/settings/models-panel";
 import ThemePanel from "@/components/settings/theme-panel";
+import ReminderCleanupPanel from "@/components/settings/reminder-cleanup-panel";
 import ConnectionsPanel, {
   type ConnectionView,
 } from "@/components/settings/connections-panel";
@@ -248,6 +249,15 @@ export default async function SettingsPage({
       </p>
       <div className="mt-2">
         <ConnectionsPanel items={connections} />
+      </div>
+
+      <h2 className="mt-8 text-base font-semibold tracking-tight">Calendar reminders</h2>
+      <p className="mt-1 text-sm text-secondary">
+        The calendar is for the dates that must interrupt you. Routine work
+        stays in the app and on your morning brief.
+      </p>
+      <div className="mt-2">
+        <ReminderCleanupPanel />
       </div>
 
       <h2 className="mt-8 text-base font-semibold tracking-tight">Assistant persona</h2>
