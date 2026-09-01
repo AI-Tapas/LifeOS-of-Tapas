@@ -203,11 +203,11 @@ function ChainHint({ previous, next }: { previous?: TripRow; next?: TripRow }) {
   if (!a || !b) return null;
   const gap = daysBetween(a, b);
   if (gap <= 1 || gap > 6) return null;
+  // Just the gap. Whether to chain two close trips into one is his call and he
+  // does not need it explained every time; the number is the whole point.
   return (
-    <p className="mt-1.5 rounded-lg border border-dashed border-border-strong px-3 py-2 text-[11px] text-secondary">
-      {gap} days between this and the next trip. Chaining them into one trip is
-      a question worth asking, not a default: staying on costs hotel nights,
-      going home costs a return leg.
+    <p className="mt-1.5 px-3 py-1 text-[11px] text-muted">
+      {gap} {gap === 1 ? "day" : "days"} before the next trip.
     </p>
   );
 }
