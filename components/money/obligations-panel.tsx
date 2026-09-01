@@ -10,7 +10,8 @@ import {
   drawerFooterCls,
   inputCls,
 } from "@/components/ui";
-import { formatINR } from "@/lib/datetime";
+import { formatDateShortIST, formatINR } from "@/lib/datetime";
+import { nextObligationDates, parseDateKey } from "@/lib/reminders/core";
 import {
   createObligationAction,
   updateObligationAction,
@@ -28,7 +29,13 @@ type Category =
   | "rent"
   | "subscription"
   | "other";
-type Frequency = "monthly" | "bi_monthly" | "quarterly" | "half_yearly" | "yearly";
+type Frequency =
+  | "custom"
+  | "monthly"
+  | "bi_monthly"
+  | "quarterly"
+  | "half_yearly"
+  | "yearly";
 
 export interface ObligationRow {
   id: string;
@@ -39,6 +46,8 @@ export interface ObligationRow {
   frequency: Frequency;
   due_day: number | null;
   due_month: number | null;
+  interval_rule: string | null;
+  anchor_date: string | null;
   autopay: boolean;
   account_ref: string | null;
   active: boolean;
@@ -57,6 +66,7 @@ const CATEGORIES: Category[] = [
   "other",
 ];
 const FREQUENCIES: Frequency[] = [
+  "custom",
   "monthly",
   "bi_monthly",
   "quarterly",
@@ -81,7 +91,19 @@ const MONTHS = [
 function label(s: string): string {
   return s.replace(/_/g, " ");
 }
+
+// "custom" is a word for the database, not for him: the card says what the
+// series actually does.
+function frequencyLabel(o: ObligationRow): string {
+  if (o.frequency !== "custom") return label(o.frequency);
+  const [freq, every] = (o.interval_rule ?? "").split(":");
+  const n = Number(every || 1);
+  const unit = freq === "weekly" ? "week" : "day";
+  return n === 1 ? `every ${unit}` : `every ${n} ${unit}s`;
+}
+
 function dueLabel(o: ObligationRow): string {
+  if (o.frequency === "custom") return o.anchor_date ? "" : "no start date";
   if (!o.due_day) return "no due day";
   if (o.frequency === "yearly") {
     return `${o.due_day} ${o.due_month ? MONTHS[o.due_month - 1] : ""}`.trim();
@@ -89,10 +111,38 @@ function dueLabel(o: ObligationRow): string {
   return `day ${o.due_day}`;
 }
 
+// B2: the series is shown, not just ruled. He can read the next three dates
+// on the obligation itself and catch a wrong one before it reminds him,
+// instead of trusting a rule he cannot see. The same function anchors the
+// calendar event, so the two cannot disagree.
+export interface ObligationSeriesFields {
+  active: boolean;
+  frequency: Frequency;
+  due_day: number | null;
+  due_month: number | null;
+  interval_rule: string | null;
+  anchor_date: string | null;
+}
+
+export function seriesDates(o: ObligationSeriesFields, todayKey: string): string[] {
+  if (!o.active) return [];
+  try {
+    return nextObligationDates(o, parseDateKey(todayKey), 3).map((k) =>
+      formatDateShortIST(`${k}T12:00:00+05:30`)
+    );
+  } catch {
+    // An incomplete row (no due day yet, no start date yet) simply shows no
+    // series. Saving it is what surfaces the error message.
+    return [];
+  }
+}
+
 export default function ObligationsPanel({
   obligations,
+  todayKey,
 }: {
   obligations: ObligationRow[];
+  todayKey: string;
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState<ObligationRow | "new" | null>(null);
@@ -143,13 +193,20 @@ export default function ObligationsPanel({
                 <button onClick={() => setEditing(o)} className="min-w-0 text-left">
                   <p className="font-medium">{o.name}</p>
                   <p className="text-xs capitalize text-secondary">
-                    {label(o.category)} · {label(o.frequency)} · {dueLabel(o)}
+                    {[label(o.category), frequencyLabel(o), dueLabel(o)]
+                      .filter(Boolean)
+                      .join(" · ")}
                   </p>
                   <p className="mt-0.5 text-sm">
                     {o.variable_amount ? "Variable amount" : formatINR(o.amount)}
                     {o.autopay ? " · autopay" : ""}
                     {o.account_ref ? ` · ${o.account_ref}` : ""}
                   </p>
+                  {seriesDates(o, todayKey).length > 0 && (
+                    <p className="mt-0.5 text-xs text-muted">
+                      Next: {seriesDates(o, todayKey).join(", ")}
+                    </p>
+                  )}
                 </button>
                 <label className="flex shrink-0 items-center gap-1 text-xs text-secondary">
                   <input
@@ -169,6 +226,7 @@ export default function ObligationsPanel({
       {editing && (
         <ObligationForm
           obligation={editing === "new" ? null : editing}
+          todayKey={todayKey}
           onClose={() => setEditing(null)}
           onNotice={setNotice}
         />
@@ -185,6 +243,9 @@ interface Fields {
   frequency: Frequency;
   dueDay: string;
   dueMonth: string;
+  everyUnit: "daily" | "weekly";
+  everyCount: string;
+  anchorDate: string;
   autopay: boolean;
   accountRef: string;
   active: boolean;
@@ -201,6 +262,9 @@ function toFields(o: ObligationRow | null): Fields {
     frequency: o?.frequency ?? "monthly",
     dueDay: o?.due_day != null ? String(o.due_day) : "",
     dueMonth: o?.due_month != null ? String(o.due_month) : "",
+    everyUnit: o?.interval_rule?.startsWith("daily") ? "daily" : "weekly",
+    everyCount: o?.interval_rule?.split(":")[1] ?? "2",
+    anchorDate: o?.anchor_date ?? "",
     autopay: o?.autopay ?? false,
     accountRef: o?.account_ref ?? "",
     active: o?.active ?? true,
@@ -211,10 +275,12 @@ function toFields(o: ObligationRow | null): Fields {
 
 function ObligationForm({
   obligation,
+  todayKey,
   onClose,
   onNotice,
 }: {
   obligation: ObligationRow | null;
+  todayKey: string;
   onClose: () => void;
   onNotice: (s: string | null) => void;
 }) {
@@ -224,6 +290,22 @@ function ObligationForm({
   const [err, setErr] = useState<string | null>(null);
   const [armed, setArmed] = useState(false);
   const isEdit = !!obligation;
+
+  // What the rule he is typing actually means, shown while he types it.
+  const preview =
+    f.frequency === "custom"
+      ? seriesDates(
+          {
+            active: true,
+            frequency: "custom",
+            due_day: null,
+            due_month: null,
+            interval_rule: `${f.everyUnit}:${f.everyCount || 1}`,
+            anchor_date: f.anchorDate || null,
+          },
+          todayKey
+        )
+      : [];
 
   function buildInput(): ObligationInput {
     const offsets = [...f.offsets].sort((a, b) => b - a);
@@ -235,6 +317,9 @@ function ObligationForm({
       frequency: f.frequency,
       due_day: f.dueDay ? parseInt(f.dueDay, 10) : null,
       due_month: f.frequency === "yearly" && f.dueMonth ? parseInt(f.dueMonth, 10) : null,
+      interval_rule:
+        f.frequency === "custom" ? `${f.everyUnit}:${f.everyCount || 1}` : null,
+      anchor_date: f.frequency === "custom" ? f.anchorDate || null : null,
       autopay: f.autopay,
       account_ref: f.accountRef || null,
       active: f.active,
@@ -331,34 +416,73 @@ function ObligationForm({
             />
           </Field>
         )}
-        <div className="flex gap-2">
-          <Field label="Due day (1-31)">
-            <input
-              type="number"
-              min={1}
-              max={31}
-              value={f.dueDay}
-              onChange={(e) => setF({ ...f, dueDay: e.target.value })}
-              className={inputCls}
-            />
-          </Field>
-          {f.frequency === "yearly" && (
-            <Field label="Due month">
-              <select
-                value={f.dueMonth}
-                onChange={(e) => setF({ ...f, dueMonth: e.target.value })}
+        {f.frequency === "custom" ? (
+          <>
+            <div className="flex gap-2">
+              <Field label="Every">
+                <input
+                  type="number"
+                  min={1}
+                  value={f.everyCount}
+                  onChange={(e) => setF({ ...f, everyCount: e.target.value })}
+                  className={inputCls}
+                />
+              </Field>
+              <Field label="Unit">
+                <select
+                  value={f.everyUnit}
+                  onChange={(e) =>
+                    setF({ ...f, everyUnit: e.target.value as "daily" | "weekly" })
+                  }
+                  className={inputCls}
+                >
+                  <option value="daily">days</option>
+                  <option value="weekly">weeks</option>
+                </select>
+              </Field>
+              <Field label="Starting">
+                <input
+                  type="date"
+                  value={f.anchorDate}
+                  onChange={(e) => setF({ ...f, anchorDate: e.target.value })}
+                  className={inputCls}
+                />
+              </Field>
+            </div>
+            {preview.length > 0 && (
+              <p className="text-xs text-secondary">Next: {preview.join(", ")}</p>
+            )}
+          </>
+        ) : (
+          <div className="flex gap-2">
+            <Field label="Due day (1-31)">
+              <input
+                type="number"
+                min={1}
+                max={31}
+                value={f.dueDay}
+                onChange={(e) => setF({ ...f, dueDay: e.target.value })}
                 className={inputCls}
-              >
-                <option value="">Month</option>
-                {MONTHS.map((m, i) => (
-                  <option key={m} value={i + 1}>
-                    {m}
-                  </option>
-                ))}
-              </select>
+              />
             </Field>
-          )}
-        </div>
+            {f.frequency === "yearly" && (
+              <Field label="Due month">
+                <select
+                  value={f.dueMonth}
+                  onChange={(e) => setF({ ...f, dueMonth: e.target.value })}
+                  className={inputCls}
+                >
+                  <option value="">Month</option>
+                  {MONTHS.map((m, i) => (
+                    <option key={m} value={i + 1}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
+          </div>
+        )}
         <Field label="Account reference (free text)">
           <input
             value={f.accountRef}

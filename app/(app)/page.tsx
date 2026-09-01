@@ -21,6 +21,12 @@ import {
   type TripStep,
 } from "@/lib/tasks/trip-rollup";
 import type { PrioritySource } from "@/lib/tasks/priority";
+import {
+  reviewHorizonKey,
+  reviewLine,
+  reviewsDue,
+  type Holding,
+} from "@/lib/money/investments";
 
 export const dynamic = "force-dynamic";
 
@@ -66,12 +72,19 @@ export default async function DashboardPage() {
   const dayStart = istInstant(today, 0, 0).toISOString();
   const dayEnd = istInstant(today, 23, 59).toISOString();
 
-  // Five independent reads in parallel. The stream name is fetched as its own
+  // Six independent reads in parallel. The stream name is fetched as its own
   // small table and joined in memory rather than through an embedded
   // work_streams(name) select: measured against the live database, the
   // embedded join cost about 870ms where two plain queries cost about 390ms
   // in total, and this runs on the first screen of every visit.
-  const [{ data: events }, { data: tasks }, { data: tripStepRows }, { data: streams }, { count: pendingCount }] =
+  const [
+    { data: events },
+    { data: tasks },
+    { data: tripStepRows },
+    { data: streams },
+    { count: pendingCount },
+    { data: holdings },
+  ] =
     await Promise.all([
       supabase
         .from("events")
@@ -97,6 +110,14 @@ export default async function DashboardPage() {
         .from("assistant_actions")
         .select("id", { count: "exact", head: true })
         .eq("status", "proposed"),
+      // A review date writes no calendar event by design (M7b), so if it did
+      // not appear here it would be a date that quietly passes. This IS its
+      // interruption, along with the morning brief.
+      supabase
+        .from("finance_items")
+        .select("id, kind, name, institution, value, key_date, key_date_type, remind, notes")
+        .eq("key_date_type", "review")
+        .not("key_date", "is", null),
     ]);
 
   type Row = NonNullable<typeof tasks>[number];
@@ -172,6 +193,14 @@ export default async function DashboardPage() {
   ];
   const weekendRisk = weekendGuard(open, civilWeekday(today), guardKeys);
 
+  const todayKey = civilKey(today);
+  const dueReviews = reviewsDue(
+    (holdings ?? []) as Holding[],
+    todayKey,
+    reviewHorizonKey(today)
+  );
+  const moneyLine = reviewLine(dueReviews);
+
   const timelineEvents = (events ?? []).map((e) => ({
     id: e.id,
     title: e.title,
@@ -235,6 +264,16 @@ export default async function DashboardPage() {
             for your approval.
           </span>
           <span className="shrink-0 text-sm font-medium text-waiting">Review</span>
+        </Link>
+      )}
+
+      {moneyLine && (
+        <Link
+          href="/money"
+          className="press mt-3 flex items-center gap-2.5 rounded-2xl border border-border bg-surface p-3.5"
+        >
+          <span className="flex-1 text-[13.5px] text-foreground">{moneyLine}</span>
+          <span className="shrink-0 text-sm font-medium text-accent">Money</span>
         </Link>
       )}
 

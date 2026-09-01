@@ -16,6 +16,12 @@ import {
 import { rollUpTrips, type TripStep } from "../tasks/trip-rollup.ts";
 import { briefGapLine, type MonthExpense } from "../trips/month.ts";
 import {
+  reviewHorizonKey,
+  reviewLine,
+  reviewsDue,
+  type Holding,
+} from "../money/investments.ts";
+import {
   addDays,
   civilKey,
   civilToday,
@@ -84,6 +90,10 @@ export interface ComposeBriefInput {
   // Every trip expense, for the receipt-gap line. Optional so older fixtures
   // stay valid.
   tripExpenses?: MonthExpense[];
+  // Investments carrying a review date. A review date deliberately writes no
+  // calendar event (M7b), so this brief and the Home card are the only places
+  // it can reach him. Optional so older fixtures stay valid.
+  holdings?: Holding[];
   pendingApprovalsCount: number;
   accountsNeedingReconnect: BriefAccountIssue[];
   appBaseUrl: string;
@@ -170,6 +180,12 @@ export function composeBrief(input: ComposeBriefInput): ComposedBrief {
   // still be fixed.
   const receiptGapLine = briefGapLine(input.tripExpenses ?? [], civilKey(today));
 
+  // Holdings past or approaching their review date. Overdue ones lead, since
+  // a review he has walked past for three weeks is the one worth naming.
+  const moneyReviewLine = reviewLine(
+    reviewsDue(input.holdings ?? [], civilKey(today), reviewHorizonKey(today))
+  );
+
   const dateHeading = `${formatWeekdayLongIST(nowIso)}, ${formatDateIST(nowIso)}`;
   const narrative = topItem ? `The one thing to do first today: ${topItem.title}.` : "Desk clear.";
   const topTitle = topItem ? truncate(topItem.title, MAX_SUBJECT_ITEM_LEN) : null;
@@ -185,6 +201,7 @@ export function composeBrief(input: ComposeBriefInput): ComposedBrief {
     pendingApprovalsCount,
     scannedTasks,
     receiptGapLine,
+    moneyReviewLine,
     nowIso,
     appBaseUrl,
   });
@@ -198,6 +215,7 @@ export function composeBrief(input: ComposeBriefInput): ComposedBrief {
     pendingApprovalsCount,
     scannedTasks,
     receiptGapLine,
+    moneyReviewLine,
     nowIso,
     appBaseUrl,
   });
@@ -233,6 +251,7 @@ interface RenderInput {
   pendingApprovalsCount: number;
   scannedTasks: BriefTask[];
   receiptGapLine: string | null;
+  moneyReviewLine: string | null;
   nowIso: string;
   appBaseUrl: string;
 }
@@ -370,6 +389,19 @@ function renderHtml(r: RenderInput): string {
     </td></tr>`
     : "";
 
+  const moneyBlock = r.moneyReviewLine
+    ? `
+    <tr><td style="padding:16px 32px 0 32px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+        <td style="border-radius:10px;background-color:${COLORS.cardBorder};padding:12px 14px;">
+          <a href="${r.appBaseUrl}/money" style="text-decoration:none;font-size:13px;color:${COLORS.heading};font-family:${FONT};">
+            ${esc(r.moneyReviewLine)} Open Money.
+          </a>
+        </td>
+      </tr></table>
+    </td></tr>`
+    : "";
+
   const approvalsBlock = r.pendingApprovalsCount
     ? `
     <tr><td style="padding:16px 32px 0 32px;">
@@ -412,6 +444,7 @@ function renderHtml(r: RenderInput): string {
         </div>
       </td></tr>
       ${receiptBlock}
+      ${moneyBlock}
       ${approvalsBlock}
       ${scannedBlock}
       <tr><td style="padding:24px 32px 28px 32px;">
@@ -474,6 +507,10 @@ function renderText(r: RenderInput): string {
       `${r.receiptGapLine} Open the month pack: ${r.appBaseUrl}/trips/month`,
       ""
     );
+  }
+
+  if (r.moneyReviewLine) {
+    lines.push(`${r.moneyReviewLine} Open Money: ${r.appBaseUrl}/money`, "");
   }
 
   if (r.pendingApprovalsCount) {

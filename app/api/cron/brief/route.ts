@@ -9,6 +9,7 @@ import { sendBriefEmail } from "@/lib/brief/send";
 import { composeBrief, type BriefTask, type BriefEvent, type BriefAccountIssue } from "@/lib/brief/compose";
 import type { TripStep } from "@/lib/tasks/trip-rollup";
 import type { MonthExpense } from "@/lib/trips/month";
+import type { Holding } from "@/lib/money/investments";
 import { cronAuthorized, alreadyRanToday } from "@/lib/cron/guard";
 import { civilKey, civilToday, istInstant } from "@/lib/datetime";
 import type { Json } from "@/lib/database.types";
@@ -41,7 +42,7 @@ export async function GET(req: Request): Promise<Response> {
     const dayStart = istInstant(today, 0, 0).toISOString();
     const dayEnd = istInstant(today, 23, 59).toISOString();
 
-    const [{ data: tasks }, { data: tripStepRows }, { data: streams }, { data: events }, { count: pendingCount }, { data: needsReauth }, { data: briefAccount }, { data: reminderRows }, { data: expenseRows }] =
+    const [{ data: tasks }, { data: tripStepRows }, { data: streams }, { data: events }, { count: pendingCount }, { data: needsReauth }, { data: briefAccount }, { data: reminderRows }, { data: expenseRows }, { data: holdingRows }] =
       await Promise.all([
         supabase
           .from("tasks")
@@ -88,6 +89,14 @@ export async function GET(req: Request): Promise<Response> {
           .from("trip_expenses")
           .select("id, trip_id, category, amount, date, billable, receipt_ref")
           .eq("user_id", userId),
+        // Holdings with a review date. A review writes no calendar event by
+        // design (M7b), so the brief is where it reaches him.
+        supabase
+          .from("finance_items")
+          .select("id, kind, name, institution, value, key_date, key_date_type, remind, notes")
+          .eq("user_id", userId)
+          .eq("key_date_type", "review")
+          .not("key_date", "is", null),
       ]);
 
     const streamName = new Map((streams ?? []).map((s) => [s.id, s.name]));
@@ -152,6 +161,7 @@ export async function GET(req: Request): Promise<Response> {
           receipt_ref: e.receipt_ref,
         })
       ),
+      holdings: (holdingRows ?? []) as Holding[],
       pendingApprovalsCount: pendingCount ?? 0,
       accountsNeedingReconnect,
       appBaseUrl,
