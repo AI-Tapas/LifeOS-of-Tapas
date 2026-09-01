@@ -15,7 +15,7 @@
 import { createHash } from "node:crypto";
 // Explicit .ts extension so node --test (type stripping, no bundler) can
 // resolve it; allowImportingTsExtensions covers the Next side.
-import { SEND_CLASS } from "./tools.ts";
+import { SEND_CLASS, type ToolDisclosure } from "./tools.ts";
 import { cleanReason, isPriority, type TaskPriority } from "../tasks/priority.ts";
 
 // Canonical JSON: object keys sorted at every depth, so semantically equal
@@ -39,6 +39,28 @@ export function canonicalJson(value: unknown): string {
 
 export function hashPayload(payload: unknown): string {
   return createHash("sha256").update(canonicalJson(payload), "utf8").digest("hex");
+}
+
+// ---------------------------------------------------------------------------
+// Disclosure gate (B8). The bucket says what a tool may change; the disclosure
+// class says what it may see. Exactly one class reads message bodies, and a
+// body read is only ever legitimate as its own top-level act: Tapas asked for
+// a scan, or the nightly cron ran one. Reached as a silent step inside another
+// tool's execution, it would pull mail content into work nobody asked for, so
+// it is refused there. Pure, so scripts/m4.test.ts proves it offline.
+// ---------------------------------------------------------------------------
+export function checkDisclosure(
+  disclosure: ToolDisclosure,
+  nestedInsideAnotherTool: boolean
+): GateOutcome {
+  if (disclosure === "mail_body" && nestedInsideAnotherTool) {
+    return {
+      ok: false,
+      message:
+        "Reading mail is its own act, never a step inside another one. Ask for a mail scan directly.",
+    };
+  }
+  return { ok: true };
 }
 
 export interface GateActionRow {

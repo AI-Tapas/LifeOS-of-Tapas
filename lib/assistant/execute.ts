@@ -8,6 +8,7 @@
 // apply; only the provider calls use the service-role path inside
 // withResourceAuth.
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { cookieActor, type Actor } from "@/lib/assistant/actor";
 import { withResourceAuth } from "@/lib/oauth/tokens";
 import { createEvent, updateEvent, deleteAppEvent } from "@/lib/events/write";
@@ -42,8 +43,9 @@ import {
   STUB_REPLIES,
   SEND_CLASS,
   assertNoAttendees,
+  disclosureOf,
 } from "./tools";
-import { hashPayload, runApprovedExecution } from "./core";
+import { checkDisclosure, hashPayload, runApprovedExecution } from "./core";
 import {
   removeObligationReminder,
   syncObligationReminder,
@@ -197,7 +199,25 @@ export interface ToolOutcome {
   queued?: boolean;
 }
 
+// Set for the whole of one tool's execution, so a tool that reaches back into
+// executeToolCall is visibly nested. AsyncLocalStorage rather than a module
+// counter: the nightly scan and a chat turn can be in flight at the same time,
+// and a counter would mistake one for the other.
+const insideTool = new AsyncLocalStorage<true>();
+
 export async function executeToolCall(
+  name: string,
+  input: Record<string, unknown>,
+  actor?: Actor
+): Promise<ToolOutcome> {
+  // Disclosure comes before anything else, including the stub shortcut: what a
+  // tool may SEE is decided before we look at what it may do.
+  const gate = checkDisclosure(disclosureOf(name), insideTool.getStore() === true);
+  if (!gate.ok) throw new Error(gate.message);
+  return insideTool.run(true, () => dispatchToolCall(name, input, actor));
+}
+
+async function dispatchToolCall(
   name: string,
   input: Record<string, unknown>,
   actor?: Actor

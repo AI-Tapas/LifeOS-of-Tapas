@@ -15,21 +15,27 @@
 //   5. Persona has no authority: gate behaviour is identical whatever the
 //      persona says, and the persona sits below the hard rules in a labelled
 //      tone-only block.
+//   6. Disclosure classes (B8): every tool declares what it may SEE, the union
+//      cannot express document content, and a mail-body tool cannot run as a
+//      hidden step inside another tool.
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
   TOOLS,
+  TOOL_DISCLOSURES,
   AUTONOMOUS_KINDS,
   CONFIRM_KINDS,
   SEND_CLASS,
   SCAN_TOOL,
   toolByName,
+  disclosureOf,
   assertNoAttendees,
   anthropicTools,
   schemaStats,
 } from "../lib/assistant/tools.ts";
 import {
   canonicalJson,
+  checkDisclosure,
   hashPayload,
   runApprovedExecution,
   validateScanProposals,
@@ -871,6 +877,71 @@ test("access tokens are refused once expired or revoked", async () => {
   // A refresh token must not be accepted where an access token is required.
   assert.equal(checkGrantUsable({ ...live, kind: "refresh" }, now, "access").ok, false);
   assert.equal(checkGrantUsable(null, now, "access").ok, false);
+});
+
+
+// --- 6. disclosure classes (B8) -----------------------------------------------
+//
+// The bucket answers "what can this tool change". None of it answers "what is
+// this tool entitled to see", and firm constraint 1 is a disclosure rule. The
+// three tests below are the control: the class is mandatory, it cannot be a
+// value outside the union, and the union cannot quietly grow a fifth member
+// for document content.
+
+test("every tool declares a disclosure class, the scan tool included", () => {
+  for (const t of [...TOOLS, SCAN_TOOL]) {
+    assert.ok(
+      (TOOL_DISCLOSURES as readonly string[]).includes(t.disclosure),
+      `tool ${t.name} has no valid disclosure class`
+    );
+  }
+  // The classes actually in use, so a reclassification is a visible diff.
+  assert.equal(disclosureOf("scan_mail"), "mail_body", "the scan reads snippets and body previews");
+  assert.equal(disclosureOf("lookup_gst_wiki"), "none", "a stub touches nothing");
+  assert.equal(disclosureOf("create_task"), "app_data");
+  assert.equal(disclosureOf("send_email"), "app_data");
+  // Exactly one tool may see message bodies. A second one is a decision, not
+  // an accident.
+  const bodyReaders = [...TOOLS, SCAN_TOOL].filter((t) => t.disclosure === "mail_body");
+  assert.deepEqual(bodyReaders.map((t) => t.name), ["scan_mail"]);
+  // An unknown name gets the most restrictive answer, never a permissive one.
+  assert.equal(disclosureOf("read_drive_file"), "none");
+});
+
+test("the disclosure union has exactly four members and none for document content", () => {
+  // Widening this union is a firm-constraint-1 decision for Tapas, never a
+  // line in somebody's diff. ToolDisclosure is derived from TOOL_DISCLOSURES,
+  // so this assertion IS an assertion about the type: a fifth member cannot
+  // exist in the type without appearing here first.
+  assert.deepEqual(
+    [...TOOL_DISCLOSURES],
+    ["none", "app_data", "mail_metadata", "mail_body"],
+    "adding a disclosure class is a constraint-1 decision, not a refactor"
+  );
+  // No member can express reading a document's contents, so no tool that did
+  // so could be given a valid class.
+  for (const d of TOOL_DISCLOSURES) {
+    assert.doesNotMatch(
+      d,
+      /doc|file|drive|sharepoint|onedrive|o365|attachment|content/i,
+      `disclosure class ${d} would let a document-reading tool exist`
+    );
+  }
+});
+
+test("a mail-body tool cannot run as a hidden step inside another tool", () => {
+  // Top level is fine: Tapas asked for a scan, or the nightly cron ran one.
+  assert.equal(checkDisclosure("mail_body", false).ok, true);
+  // Nested inside another tool's execution is not: that would pull message
+  // bodies into work nobody asked for.
+  const nested = checkDisclosure("mail_body", true);
+  assert.equal(nested.ok, false);
+  assert.match(nested.ok === false ? nested.message : "", /its own act/i);
+  // Nothing else is restricted by nesting; the buckets already govern those.
+  for (const d of TOOL_DISCLOSURES) {
+    if (d === "mail_body") continue;
+    assert.equal(checkDisclosure(d, true).ok, true, `${d} must not be nesting-gated`);
+  }
 });
 
 // --- destructive tools stay reversible ---------------------------------------

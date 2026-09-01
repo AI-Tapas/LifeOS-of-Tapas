@@ -13,10 +13,40 @@
 // payment tools, deletion of external data the app did not create, generic
 // SQL/rpc, and any tool that mutates assistant_actions.status.
 //
+// A bucket answers "what can this tool change". It does not answer "what is
+// this tool entitled to see", and firm constraint 1 is a disclosure rule, not
+// a permission one. So every tool also carries a disclosure class, and the
+// class it would need to read a client document does not exist in the union.
+//
 // Pure module: no server imports, so the offline suite (scripts/m4.test.ts)
 // can prove the registry shape.
 
 export type ToolBucket = "autonomous" | "confirm" | "stub";
+
+// What a tool is entitled to SEE. Firm constraint 1 says client-confidential
+// documents never enter this app, and no permission setting can enforce a
+// disclosure rule: only the absence of the capability can. So the union below
+// has deliberately NO member for document content. A tool that read a Drive
+// file, an O365 attachment or a mail attachment could not be given a valid
+// class, which means it cannot be added without first widening this union,
+// and widening it is a decision Tapas makes, not a line that slips through a
+// diff. scripts/m4.test.ts fails the moment a fifth member appears.
+//
+//   none           touches no owner data at all (the stubs, pure computation)
+//   app_data       reads rows Life OS itself owns
+//   mail_metadata  sender, subject, timestamps, calendar invite fields
+//   mail_body      message bodies, previews and snippets
+// The type is DERIVED from this list rather than written alongside it, so the
+// only way to widen the union is to add a member here, and the test that reads
+// this list is therefore a test of the type itself.
+export const TOOL_DISCLOSURES = [
+  "none",
+  "app_data",
+  "mail_metadata",
+  "mail_body",
+] as const;
+
+export type ToolDisclosure = (typeof TOOL_DISCLOSURES)[number];
 
 export type ToolSchema = { type: "object" } & Record<string, unknown>;
 
@@ -25,6 +55,7 @@ export interface ToolDef {
   description: string;
   input_schema: ToolSchema;
   bucket: ToolBucket;
+  disclosure: ToolDisclosure;
 }
 
 // Schema helpers. Optionality is expressed the plain JSON Schema way: the
@@ -86,6 +117,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "create_task",
     bucket: "autonomous",
+    disclosure: "app_data",
     description:
       "Create a task on Tapas's own list. Executes immediately and is undoable from the queue history.",
     input_schema: schema({
@@ -112,6 +144,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "update_task",
     bucket: "autonomous",
+    disclosure: "app_data",
     description:
       "Update an existing task (title, note, status, priority, due date). Undo restores the previous values.",
     input_schema: schema({
@@ -139,6 +172,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "set_reminder",
     bucket: "autonomous",
+    disclosure: "app_data",
     description:
       "Set or move the due date and reminder offsets of a task. Reminders are popup notifications on an attendee-free calendar event; nothing is sent to anyone.",
     input_schema: schema({
@@ -154,6 +188,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "add_note",
     bucket: "autonomous",
+    disclosure: "app_data",
     description: "Save a note (meeting, decision, idea or reference) in the app.",
     input_schema: schema({
       type: enumOf(["meeting", "decision", "idea", "reference"], "Note type."),
@@ -164,6 +199,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "add_person",
     bucket: "autonomous",
+    disclosure: "app_data",
     description:
       "Save a person record. Records created by the assistant are flagged unverified until Tapas confirms them; unverified recipients are highlighted at send time.",
     input_schema: schema({
@@ -178,6 +214,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "add_obligation",
     bucket: "autonomous",
+    disclosure: "app_data",
     description: "Add a recurring obligation (bill, premium, subscription).",
     input_schema: schema({
       name: str("Obligation name, e.g. House insurance premium."),
@@ -214,6 +251,7 @@ export const TOOLS: ToolDef[] = [
     // without confirmation as a third belt.
     name: "add_event_solo",
     bucket: "autonomous",
+    disclosure: "app_data",
     description:
       "Add a calendar event with ZERO attendees to one of Tapas's own calendars (the account's write-back calendar). Nothing is sent to anyone. For any event involving other people use propose_event_with_invites instead.",
     input_schema: schema({
@@ -232,6 +270,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "draft_email",
     bucket: "autonomous",
+    disclosure: "app_data",
     description:
       "Draft an email in Tapas's voice. The draft is stored in the app only (never in Gmail or Outlook) and CANNOT be sent until Tapas approves it in the queue.",
     input_schema: schema({
@@ -256,6 +295,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "send_email",
     bucket: "confirm",
+    disclosure: "app_data",
     description:
       "Queue an email for sending. It is NEVER sent directly: it lands in the approval queue and goes out only after Tapas approves it there.",
     input_schema: schema({
@@ -280,6 +320,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "propose_event_with_invites",
     bucket: "confirm",
+    disclosure: "app_data",
     description:
       "Propose a calendar event that invites other people. It always lands in the approval queue; the invite goes out only after Tapas approves it.",
     input_schema: schema({
@@ -306,6 +347,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "delete_task",
     bucket: "autonomous",
+    disclosure: "app_data",
     description:
       "Delete one of Tapas's own tasks, and its reminder. Recorded in the queue and reversible with undo_action. Use update_task with status dropped when the work was abandoned but worth remembering.",
     input_schema: schema({ task_id: str("The task id from context.") }),
@@ -313,6 +355,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "add_project",
     bucket: "autonomous",
+    disclosure: "app_data",
     description: "Create a project to group related tasks under a work stream.",
     input_schema: schema({
       name: str("Project name."),
@@ -325,6 +368,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "update_note",
     bucket: "autonomous",
+    disclosure: "app_data",
     description: "Change a saved note's title or body.",
     input_schema: schema({
       note_id: str("The note id."),
@@ -335,6 +379,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "delete_note",
     bucket: "autonomous",
+    disclosure: "app_data",
     description:
       "Delete a saved note. Reversible: undo_action restores it.",
     input_schema: schema({ note_id: str("The note id.") }),
@@ -342,6 +387,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "update_person",
     bucket: "autonomous",
+    disclosure: "app_data",
     description:
       "Update a person record. Set verified to true only when Tapas has confirmed the address himself; that clears the unverified flag shown at send time.",
     input_schema: schema({
@@ -358,6 +404,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "delete_person",
     bucket: "autonomous",
+    disclosure: "app_data",
     description:
       "Delete a person record. Reversible: undo_action restores it.",
     input_schema: schema({ person_id: str("The person id.") }),
@@ -365,6 +412,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "update_obligation",
     bucket: "autonomous",
+    disclosure: "app_data",
     description: "Update a recurring obligation, or switch it off with active false.",
     input_schema: schema({
       obligation_id: str("The obligation id."),
@@ -387,6 +435,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "delete_obligation",
     bucket: "autonomous",
+    disclosure: "app_data",
     description:
       "Delete a recurring obligation and its reminder. Reversible: undo_action restores it.",
     input_schema: schema({ obligation_id: str("The obligation id.") }),
@@ -394,6 +443,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "add_finance_item",
     bucket: "autonomous",
+    disclosure: "app_data",
     description:
       "Record an investment or deposit: a fixed deposit, mutual fund, stock, NCD or other holding.",
     input_schema: schema({
@@ -409,6 +459,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "update_finance_item",
     bucket: "autonomous",
+    disclosure: "app_data",
     description: "Update a recorded holding: its value, key date or notes.",
     input_schema: schema({
       finance_item_id: str("The holding id."),
@@ -421,6 +472,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "delete_finance_item",
     bucket: "autonomous",
+    disclosure: "app_data",
     description:
       "Delete a recorded holding. Reversible: undo_action restores it.",
     input_schema: schema({ finance_item_id: str("The holding id.") }),
@@ -428,6 +480,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "update_event_solo",
     bucket: "autonomous",
+    disclosure: "app_data",
     description:
       "Edit an event the app created, keeping it attendee-free. Events synced from a calendar Tapas does not own cannot be edited here.",
     input_schema: schema({
@@ -443,6 +496,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "delete_event",
     bucket: "autonomous",
+    disclosure: "app_data",
     description:
       "Delete an event the app created. Refuses anything synced from an external calendar, since that is not the app's to remove.",
     input_schema: schema({ event_id: str("The event id.") }),
@@ -450,6 +504,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "scan_mail",
     bucket: "autonomous",
+    disclosure: "mail_body",
     description:
       "Read recent inbox metadata across the connected accounts and propose tasks from anything needing action. Never stores message bodies.",
     input_schema: schema({}),
@@ -457,6 +512,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "undo_action",
     bucket: "autonomous",
+    disclosure: "app_data",
     description:
       "Undo an assistant action that already ran, reversing what it created. Sent email cannot be undone.",
     input_schema: schema({ action_id: str("The action id from the queue history.") }),
@@ -464,6 +520,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "reject_queued_action",
     bucket: "autonomous",
+    disclosure: "app_data",
     description:
       "Discard something waiting in the approval queue, so it can never be sent. Approving remains impossible outside the app.",
     input_schema: schema({ action_id: str("The action id from the pending list.") }),
@@ -471,6 +528,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "lookup_gst_wiki",
     bucket: "stub",
+    disclosure: "none",
     description:
       "Look up Tapas's GST research wiki. Not yet connected in this version.",
     input_schema: schema({ query: str("What to look up.") }),
@@ -478,6 +536,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "create_trip",
     bucket: "autonomous",
+    disclosure: "app_data",
     description:
       "Create a trip: an AICA session, a conference, leisure or other travel. Its travel legs and expenses hang off it, and they feed the month pack Tapas invoices from. This app never produces an invoice or a bill.",
     input_schema: schema({
@@ -513,6 +572,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "update_trip",
     bucket: "autonomous",
+    disclosure: "app_data",
     description:
       "Update a trip: its title, dates, how it is billed, or where it sits on the trail (planned, underway, done, billed). Undo restores the previous values.",
     input_schema: schema({
@@ -538,6 +598,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "log_trip_leg",
     bucket: "autonomous",
+    disclosure: "app_data",
     description:
       "Add one journey to a trip: from, to, date and mode. Tapas's transport preference runs Vande Bharat, then Tejas, then AC sleeper, then cab; suggest in that order unless he says otherwise. Undo removes the leg again.",
     input_schema: schema({
@@ -555,6 +616,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "add_trip_expense",
     bucket: "autonomous",
+    disclosure: "app_data",
     description:
       "Record one expense against a trip. Mark it billable when the institute or client reimburses it; billable expenses are what the monthly claim is assembled from. Always give a receipt_ref when there is one: a billable expense without it becomes a chase at invoice time. Undo removes it.",
     input_schema: schema({
@@ -589,6 +651,14 @@ export const SEND_CLASS = new Set(["send_email", "propose_event_with_invites"]);
 
 export function toolByName(name: string): ToolDef | undefined {
   return TOOLS.find((t) => t.name === name);
+}
+
+// The disclosure class of any tool the executor may be asked to run, the scan
+// pipeline's single tool included. An unknown name gets the most restrictive
+// answer rather than a permissive default.
+export function disclosureOf(name: string): ToolDisclosure {
+  if (name === SCAN_TOOL.name) return SCAN_TOOL.disclosure;
+  return toolByName(name)?.disclosure ?? "none";
 }
 
 export const STUB_REPLIES: Record<string, string> = {
@@ -700,6 +770,7 @@ export function mcpWriteTools(): ToolDef[] {
 export const SCAN_TOOL: ToolDef = {
   name: "propose_task",
   bucket: "autonomous",
+  disclosure: "app_data",
   description:
     "Propose one task derived from a scanned email. Short title, short note, and the message id as external_ref. Never copy full email bodies.",
   input_schema: schema({
@@ -719,3 +790,17 @@ export const SCAN_TOOL: ToolDef = {
     ),
   }),
 };
+
+// ---------------------------------------------------------------------------
+// Registry self-check, at import time. TypeScript already refuses a bad
+// disclosure class, but a cast or a hand-edited build output would not be
+// caught by the compiler, and this registry is the security boundary. A bad
+// registry stops the process rather than serving one request under it.
+// ---------------------------------------------------------------------------
+for (const t of [...TOOLS, SCAN_TOOL]) {
+  if (!(TOOL_DISCLOSURES as readonly string[]).includes(t.disclosure)) {
+    throw new Error(
+      `Tool ${t.name} has disclosure "${t.disclosure}", which is not one of ${TOOL_DISCLOSURES.join(", ")}.`
+    );
+  }
+}
