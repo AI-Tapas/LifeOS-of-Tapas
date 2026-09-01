@@ -11,6 +11,9 @@ import PersonaPanel, {
 } from "@/components/settings/persona-panel";
 import ModelsPanel from "@/components/settings/models-panel";
 import ThemePanel from "@/components/settings/theme-panel";
+import WorkStreamsPanel, {
+  type WorkStreamView,
+} from "@/components/settings/work-streams-panel";
 import ReminderCleanupPanel from "@/components/settings/reminder-cleanup-panel";
 import ConnectionsPanel, {
   type ConnectionView,
@@ -111,7 +114,7 @@ export default async function SettingsPage({
         .order("name"),
       supabase
         .from("work_streams")
-        .select("id, name, kind, billing_entity, feeds_billing, active")
+        .select("id, name, kind, billing_entity, feeds_billing, active, hourly_rate")
         .order("name"),
       supabase
         .from("assistant_persona")
@@ -201,28 +204,17 @@ export default async function SettingsPage({
       </div>
 
       <h2 className="mt-8 text-base font-semibold tracking-tight">Work streams</h2>
+      <p className="mt-1 text-sm text-secondary">
+        What an hour of each is worth. The assistant reads these when it warns
+        you about a price.
+      </p>
       {error && (
         <p className="mt-2 text-sm text-overdue">
           Could not load work streams: {error.message}
         </p>
       )}
-      <div className="mt-2 rounded-2xl border border-border bg-surface p-4 shadow-[var(--shadow-card)]">
-        <ul className="divide-y divide-border">
-          {streams?.map((s) => (
-            <li key={s.id} className="flex items-baseline justify-between py-3 first:pt-0 last:pb-0">
-              <div>
-                <p className="font-medium">{s.name}</p>
-                <p className="text-sm text-secondary">
-                  {s.kind.replace(/_/g, " ")}
-                  {s.billing_entity ? `, bills as ${s.billing_entity}` : ""}
-                </p>
-              </div>
-              <span className="text-xs text-muted">
-                {s.feeds_billing ? "billable" : "non-billing"}
-              </span>
-            </li>
-          ))}
-        </ul>
+      <div className="mt-2">
+        <WorkStreamsPanel streams={(streams ?? []) as WorkStreamView[]} />
       </div>
 
       <h2 className="mt-8 text-base font-semibold tracking-tight">Assistant models</h2>

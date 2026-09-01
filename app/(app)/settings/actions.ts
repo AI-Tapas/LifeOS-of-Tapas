@@ -381,3 +381,31 @@ export async function clearInAppCalendarEntriesAction(): Promise<{
     return { ok: false, message: describeError(e) };
   }
 }
+
+// ---------------------------------------------------------------------------
+// The rate a work stream is worth an hour (backlog B4)
+// ---------------------------------------------------------------------------
+// The Rs 3,500 per hour floor was a sentence in the assistant's hard rules,
+// which asked a model to remember a number. Now the app holds one number per
+// stream and puts it in the assistant's context, so the underpricing warning
+// names the stream's own rate.
+//
+// Clearing it is a real answer, not a failure: an empty rate means "no rate
+// recorded" and the assistant falls back to the floor and says so. This
+// stores one number. It quotes nothing and invoices nothing.
+export async function setWorkStreamRateAction(
+  workStreamId: string,
+  rate: number | null
+): Promise<{ ok: boolean; message?: string }> {
+  const { supabase } = await requireUser("/settings");
+  if (rate !== null && (!Number.isFinite(rate) || rate < 0)) {
+    return { ok: false, message: "A rate must be a number." };
+  }
+  const { error } = await supabase
+    .from("work_streams")
+    .update({ hourly_rate: rate })
+    .eq("id", workStreamId);
+  if (error) return { ok: false, message: error.message };
+  revalidatePath("/settings");
+  return { ok: true };
+}

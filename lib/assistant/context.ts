@@ -5,6 +5,7 @@
 
 import { formatDateIST, formatDateTimeIST, formatWeekdayIST } from "@/lib/datetime";
 import { fenceUntrusted } from "./prompt";
+import { streamRateLine, type StreamRate } from "@/lib/money/rates";
 import type { Database } from "@/lib/database.types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -16,7 +17,10 @@ export async function buildAppContext(supabase: Db): Promise<string> {
 
   const [{ data: streams }, { data: tasks }, { data: events }, { data: pending }, { data: accounts }] =
     await Promise.all([
-      supabase.from("work_streams").select("name, kind, active").order("name"),
+      supabase
+        .from("work_streams")
+        .select("name, kind, active, hourly_rate")
+        .order("name"),
       supabase
         .from("tasks")
         .select(
@@ -45,11 +49,9 @@ export async function buildAppContext(supabase: Db): Promise<string> {
   lines.push(
     `Now: ${formatWeekdayIST(now)} ${formatDateTimeIST(now)} IST.`,
     "",
-    "Work streams: " +
-      (streams ?? [])
-        .filter((s) => s.active)
-        .map((s) => s.name)
-        .join(", ")
+    // B4: the rate is a fact the app holds, not a number the model is asked
+    // to remember. streamRateLine is pure and tested in scripts/m7b.test.ts.
+    streamRateLine((streams ?? []) as StreamRate[])
   );
 
   lines.push(
