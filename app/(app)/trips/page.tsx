@@ -19,7 +19,7 @@ export default async function TripsPage() {
       supabase
         .from("trips")
         .select(
-          "id, purpose, title, work_stream_id, start_date, end_date, cities, status, bills_to, notes, work_streams(name)"
+          "id, purpose, title, work_stream_id, start_date, end_date, cities, status, bills_to, notes, session_label, session_date, work_streams(name)"
         )
         .order("start_date", { ascending: true, nullsFirst: false }),
       supabase
@@ -58,6 +58,8 @@ export default async function TripsPage() {
       id: t.id,
       purpose: t.purpose,
       title: t.title,
+      session_label: t.session_label,
+      session_date: t.session_date,
       work_stream_id: t.work_stream_id,
       start_date: t.start_date,
       end_date: t.end_date,

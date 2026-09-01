@@ -19,7 +19,7 @@ import {
   btnSmall,
 } from "@/components/ui";
 import { formatINR } from "@/lib/datetime";
-import { tripDatesLabel } from "@/lib/trips/bill";
+import { sessionLine, tripDatesLabel, travelDiffersFromSession } from "@/lib/trips/bill";
 import {
   BillsToChip,
   PurposeChip,
@@ -36,6 +36,8 @@ export interface TripRow {
   id: string;
   purpose: TripPurpose;
   title: string;
+  session_label: string | null;
+  session_date: string | null;
   work_stream_id: string;
   start_date: string | null;
   end_date: string | null;
@@ -191,6 +193,14 @@ export default function TripsView({
 }
 
 function TripCard({ trip }: { trip: TripRow }) {
+  const session = sessionLine(trip.session_label, trip.session_date);
+  // Only worth a line when it says something the session date does not: a
+  // day return would just repeat itself.
+  const showTravel = travelDiffersFromSession(
+    trip.start_date,
+    trip.end_date,
+    trip.session_date
+  );
   return (
     <Link
       href={`/trips/${trip.id}`}
@@ -198,16 +208,28 @@ function TripCard({ trip }: { trip: TripRow }) {
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="truncate font-medium">{trip.title}</p>
-          {/* The city, not the branch: the one word that says which session
-              this row is. Deliberately larger than the date line. */}
-          <p className="mt-0.5 truncate text-sm font-semibold text-brand-deep">
-            {trip.cities.length ? trip.cities.join(", ") : "No city recorded"}
-          </p>
-          <p className="mt-0.5 text-xs text-secondary">
-            {tripDatesLabel(trip.start_date, trip.end_date)}
-            {trip.stream_name ? ` · ${trip.stream_name}` : ""}
-          </p>
+          {/* The session first: which level, which day of the course, and
+              the day he actually teaches. The travel span below is arrival
+              and return, which is what he was having to decode. */}
+          {session ? (
+            <p className="truncate text-base font-semibold">
+              {session}
+              <span className="font-medium text-brand-deep">
+                {trip.cities.length ? ` · ${trip.cities.join(", ")}` : ""}
+              </span>
+            </p>
+          ) : (
+            <p className="mt-0.5 truncate text-sm font-semibold text-brand-deep">
+              {trip.cities.length ? trip.cities.join(", ") : "No city recorded"}
+            </p>
+          )}
+          <p className="mt-0.5 truncate text-sm text-secondary">{trip.title}</p>
+          {showTravel && (
+            <p className="mt-0.5 text-xs text-secondary">
+              Travel {tripDatesLabel(trip.start_date, trip.end_date)}
+              {trip.stream_name ? ` · ${trip.stream_name}` : ""}
+            </p>
+          )}
         </div>
         <PurposeChip purpose={trip.purpose} />
       </div>

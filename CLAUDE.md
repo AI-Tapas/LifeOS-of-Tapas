@@ -540,3 +540,26 @@ What the app does instead:
   them through removeReminder and reports the count. Safe to run twice, on no
   tool surface, and never run automatically on deploy.
 - Tests: npm run test:m7a (27 offline).
+
+## Which session a trip is for (M7d)
+
+- trips.session_label and trips.session_date (migration 20260901000500).
+  The problem: a trip card led with "3 to 5 September 2026", which is the
+  TRAVEL span including the night-before arrival, and Tapas had to stop and
+  work out which day he was actually teaching.
+- session_label is free text, not an enum: "L1D2" is AICA Level 1, Day 2 of
+  that batch's course. His schedule carries Level 1, Level 2, Industry and
+  Foreign programmes and days D1 to D5, and a new programme must not need a
+  migration. Industry rows still take the level they belong to; the word
+  Industry never appears (it is faculty reference only, and his invoice
+  prints them as the level).
+- session_date is the teaching day. It is NOT start_date, and often not
+  end_date either.
+- sessionLine() and travelDiffersFromSession() in lib/trips/bill.ts are pure
+  and drive the card: "L1D2 - 4 Sept - Bangalore" leads, the descriptive
+  title sits under it, and the travel span is labelled "Travel ..." and only
+  shown when it says something the session date does not (a day return
+  would just repeat itself). A trip with neither field reads exactly as it
+  did before.
+- Both fields are on create_trip and update_trip, so a schedule import fills
+  them. prompts/RECIPE-aica-schedule-intake.md carries the mapping.
