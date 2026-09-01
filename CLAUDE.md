@@ -667,5 +667,5 @@ Migration `20260901000600_m7b_money.sql`. Additive, nothing dropped.
   floor silently. This stores one number and tells the assistant. There is no
   quoting, no invoicing and no time tracking, and m7b.test.ts fails if a tool
   grows one.
-- Tests: `npm run test:m7b` (32 offline). app/dev-preview renders both money
+- Tests: `npm run test:m7b` (34 offline). app/dev-preview renders both money
   panels and the rate panel with mock data.
