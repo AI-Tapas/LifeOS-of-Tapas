@@ -19,12 +19,15 @@ import { TokenRevokedError } from "@/lib/oauth/core";
 import {
   buildGoogleReminderEvent,
   buildTripEvent,
-  obligationRRule,
   assertReminderHome,
+  planFinanceReminder,
   planTaskReminder,
   runReminderCleanup,
-  nextObligationDate,
+  nextObligationDates,
+  obligationSeriesRRule,
+  parseDateKey,
   reminderTitle,
+  type FinanceKeyDateType,
   type ObligationFrequency,
 } from "@/lib/reminders/core";
 import type { Database } from "@/lib/database.types";
@@ -36,8 +39,9 @@ type Svc = SupabaseClient<Database>;
 const REMINDER_HOUR_IST = 9;
 const RECONNECT_REASON = "Reminder not set: reconnect ca.tapasnr";
 
-// A reminder always belongs to exactly one parent. finance_item_id is carried
-// through unused in M3 so M7 reuses this exact path.
+// A reminder always belongs to exactly one parent. finance_item_id was carried
+// through unused in M3 "so M7 reuses this exact path"; M7b does exactly that,
+// and there is still only one writer.
 export interface ReminderSource {
   task_id?: string | null;
   obligation_id?: string | null;
@@ -389,7 +393,9 @@ export async function syncObligationReminder(
   const svc = createServiceClient();
   const { data: ob } = await svc
     .from("recurring_obligations")
-    .select("id, name, frequency, due_day, due_month, remind_offsets, active")
+    .select(
+      "id, name, frequency, due_day, due_month, interval_rule, anchor_date, remind_offsets, active"
+    )
     .eq("id", obligationId)
     .single();
   if (!ob) return { created: false, reason: "Obligation not found." };
@@ -399,21 +405,22 @@ export async function syncObligationReminder(
     return { created: false, removed: true };
   }
 
-  const rrule = obligationRRule(
-    ob.frequency as ObligationFrequency,
-    ob.due_day,
-    ob.due_month
-  );
+  // One entry point for both families: the monthly enum and the sub-monthly
+  // custom series (B2). The anchor is the first date of the same series the
+  // screen shows him, so what he reads and what Google expands cannot differ.
+  const series = {
+    frequency: ob.frequency as ObligationFrequency,
+    due_day: ob.due_day,
+    due_month: ob.due_month,
+    interval_rule: ob.interval_rule,
+    anchor_date: ob.anchor_date,
+  };
+  const rrule = obligationSeriesRRule(series);
   const today = (() => {
     const d = new Date(Date.now() + 330 * 60000);
     return { y: d.getUTCFullYear(), m: d.getUTCMonth() + 1, d: d.getUTCDate() };
   })();
-  const first = nextObligationDate(
-    ob.frequency as ObligationFrequency,
-    ob.due_day!,
-    ob.due_month,
-    today
-  );
+  const first = parseDateKey(nextObligationDates(series, today, 1)[0]);
   const anchorRfc = `${first.y}-${pad(first.m)}-${pad(first.d)}T${pad(
     REMINDER_HOUR_IST
   )}:00:00+05:30`;
@@ -438,6 +445,61 @@ export async function removeObligationReminder(
 ): Promise<void> {
   const svc = createServiceClient();
   await removeReminder(svc, userId, { obligation_id: obligationId });
+}
+
+// ---------------------------------------------------------------------------
+// Public API: investments (M7b)
+// ---------------------------------------------------------------------------
+// The same writer, the same reminder-home resolution, the same offsets. A
+// maturity is a calendar interrupt because money is genuinely at stake on the
+// day; a review date is in-app and writes nothing here, and the same removal
+// path covers switching one to the other, so no orphan event is left behind.
+export async function syncFinanceReminder(
+  userId: string,
+  financeItemId: string
+): Promise<ReminderWriteOutcome> {
+  const svc = createServiceClient();
+  const { data: item } = await svc
+    .from("finance_items")
+    .select("id, name, institution, key_date, key_date_type, remind")
+    .eq("id", financeItemId)
+    .single();
+  if (!item) return { created: false, reason: "Holding not found." };
+
+  const state = {
+    key_date: item.key_date,
+    key_date_type: item.key_date_type as FinanceKeyDateType | null,
+    remind: item.remind,
+  };
+  if (planFinanceReminder(state) === "remove") {
+    await removeReminder(svc, userId, { finance_item_id: financeItemId });
+    return { created: false, removed: true };
+  }
+
+  const anchorIso = new Date(
+    `${item.key_date}T${pad(REMINDER_HOUR_IST)}:00:00+05:30`
+  ).toISOString();
+  const where = item.institution ? ` (${item.institution})` : "";
+  return writeReminder(
+    svc,
+    userId,
+    { finance_item_id: financeItemId },
+    {
+      title: `Maturing: ${item.name}${where}`,
+      anchorIso,
+      // The standard offsets. A maturity is exactly the case the 7/3/1/0 set
+      // was designed for: enough notice to actually redirect the money.
+      offsetsDays: [7, 3, 1, 0],
+    }
+  );
+}
+
+export async function removeFinanceReminder(
+  userId: string,
+  financeItemId: string
+): Promise<void> {
+  const svc = createServiceClient();
+  await removeReminder(svc, userId, { finance_item_id: financeItemId });
 }
 
 // ---------------------------------------------------------------------------
@@ -576,7 +638,7 @@ export async function retryPendingReminders(userId: string): Promise<number> {
 
   const { data: pending } = await svc
     .from("reminders")
-    .select("id, task_id, obligation_id")
+    .select("id, task_id, obligation_id, finance_item_id")
     .eq("user_id", userId)
     .eq("channel", "gcal")
     .eq("created", false);
@@ -588,7 +650,9 @@ export async function retryPendingReminders(userId: string): Promise<number> {
         ? await syncTaskReminder(userId, r.task_id)
         : r.obligation_id
           ? await syncObligationReminder(userId, r.obligation_id)
-          : null;
+          : r.finance_item_id
+            ? await syncFinanceReminder(userId, r.finance_item_id)
+            : null;
       if (outcome?.created) created += 1;
     } catch {
       // leave it pending for the next sweep

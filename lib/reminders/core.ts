@@ -1,8 +1,15 @@
 // Pure reminder logic: offsets-to-overrides mapping, the recurrence rule for
 // obligations, the Google reminder-event payload, the reminder-home guard and
-// the cleanup orchestration. Zero imports on purpose so scripts/m3.test.ts can
+// the cleanup orchestration. No server imports, so scripts/m3.test.ts can
 // load this file directly under `node --test` type-stripping, exactly like
 // lib/oauth/core.ts. The DB- and network-wired writer is lib/reminders/writer.ts.
+//
+// M7b added one import, the recurring-rule parser tasks have used since M1,
+// because a sub-monthly obligation series must read the same rule a task
+// does rather than a second one that drifts from it. Relative .ts, so the
+// type-stripping loader still resolves it.
+
+import { parseRecurringRule } from "../tasks/recurring.ts";
 
 export const IST_TZ = "Asia/Kolkata";
 
@@ -93,11 +100,22 @@ export function buildGoogleReminderEvent(
 // Obligation recurrence
 // ---------------------------------------------------------------------------
 export type ObligationFrequency =
+  | "custom"
   | "monthly"
   | "bi_monthly"
   | "quarterly"
   | "half_yearly"
   | "yearly";
+
+// How many months one step of each frequency covers. 'custom' is absent
+// because it is not a monthly family member at all: it counts in days.
+export const OBLIGATION_MONTH_INTERVAL: Record<string, number> = {
+  monthly: 1,
+  bi_monthly: 2,
+  quarterly: 3,
+  half_yearly: 6,
+  yearly: 12,
+};
 
 // Map an obligation's frequency + due day (+ due month for yearly) to a single
 // RRULE. Monthly-family frequencies vary only by INTERVAL.
@@ -109,19 +127,15 @@ export function obligationRRule(
   if (!dueDay || dueDay < 1 || dueDay > 31) {
     throw new Error("obligation reminder needs a due day between 1 and 31");
   }
-  const monthlyInterval: Record<string, number> = {
-    monthly: 1,
-    bi_monthly: 2,
-    quarterly: 3,
-    half_yearly: 6,
-  };
   if (frequency === "yearly") {
     if (!dueMonth || dueMonth < 1 || dueMonth > 12) {
       throw new Error("a yearly obligation needs a due month between 1 and 12");
     }
     return `RRULE:FREQ=YEARLY;BYMONTH=${dueMonth};BYMONTHDAY=${dueDay}`;
   }
-  const interval = monthlyInterval[frequency];
+  // 'yearly' returned above, so anything left without a month interval is
+  // 'custom', which has its own rule and must not reach here.
+  const interval = OBLIGATION_MONTH_INTERVAL[frequency];
   if (!interval) throw new Error(`unknown obligation frequency: ${frequency}`);
   const intervalPart = interval === 1 ? "" : `;INTERVAL=${interval}`;
   return `RRULE:FREQ=MONTHLY${intervalPart};BYMONTHDAY=${dueDay}`;
@@ -162,6 +176,126 @@ export function nextObligationDate(
     }
   }
   return { y: from.y, m: from.m, d: clampDay(from.y, from.m) };
+}
+
+// ---------------------------------------------------------------------------
+// Sub-monthly obligation intervals (backlog B2)
+// ---------------------------------------------------------------------------
+// obligation_frequency ran monthly and longer, so a fortnightly payment could
+// not be said at all: a due day of the month has no meaning every ten days.
+// Frequency 'custom' fills the gap, and it reads the SAME rule tasks have
+// used since M1 (lib/tasks/recurring.ts, "<freq>:<interval>"), restricted to
+// daily and weekly because the monthly family is already in the enum.
+//
+// It needs an anchor as well as an interval. "Every ten days" is only a
+// series once you say from when, and unlike a monthly obligation there is no
+// day-of-month to derive it from.
+
+export interface ObligationSeries {
+  frequency: ObligationFrequency;
+  due_day?: number | null;
+  due_month?: number | null;
+  interval_rule?: string | null; // 'daily:10', 'weekly:2'
+  anchor_date?: string | null; // YYYY-MM-DD, the first occurrence
+}
+
+// How many days one step of a custom rule covers. Throws on anything the
+// rule cannot mean, so a malformed row fails loudly at save time instead of
+// quietly writing a reminder on the wrong day.
+export function customStepDays(rule: string | null | undefined): number {
+  const parsed = parseRecurringRule(rule);
+  if (!parsed) throw new Error("a custom obligation needs a rule like 'weekly:2'");
+  if (parsed.freq === "daily") return parsed.interval;
+  if (parsed.freq === "weekly") return parsed.interval * 7;
+  throw new Error(
+    "a custom obligation counts in days or weeks; use the monthly frequencies for longer"
+  );
+}
+
+export function parseDateKey(key: string | null | undefined): {
+  y: number;
+  m: number;
+  d: number;
+} {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec((key ?? "").trim());
+  if (!m) throw new Error("a custom obligation needs a start date");
+  return { y: Number(m[1]), m: Number(m[2]), d: Number(m[3]) };
+}
+
+export function civilDateKey(c: { y: number; m: number; d: number }): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${c.y}-${p(c.m)}-${p(c.d)}`;
+}
+
+function toEpochDay(c: { y: number; m: number; d: number }): number {
+  return Math.floor(Date.UTC(c.y, c.m - 1, c.d) / 86400000);
+}
+
+function fromEpochDay(day: number): { y: number; m: number; d: number } {
+  const dt = new Date(day * 86400000);
+  return { y: dt.getUTCFullYear(), m: dt.getUTCMonth() + 1, d: dt.getUTCDate() };
+}
+
+// The RRULE for any obligation, custom included. One entry point, so the
+// writer never has to know which family a row belongs to.
+export function obligationSeriesRRule(series: ObligationSeries): string {
+  if (series.frequency === "custom") {
+    const step = customStepDays(series.interval_rule);
+    const parsed = parseRecurringRule(series.interval_rule)!;
+    const freq = parsed.freq === "weekly" ? "WEEKLY" : "DAILY";
+    const interval = parsed.freq === "weekly" ? step / 7 : step;
+    const intervalPart = interval === 1 ? "" : `;INTERVAL=${interval}`;
+    return `RRULE:FREQ=${freq}${intervalPart}`;
+  }
+  return obligationRRule(series.frequency, series.due_day, series.due_month);
+}
+
+// The next `count` dates of the series, on or after `from`, as YYYY-MM-DD.
+//
+// This exists so the series is VISIBLE. A rule he cannot read is a rule he has
+// to trust, and the whole point of B2 is that he can see the next three dates
+// on the obligation itself and catch a wrong one before it reminds him.
+// The first entry is also what the writer anchors the calendar event on, so
+// what he reads and what Google expands are the same series by construction.
+export function nextObligationDates(
+  series: ObligationSeries,
+  from: { y: number; m: number; d: number },
+  count = 3
+): string[] {
+  if (count < 1) return [];
+
+  if (series.frequency === "custom") {
+    const step = customStepDays(series.interval_rule);
+    const anchorDay = toEpochDay(parseDateKey(series.anchor_date));
+    const fromDay = toEpochDay(from);
+    // A series that started in the past is fast-forwarded in one step rather
+    // than looped: an anchor five years back is otherwise hundreds of turns.
+    const first =
+      anchorDay >= fromDay
+        ? anchorDay
+        : anchorDay + Math.ceil((fromDay - anchorDay) / step) * step;
+    return Array.from({ length: count }, (_, i) => civilDateKey(fromEpochDay(first + i * step)));
+  }
+
+  const dueDay = series.due_day;
+  if (!dueDay || dueDay < 1 || dueDay > 31) {
+    throw new Error("obligation reminder needs a due day between 1 and 31");
+  }
+  const first = nextObligationDate(series.frequency, dueDay, series.due_month, from);
+  const stepMonths = OBLIGATION_MONTH_INTERVAL[series.frequency];
+  if (!stepMonths) throw new Error(`unknown obligation frequency: ${series.frequency}`);
+
+  const out: string[] = [];
+  for (let i = 0; i < count; i++) {
+    const total = (first.y * 12 + (first.m - 1)) + i * stepMonths;
+    const y = Math.floor(total / 12);
+    const m = (total % 12) + 1;
+    // A 31st in a 30-day month falls back to the last day, exactly as
+    // nextObligationDate clamps it.
+    const lastDay = new Date(Date.UTC(y, m, 0)).getUTCDate();
+    out.push(civilDateKey({ y, m, d: Math.min(dueDay, lastDay) }));
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -256,6 +390,44 @@ export function planTaskReminder(task: TaskReminderState): "write" | "remove" {
   if (mode === "in_app") return "remove";
   if (!task.due_ts) return "remove";
   if (task.status === "done" || task.status === "dropped") return "remove";
+  return "write";
+}
+
+// ---------------------------------------------------------------------------
+// M7b: which reminder an investment gets
+// ---------------------------------------------------------------------------
+// Money is genuinely at stake on a maturity date. An FD that matures unnoticed
+// rolls over at a worse rate, and that is precisely the interruption M7a
+// reserved the calendar for, so a maturity writes one calendar event with the
+// standard offsets.
+//
+// A review date is a date to think on, not a deadline. Nothing is lost by
+// noticing it a day late, so it stays in the app: it ranks on Home and it
+// appears in the morning brief, and it never interrupts him. Same rule as a
+// task's reminder_mode, decided from what the date MEANS rather than from a
+// separate column somebody would have to keep in step.
+export type FinanceKeyDateType = "maturity" | "review";
+
+export function isFinanceKeyDateType(v: unknown): v is FinanceKeyDateType {
+  return v === "maturity" || v === "review";
+}
+
+export function financeReminderMode(
+  keyDateType: FinanceKeyDateType | null | undefined
+): ReminderMode {
+  return keyDateType === "maturity" ? "calendar" : "in_app";
+}
+
+export interface FinanceReminderState {
+  key_date: string | null;
+  key_date_type: FinanceKeyDateType | null;
+  remind: boolean;
+}
+
+export function planFinanceReminder(item: FinanceReminderState): "write" | "remove" {
+  if (!item.remind) return "remove";
+  if (!item.key_date) return "remove";
+  if (financeReminderMode(item.key_date_type) === "in_app") return "remove";
   return "write";
 }
 

@@ -5,6 +5,9 @@
 // Completing an occurrence advances the due timestamp by one interval, keeping
 // the IST time-of-day. Documented in the README.
 
+// Relative .ts import so node --test (type stripping, no bundler) can load
+// this file, the same convention lib/tasks/triage.ts uses. M7b ports this
+// rule to recurring obligations, and the port is an import, not a copy.
 import {
   istCivil,
   istHour,
@@ -12,7 +15,7 @@ import {
   addDays,
   addMonths,
   istInstant,
-} from "@/lib/datetime";
+} from "../datetime.ts";
 
 export type RecurFreq = "daily" | "weekly" | "monthly" | "yearly";
 export interface RecurRule {

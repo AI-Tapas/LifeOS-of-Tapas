@@ -728,12 +728,14 @@ export type Database = {
           account_ref: string | null
           active: boolean
           amount: number | null
+          anchor_date: string | null
           autopay: boolean
           category: Database["public"]["Enums"]["obligation_category"]
           due_day: number | null
           due_month: number | null
           frequency: Database["public"]["Enums"]["obligation_frequency"]
           id: string
+          interval_rule: string | null
           name: string
           notes: string | null
           remind_offsets: number[]
@@ -744,12 +746,14 @@ export type Database = {
           account_ref?: string | null
           active?: boolean
           amount?: number | null
+          anchor_date?: string | null
           autopay?: boolean
           category: Database["public"]["Enums"]["obligation_category"]
           due_day?: number | null
           due_month?: number | null
           frequency: Database["public"]["Enums"]["obligation_frequency"]
           id?: string
+          interval_rule?: string | null
           name: string
           notes?: string | null
           remind_offsets?: number[]
@@ -760,12 +764,14 @@ export type Database = {
           account_ref?: string | null
           active?: boolean
           amount?: number | null
+          anchor_date?: string | null
           autopay?: boolean
           category?: Database["public"]["Enums"]["obligation_category"]
           due_day?: number | null
           due_month?: number | null
           frequency?: Database["public"]["Enums"]["obligation_frequency"]
           id?: string
+          interval_rule?: string | null
           name?: string
           notes?: string | null
           remind_offsets?: number[]
@@ -1040,6 +1046,7 @@ export type Database = {
           active: boolean
           billing_entity: string | null
           feeds_billing: boolean
+          hourly_rate: number | null
           id: string
           kind: Database["public"]["Enums"]["work_stream_kind"]
           linked_account_hint: string | null
@@ -1051,6 +1058,7 @@ export type Database = {
           active?: boolean
           billing_entity?: string | null
           feeds_billing?: boolean
+          hourly_rate?: number | null
           id?: string
           kind: Database["public"]["Enums"]["work_stream_kind"]
           linked_account_hint?: string | null
@@ -1062,6 +1070,7 @@ export type Database = {
           active?: boolean
           billing_entity?: string | null
           feeds_billing?: boolean
+          hourly_rate?: number | null
           id?: string
           kind?: Database["public"]["Enums"]["work_stream_kind"]
           linked_account_hint?: string | null
@@ -1135,6 +1144,7 @@ export type Database = {
         | "subscription"
         | "other"
       obligation_frequency:
+        | "custom"
         | "monthly"
         | "bi_monthly"
         | "quarterly"
@@ -1334,6 +1344,7 @@ export const Constants = {
         "other",
       ],
       obligation_frequency: [
+        "custom",
         "monthly",
         "bi_monthly",
         "quarterly",
