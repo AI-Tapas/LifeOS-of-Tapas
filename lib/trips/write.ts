@@ -8,7 +8,7 @@
 // reachable from the Trips screen alone. No assistant or connector tool calls
 // it, and nothing in this file sends anything to anybody.
 
-import { buildChecklist } from "./checklist.ts";
+import { buildChecklist, type HotelArrangement } from "./checklist.ts";
 import {
   deriveLineItems,
   lineItemsTotal,
@@ -45,6 +45,10 @@ export interface TripInput {
   status?: TripStatus;
   billable_to?: string | null;
   notes?: string | null;
+  // How the accommodation is handled. Left out on a create and the column
+  // stays null, which readers resolve to his norm for that purpose. The app
+  // sends a value; the connectors may omit it.
+  hotel_arrangement?: HotelArrangement | null;
   // Not a column: when true, createTrip also seeds the standard travel
   // checklist against the new trip. The add-trip drawer sets it, and so does
   // the connector's with_checklist flag, through this one code path.
@@ -87,6 +91,7 @@ export async function createTrip(
       status: input.status ?? "planned",
       billable_to: input.billable_to ?? null,
       notes: input.notes ?? null,
+      hotel_arrangement: input.hotel_arrangement ?? null,
     })
     .select("id")
     .single();
@@ -101,6 +106,7 @@ export async function createTrip(
       start_date: input.start_date ?? null,
       end_date: input.end_date ?? null,
       billable_to: input.billable_to ?? null,
+      hotel_arrangement: input.hotel_arrangement ?? null,
       work_stream_id: input.work_stream_id,
     });
     return {
@@ -130,6 +136,7 @@ export async function seedTripChecklist(
     start_date: string | null;
     end_date: string | null;
     billable_to: string | null;
+    hotel_arrangement?: HotelArrangement | null;
     work_stream_id: string;
   }
 ): Promise<string[]> {
@@ -180,6 +187,9 @@ export async function updateTrip(
       ...(patch.status !== undefined ? { status: patch.status } : {}),
       ...(patch.billable_to !== undefined ? { billable_to: patch.billable_to } : {}),
       ...(patch.notes !== undefined ? { notes: patch.notes } : {}),
+      ...(patch.hotel_arrangement !== undefined
+        ? { hotel_arrangement: patch.hotel_arrangement }
+        : {}),
     })
     .eq("id", id);
   if (error) return { ok: false, message: error.message };
@@ -469,7 +479,9 @@ function checkDates(
 }
 
 // A YYYY-MM-DD checklist date at 9:30 am IST, the app's standard due time.
-function dueAt(dateOnly: string): string {
+// Exported so the trip screen's hotel-step sync dates a step exactly as the
+// seeder does.
+export function dueAt(dateOnly: string): string {
   const [y, m, d] = dateOnly.split("-").map(Number);
   return istInstant({ y, m, d }, 9, 30).toISOString();
 }

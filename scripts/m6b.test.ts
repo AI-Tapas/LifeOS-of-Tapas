@@ -215,7 +215,11 @@ test("AICA copy names the preference order and the branch's hotel", () => {
   assert.match(steps[2].note, /confirmation, not a booking/);
 });
 
-test("a non-AICA trip drops the branch wording, and the bill without a payer", () => {
+test("a non-AICA trip loses the bill step without a payer", () => {
+  // Since milestone 6c the hotel wording follows the trip's hotel_arrangement,
+  // not its purpose: a branch arranges his hotel on almost every trip, so a
+  // trip that has not said otherwise reads as 'branch'. What the purpose still
+  // decides is the bill: only AICA is billable without an explicit payer.
   const leisure = {
     title: "Family trip",
     purpose: "leisure",
@@ -225,8 +229,6 @@ test("a non-AICA trip drops the branch wording, and the bill without a payer", (
   };
   const steps = buildChecklist(leisure, "2026-08-01");
   assert.deepEqual(steps.map((s) => s.key), ["onward", "return", "hotel", "receipts"]);
-  assert.equal(steps[2].title, "Confirm the hotel");
-  assert.ok(!/branch/i.test(steps[2].note));
 
   // Named a payer, so the reimbursement step comes back.
   const billed = buildChecklist({ ...leisure, billable_to: "Cygnet" }, "2026-08-01");

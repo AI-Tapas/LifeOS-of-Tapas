@@ -45,7 +45,14 @@ import TripForm, {
 import BillBuilder from "@/components/trips/bill-builder";
 import { setTaskStatusAction } from "@/app/(app)/tasks/actions";
 import {
+  HOTEL_SENTENCES,
+  HOTEL_STEP_TITLES,
+  buildChecklist,
+  resolveHotelArrangement,
+} from "@/lib/trips/checklist";
+import {
   addChecklistAction,
+  syncHotelStepAction,
   addExpenseAction,
   deleteExpenseAction,
   setBillStatusAction,
@@ -114,6 +121,19 @@ export default function TripDetail({
   const [err, setErr] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
+  const hotel = resolveHotelArrangement(trip);
+
+  // With family or back the same night there is no hotel bill to log, so the
+  // category goes last rather than second. Never removed: plans change, and a
+  // night he did pay for must still be recordable.
+  const expenseCategories = useMemo(
+    () =>
+      hotel === "relative" || hotel === "same_day"
+        ? [...EXPENSE_CATEGORIES.filter((c) => c !== "hotel"), "hotel" as ExpenseCategory]
+        : EXPENSE_CATEGORIES,
+    [hotel]
+  );
+
   const claimable = billableTotal(expenses);
   const ownCost = expenses
     .filter((e) => !e.billable)
@@ -173,7 +193,9 @@ export default function TripDetail({
         />
       </div>
 
-      <div className="flex flex-wrap items-center gap-2">
+      <p className="text-sm text-secondary">{HOTEL_SENTENCES[hotel]}</p>
+
+      <div className="mt-2 flex flex-wrap items-center gap-2">
         <PurposeChip purpose={trip.purpose} />
         {trip.cities.length > 0 && (
           <span className="text-xs text-secondary">{trip.cities.join(", ")}</span>
@@ -188,8 +210,11 @@ export default function TripDetail({
 
       {trip.purpose === "aica" && (
         <p className="mt-3 rounded-xl border border-brand/30 bg-brand-soft p-3 text-xs text-brand-deep">
-          AICA: arrive the night before the session. The branch arranges the
-          hotel, so plan transport only. {TRANSPORT_HELP}
+          AICA:{" "}
+          {hotel === "same_day"
+            ? "a day return, so no night before the session."
+            : "arrive the night before the session."}{" "}
+          {TRANSPORT_HELP}
         </p>
       )}
 
@@ -239,7 +264,12 @@ export default function TripDetail({
       </section>
 
       {/* --- checklist ------------------------------------------------- */}
-      <Checklist trip={trip} items={checklist} onError={setErr} />
+      <Checklist
+        trip={trip}
+        items={checklist}
+        todayKey={todayKey}
+        onError={setErr}
+      />
 
       {/* --- expenses -------------------------------------------------- */}
       <section className="mt-6">
@@ -429,6 +459,7 @@ export default function TripDetail({
       {expenseEditing && (
         <ExpenseForm
           expense={expenseEditing === "new" ? null : expenseEditing}
+          categories={expenseCategories}
           tripId={trip.id!}
           defaultDate={trip.start_date ?? todayKey}
           onClose={() => setExpenseEditing(null)}
@@ -564,11 +595,13 @@ function LegForm({
 // --- expense drawer ---------------------------------------------------------
 function ExpenseForm({
   expense,
+  categories,
   tripId,
   defaultDate,
   onClose,
 }: {
   expense: ExpenseRow | null;
+  categories: ExpenseCategory[];
   tripId: string;
   defaultDate: string;
   onClose: () => void;
@@ -634,7 +667,7 @@ function ExpenseForm({
             onChange={(e) => setCategory(e.target.value as ExpenseCategory)}
             className={inputCls}
           >
-            {EXPENSE_CATEGORIES.map((c) => (
+            {categories.map((c) => (
               <option key={c} value={c}>
                 {CATEGORY_LABELS[c]}
               </option>
@@ -716,16 +749,43 @@ function ExpenseForm({
 function Checklist({
   trip,
   items,
+  todayKey,
   onError,
 }: {
   trip: TripFormValues;
   items: ChecklistRow[];
+  todayKey: string;
   onError: (m: string | null) => void;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [note, setNote] = useState<string | null>(null);
   const live = items.filter((i) => i.status !== "dropped");
   const done = live.filter((i) => i.status === "done").length;
+
+  // Changing how the hotel is arranged never rewrites a step behind his back.
+  // The screen compares what the checklist WOULD be against what is there,
+  // and either offers one explicit update or, if he has already worked that
+  // step, says plainly that it is being left alone.
+  const wantHotel =
+    buildChecklist(trip, todayKey).find((s) => s.key === "hotel") ?? null;
+  const hotelRow = live.find((i) => HOTEL_STEP_TITLES.includes(i.title)) ?? null;
+  const worked = !!hotelRow && hotelRow.status !== "todo";
+  const stale =
+    live.length > 0 &&
+    ((!!wantHotel && !hotelRow) ||
+      (!wantHotel && !!hotelRow) ||
+      (!!wantHotel && !!hotelRow && hotelRow.title !== wantHotel.title));
+
+  function syncHotel() {
+    setNote(null);
+    startTransition(async () => {
+      const r = await syncHotelStepAction(trip.id!);
+      if (r.ok) setNote(r.note ?? "Checklist updated.");
+      else onError(r.message);
+      router.refresh();
+    });
+  }
 
   function complete(id: string) {
     startTransition(async () => {
@@ -757,11 +817,38 @@ function Checklist({
           }
         />
       </div>
+      {stale && (
+        <div className="mb-2 rounded-xl border border-brand/30 bg-brand-soft p-3 text-xs text-brand-deep">
+          {worked ? (
+            <p>
+              The hotel step no longer matches this trip, but you have already
+              worked it, so it is left alone. Change it yourself if it should
+              read differently.
+            </p>
+          ) : (
+            <>
+              <p>
+                The hotel choice on this trip no longer matches its checklist.
+              </p>
+              <button
+                onClick={syncHotel}
+                disabled={pending}
+                className={btnSmall + " mt-2"}
+              >
+                {pending ? "Updating" : "Update the checklist"}
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {note && <p className="mb-2 text-xs text-secondary">{note}</p>}
+
       {live.length === 0 ? (
         <Empty title="No checklist yet.">
-          The standard travel checklist is five steps: book onward, book
-          return, confirm the hotel, collect the receipts, build the bill. Each
-          becomes a task dated from this trip, with its own reminder.
+          The standard travel checklist: book onward, book return, collect the
+          receipts, build the bill, and the hotel step this trip calls for.
+          Each becomes a task dated from this trip, with its own reminder.
           <span className="mt-3 block">
             <button onClick={seed} disabled={pending} className={btnSmall}>
               {pending ? "Adding" : "Add the standard checklist"}

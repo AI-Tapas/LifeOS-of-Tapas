@@ -35,6 +35,7 @@ import {
   updateTrip,
 } from "@/lib/trips/write";
 import { TRANSPORT_MODES, type TransportMode, type TripLeg } from "@/lib/trips/bill";
+import { HOTEL_ARRANGEMENTS, type HotelArrangement } from "@/lib/trips/checklist";
 import {
   AUTONOMOUS_KINDS,
   CONFIRM_KINDS,
@@ -83,6 +84,16 @@ async function audit(
 // ---------------------------------------------------------------------------
 function s(v: unknown): string | null {
   return typeof v === "string" && v.trim() ? v.trim() : null;
+}
+
+// The model's word for how the hotel is arranged, checked against the enum
+// here rather than trusted. Anything unrecognised becomes null, which reads
+// as his norm instead of writing a value he never chose.
+function hotelArrangement(v: unknown): HotelArrangement | null {
+  const raw = s(v);
+  return raw && (HOTEL_ARRANGEMENTS as string[]).includes(raw)
+    ? (raw as HotelArrangement)
+    : null;
 }
 
 function civil(dateOnly: string): { y: number; m: number; d: number } {
@@ -830,6 +841,7 @@ const performers: Record<string, Performer> = {
         : [],
       billable_to: s(input.billable_to),
       notes: s(input.notes),
+      hotel_arrangement: hotelArrangement(input.hotel_arrangement),
       // Same seeding path as the add-trip drawer: one implementation, so the
       // steps and their dates cannot differ between the app and a connector.
       with_checklist: input.with_checklist === true,
@@ -846,7 +858,7 @@ const performers: Record<string, Performer> = {
     if (!tripId) throw new Error("trip_id is required.");
     const { data: prev } = await supabase
       .from("trips")
-      .select("title, status, start_date, end_date, billable_to, notes")
+      .select("title, status, start_date, end_date, billable_to, notes, hotel_arrangement")
       .eq("id", tripId)
       .single();
     if (!prev) throw new Error("Trip not found.");
@@ -859,6 +871,9 @@ const performers: Record<string, Performer> = {
       ...(s(input.end_date) ? { end_date: s(input.end_date) } : {}),
       ...(input.billable_to !== undefined ? { billable_to: s(input.billable_to) } : {}),
       ...(input.notes !== undefined ? { notes: s(input.notes) } : {}),
+      ...(s(input.hotel_arrangement)
+        ? { hotel_arrangement: hotelArrangement(input.hotel_arrangement) }
+        : {}),
     });
     if (!r.ok) throw new Error(r.message);
     return {

@@ -960,6 +960,9 @@ export type Database = {
           billable_to: string | null
           cities: Json | null
           end_date: string | null
+          hotel_arrangement:
+            | Database["public"]["Enums"]["hotel_arrangement"]
+            | null
           id: string
           legs: Json | null
           notes: string | null
@@ -974,6 +977,9 @@ export type Database = {
           billable_to?: string | null
           cities?: Json | null
           end_date?: string | null
+          hotel_arrangement?:
+            | Database["public"]["Enums"]["hotel_arrangement"]
+            | null
           id?: string
           legs?: Json | null
           notes?: string | null
@@ -988,6 +994,9 @@ export type Database = {
           billable_to?: string | null
           cities?: Json | null
           end_date?: string | null
+          hotel_arrangement?:
+            | Database["public"]["Enums"]["hotel_arrangement"]
+            | null
           id?: string
           legs?: Json | null
           notes?: string | null
@@ -1095,6 +1104,7 @@ export type Database = {
       event_source: "synced" | "app" | "reminder"
       finance_item_kind: "fd" | "mf" | "stock" | "ncd" | "other"
       finance_key_date_type: "maturity" | "review"
+      hotel_arrangement: "branch" | "self" | "relative" | "same_day"
       note_type: "meeting" | "decision" | "idea" | "reference"
       oauth_client: "google_internal" | "google_external" | "microsoft"
       obligation_category:
@@ -1289,6 +1299,7 @@ export const Constants = {
       event_source: ["synced", "app", "reminder"],
       finance_item_kind: ["fd", "mf", "stock", "ncd", "other"],
       finance_key_date_type: ["maturity", "review"],
+      hotel_arrangement: ["branch", "self", "relative", "same_day"],
       note_type: ["meeting", "decision", "idea", "reference"],
       oauth_client: ["google_internal", "google_external", "microsoft"],
       obligation_category: [

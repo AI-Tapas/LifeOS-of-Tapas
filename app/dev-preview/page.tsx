@@ -443,6 +443,7 @@ export default async function DevPreviewPage() {
           cities: ["Bhavnagar"],
           status: "done",
           billable_to: "ICAI Bhavnagar Branch",
+          hotel_arrangement: "branch",
           notes: null,
         }}
         streamName="ICAI"

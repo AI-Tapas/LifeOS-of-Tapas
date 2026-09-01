@@ -355,3 +355,49 @@ and email-verification rules live in lib/accounts.ts.
 - Tests: npm run test:m6b (26 offline tests: rollup counts and rank
   inheritance, checklist date derivation and the past-date clamp, the brief
   ranking the same rows, and the tool-schema rules).
+
+## Hotel arrangement (Milestone 6c)
+
+- trips.hotel_arrangement (migration 20260901000100) is a four-value enum:
+  branch (an ICAI branch arranges it), self (he books it, reimbursable),
+  relative (staying with family), same_day (back the same day). Nullable,
+  with NO database default.
+- It is not a label. It decides which checklist step exists, which is the
+  whole value of the field:
+    branch    "Confirm hotel with the branch", due 5 days before the start
+    self      "Book hotel", due 7 days before, alongside the tickets
+    relative  no hotel step at all
+    same_day  no hotel step, and the onward-ticket note drops the
+              "arrive the night before" line
+- Default for a NEW trip: branch, whatever the purpose. An ICAI branch
+  arranges his hotel on almost every trip; industry batches at company sites
+  (Royal Enfield Chennai, L&T Chennai) are the one or two a month where he
+  books, and he sets those by hand. Industry batches have NO trip purpose of
+  their own, so the default must never be guessed from purpose or title. The
+  single exception is dates: start and end on one date defaults to same_day.
+  In the add-trip drawer the default follows the dates until he taps the
+  control; after that his choice stands even if he edits the dates.
+- Reading an existing row: a null column resolves to branch
+  (resolveHotelArrangement). Deliberately NOT read from the dates, so a row
+  written before this milestone never silently becomes same_day.
+- Changing the field NEVER rewrites checklist steps behind him. The trip
+  screen compares what the checklist would be against what is there and
+  offers one explicit "Update the checklist" action (syncHotelStepAction),
+  which touches a step only while it is still at 'todo' with wording the app
+  itself wrote (HOTEL_STEP_TITLES). A step he has completed, started, dropped
+  or retitled is left alone and the screen says so. A removed step is
+  dropped, never deleted.
+- The old hard rule "the branch arranges the hotel, so do not offer to book
+  or track hotels for AICA trips" was false once this field existed and would
+  have made the assistant refuse help on exactly the trips that need it. The
+  replacement in HARD_RULES follows the field: confirmation on branch trips,
+  real help on self trips, nothing on relative or same_day.
+  lifeos_list_trips returns hotel_arrangement so a connected model can obey
+  it, and create_trip and update_trip take it as an optional single-typed
+  enum.
+- Expenses: on relative and same_day the hotel category is ordered last in
+  the expense drawer, never removed. Plans change, and a night he did pay for
+  must still be recordable.
+- Tests: npm run test:m6c (21 offline tests: the four checklists, the
+  night-before line, the branch default and the same-dates exception, null
+  rows resolving to branch, and the tool-schema rules).

@@ -23,7 +23,7 @@ export default async function TripDetailPage({
   const { data: trip } = await supabase
     .from("trips")
     .select(
-      "id, purpose, title, work_stream_id, start_date, end_date, cities, legs, status, billable_to, notes, work_streams(name)"
+      "id, purpose, title, work_stream_id, start_date, end_date, cities, legs, status, billable_to, notes, hotel_arrangement, work_streams(name)"
     )
     .eq("id", id)
     .maybeSingle();
@@ -67,6 +67,7 @@ export default async function TripDetailPage({
     status: trip.status,
     billable_to: trip.billable_to,
     notes: trip.notes,
+    hotel_arrangement: trip.hotel_arrangement,
   };
 
   return (

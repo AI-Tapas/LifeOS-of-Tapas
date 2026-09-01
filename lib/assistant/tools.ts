@@ -486,6 +486,10 @@ export const TOOLS: ToolDef[] = [
         "Who reimburses it, e.g. ICAI Rajkot branch. Omit when he bears the cost."
       ),
       notes: strOrNull("Anything worth remembering about the trip."),
+      hotel_arrangement: enumOrNull(
+        ["branch", "self", "relative", "same_day"],
+        "How the accommodation is handled: branch (the ICAI branch arranges it), self (he books it, reimbursable), relative (staying with family), same_day (back the same day). This decides the checklist's hotel step. Omit to let the app default it: branch, which is the norm, or same_day when the trip starts and ends on one date."
+      ),
       with_checklist: boolOrNull(
         "Also add the standard travel checklist (book onward, book return, confirm hotel, collect receipts, build the bill), dated from the trip's own dates. Defaults to false. Needs a start date."
       ),
@@ -507,6 +511,10 @@ export const TOOLS: ToolDef[] = [
       end_date: { ...strOrNull(DATE_DESC + " Omit to keep.") },
       billable_to: strOrNull("Who reimburses it. Omit to keep."),
       notes: strOrNull("New notes. Omit to keep."),
+      hotel_arrangement: enumOrNull(
+        ["branch", "self", "relative", "same_day"],
+        "How the accommodation is handled: branch, self, relative or same_day. Changing it does not rewrite checklist steps already there; the trip screen offers that separately. Omit to keep."
+      ),
     }),
   },
   {

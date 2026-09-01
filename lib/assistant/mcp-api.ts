@@ -187,7 +187,7 @@ export const READ_TOOL_DESCRIPTIONS: Record<string, string> = {
   lifeos_list_projects:
     "List projects and the work stream each belongs to, for filing tasks under one.",
   lifeos_list_trips:
-    "List trips with their purpose, dates, status, how much billable expense each carries, the legs logged against them, and checklist progress (checklist_done of checklist_total).",
+    "List trips with their purpose, dates, status, how the hotel is arranged (branch, self, relative or same_day), how much billable expense each carries, the legs logged against them, and checklist progress (checklist_done of checklist_total).",
   lifeos_list_bills:
     "List reimbursement bills with their number, date, payer, amount and status. Read-only: no connector can create a bill beyond a draft, or mark one sent or paid.",
   lifeos_list_action_history:
@@ -427,7 +427,7 @@ export async function runReadTool(
     let q = supabase
       .from("trips")
       .select(
-        "id, title, purpose, status, start_date, end_date, cities, legs, billable_to, notes, work_streams(name), trip_expenses(amount, billable), tasks(status)",
+        "id, title, purpose, status, start_date, end_date, cities, legs, billable_to, notes, hotel_arrangement, work_streams(name), trip_expenses(amount, billable), tasks(status)",
         { count: "exact" }
       )
       .order("start_date", { ascending: false, nullsFirst: false })
@@ -463,6 +463,10 @@ export async function runReadTool(
         work_stream: (t.work_streams as { name: string } | null)?.name ?? null,
         billable_to: t.billable_to,
         notes: t.notes,
+        // Which of the four arrangements applies. A connected model needs it
+        // to follow the hard rule: help him book only when he is booking.
+        // Null reads as 'branch', the norm.
+        hotel_arrangement: t.hotel_arrangement ?? "branch",
         billable_total: expenses
           .filter((e) => e.billable)
           .reduce((sum, e) => sum + Number(e.amount), 0),

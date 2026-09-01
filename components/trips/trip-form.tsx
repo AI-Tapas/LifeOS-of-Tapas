@@ -11,6 +11,14 @@ import {
   type TripStatus,
 } from "@/components/trips/bits";
 import {
+  HOTEL_ARRANGEMENTS,
+  HOTEL_HINTS,
+  HOTEL_LABELS,
+  HOTEL_SENTENCES,
+  defaultHotelArrangement,
+  type HotelArrangement,
+} from "@/lib/trips/checklist";
+import {
   createTripAction,
   deleteTripAction,
   updateTripAction,
@@ -32,6 +40,7 @@ export interface TripFormValues {
   status: TripStatus;
   billable_to: string | null;
   notes: string | null;
+  hotel_arrangement: HotelArrangement | null;
 }
 
 const STATUS_CHOICES: TripStatus[] = [
@@ -66,6 +75,18 @@ export default function TripForm({
   const [status, setStatus] = useState<TripStatus>(trip?.status ?? "planned");
   const [billableTo, setBillableTo] = useState(trip?.billable_to ?? "");
   const [notes, setNotes] = useState(trip?.notes ?? "");
+  // Null means "still following the dates". On a new trip that is the
+  // starting state, so entering one date in both fields flips the choice to
+  // Same day before he saves. The moment he picks a value himself, or opens
+  // an existing trip, it stops moving under him: a deliberate choice is never
+  // overwritten by a later date edit.
+  const [hotelPick, setHotelPick] = useState<HotelArrangement | null>(
+    trip?.hotel_arrangement ??
+      (isEdit
+        ? defaultHotelArrangement(trip!.start_date, trip!.end_date)
+        : null)
+  );
+  const hotel = hotelPick ?? defaultHotelArrangement(start || null, end || null);
   // Checked by default on a new trip: the five steps are what he runs every
   // time, and each one carries its own reminder. Never offered on an edit,
   // where the trip screen's Checklist section adds them instead.
@@ -90,6 +111,7 @@ export default function TripForm({
       status,
       billable_to: billableTo.trim() || null,
       notes: notes.trim() || null,
+      hotel_arrangement: hotel,
       with_checklist: !isEdit && withChecklist,
     };
     startTransition(async () => {
@@ -149,9 +171,12 @@ export default function TripForm({
 
         {purpose === "aica" && (
           <p className="rounded-lg border border-brand/30 bg-brand-soft p-2.5 text-xs text-brand-deep">
-            AICA: arrive the night before the session. The branch arranges the
-            hotel, so plan transport only. Billable expenses on this trip feed
-            the institute reimbursement bill.
+            AICA:{" "}
+            {hotel === "same_day"
+              ? "a day return, so no night before."
+              : "arrive the night before the session."}{" "}
+            {HOTEL_SENTENCES[hotel]} Billable expenses on this trip feed the
+            institute reimbursement bill.
           </p>
         )}
 
@@ -206,6 +231,38 @@ export default function TripForm({
           />
         </Field>
 
+        <Field label="Hotel">
+          <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Hotel">
+            {HOTEL_ARRANGEMENTS.map((h) => {
+              const active = h === hotel;
+              return (
+                <button
+                  key={h}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => setHotelPick(h)}
+                  className={
+                    "press flex min-h-[56px] flex-col items-center justify-center rounded-xl border px-2 py-2 text-sm " +
+                    (active
+                      ? "border-brand bg-brand-soft font-semibold text-brand-deep"
+                      : "border-border bg-surface text-foreground")
+                  }
+                >
+                  <span>{HOTEL_LABELS[h]}</span>
+                  <span className="mt-0.5 text-[11px] text-neutral-500">
+                    {HOTEL_HINTS[h]}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <p className="mt-1.5 text-[11px] text-secondary">
+            This decides the checklist: a confirmation, a booking, or no hotel
+            step at all.
+          </p>
+        </Field>
+
         <div className="flex gap-2">
           <Field label="Status">
             <select
@@ -250,10 +307,10 @@ export default function TripForm({
             <span>
               Add the standard travel checklist
               <span className="block text-xs text-secondary">
-                Book onward, book return, confirm the hotel, collect the
-                receipts, build the bill. Dated from this trip, each with its
-                own reminder, all under the trip rather than in the task list.
-                Needs a start date.
+                Book onward, book return, the receipts, the bill, and the
+                hotel step the choice above calls for. Dated from this trip,
+                each with its own reminder, all under the trip rather than in
+                the task list. Needs a start date.
               </span>
             </span>
           </label>
