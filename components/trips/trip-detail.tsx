@@ -1,8 +1,11 @@
 "use client";
 
-// One trip: its legs, its expenses grouped by category, and the bills built
-// from it. Everything a claim needs sits on this screen; the print view is
-// one tap away once a bill exists.
+// One trip: its legs, its checklist and its expenses grouped by category.
+// It leads with the city and the dates, which is what he reads to know which
+// session this is.
+//
+// No bill is built here. M6d removed that: Life OS records the trip, and the
+// month pack (/trips/month) hands the month to his own invoice run.
 
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
@@ -34,15 +37,16 @@ import {
   type TripLeg,
 } from "@/lib/trips/bill";
 import {
+  BillsToChip,
   PurposeChip,
   StatusTrail,
   type TripStatus,
 } from "@/components/trips/bits";
+import { BILLS_TO_HELP, isReceiptGap } from "@/lib/trips/month";
 import TripForm, {
   type TripFormValues,
   type WorkStreamRow,
 } from "@/components/trips/trip-form";
-import BillBuilder from "@/components/trips/bill-builder";
 import { setTaskStatusAction } from "@/app/(app)/tasks/actions";
 import {
   HOTEL_SENTENCES,
@@ -55,14 +59,9 @@ import {
   syncHotelStepAction,
   addExpenseAction,
   deleteExpenseAction,
-  setBillStatusAction,
   updateExpenseAction,
   updateTripAction,
 } from "@/app/(app)/trips/actions";
-import type { Database } from "@/lib/database.types";
-
-type BillStatus = Database["public"]["Enums"]["bill_status"];
-type BillRecipient = Database["public"]["Enums"]["bill_recipient"];
 
 export interface ExpenseRow {
   id: string;
@@ -83,24 +82,13 @@ export interface ChecklistRow {
   due_ts: string | null;
 }
 
-export interface BillSummary {
-  id: string;
-  number: string;
-  date: string;
-  bill_to: BillRecipient;
-  amount: number;
-  status: BillStatus;
-}
-
 export default function TripDetail({
   trip,
   streamName,
   legs,
   checklist,
   expenses,
-  bills,
   workStreams,
-  suggestedNumber,
   todayKey,
 }: {
   trip: TripFormValues;
@@ -108,16 +96,13 @@ export default function TripDetail({
   legs: TripLeg[];
   checklist: ChecklistRow[];
   expenses: ExpenseRow[];
-  bills: BillSummary[];
   workStreams: WorkStreamRow[];
-  suggestedNumber: string;
   todayKey: string;
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [legEditing, setLegEditing] = useState<{ index: number } | "new" | null>(null);
   const [expenseEditing, setExpenseEditing] = useState<ExpenseRow | "new" | null>(null);
-  const [building, setBuilding] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -138,6 +123,11 @@ export default function TripDetail({
   const ownCost = expenses
     .filter((e) => !e.billable)
     .reduce((sum, e) => sum + e.amount, 0);
+  // A billable expense with no receipt reference is a chase waiting at
+  // invoice time. Counted here so the screen can say so plainly.
+  const missingReceipts = expenses.filter((e) =>
+    isReceiptGap({ ...e, trip_id: trip.id ?? "" })
+  );
 
   const byCategory = useMemo(
     () =>
@@ -165,14 +155,6 @@ export default function TripDetail({
     });
   }
 
-  function billStatus(bill: BillSummary, next: BillStatus) {
-    startTransition(async () => {
-      const r = await setBillStatusAction(bill.id, trip.id!, next);
-      if (!r.ok) setErr(r.message);
-      router.refresh();
-    });
-  }
-
   return (
     <div>
       <Link href="/trips" className="text-xs font-semibold text-secondary">
@@ -180,8 +162,12 @@ export default function TripDetail({
       </Link>
 
       <div className="mt-2">
+        {/* City first, then the dates: the two facts that identify the trip
+            now that no branch name is recorded. */}
         <PageHeader
-          title={trip.title}
+          title={
+            trip.cities.length ? trip.cities.join(", ") : "No city recorded"
+          }
           subtitle={`${tripDatesLabel(trip.start_date, trip.end_date)}${
             streamName ? ` · ${streamName}` : ""
           }`}
@@ -197,10 +183,19 @@ export default function TripDetail({
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <PurposeChip purpose={trip.purpose} />
-        {trip.cities.length > 0 && (
-          <span className="text-xs text-secondary">{trip.cities.join(", ")}</span>
-        )}
+        <BillsToChip billsTo={trip.bills_to} />
       </div>
+
+      {trip.bills_to === "chapter_aed" ? (
+        <p className="mt-3 rounded-xl border border-waiting/30 bg-waiting-soft p-3 text-xs text-waiting">
+          Excluded from the monthly ICAI claim. {BILLS_TO_HELP.chapter_aed} The
+          checklist carries the reminder to raise it.
+        </p>
+      ) : trip.bills_to === "none" ? (
+        <p className="mt-3 text-xs text-muted">
+          {BILLS_TO_HELP.none} It stays off the month pack.
+        </p>
+      ) : null}
 
       <div className="mt-3">
         <StatusTrail status={trip.status} onPick={setStatus} disabled={pending} />
@@ -283,10 +278,17 @@ export default function TripDetail({
             }
           />
         </div>
+        {missingReceipts.length > 0 && (
+          <p className="mb-2 rounded-xl border border-waiting/30 bg-waiting-soft p-3 text-xs text-waiting">
+            {missingReceipts.length} billable{" "}
+            {missingReceipts.length === 1 ? "expense has" : "expenses have"} no
+            receipt reference. Add it now; the invoice run needs it.
+          </p>
+        )}
         {expenses.length === 0 ? (
           <Empty title="No expenses yet.">
             Log what the trip cost. Mark the ones the institute reimburses as
-            billable; those become the bill.
+            billable; those go into the month pack you invoice from.
           </Empty>
         ) : (
           <div className="space-y-4">
@@ -304,10 +306,16 @@ export default function TripDetail({
                     >
                       <div className="min-w-0">
                         <p className="text-sm">{dayLabel(e.date)}</p>
-                        {e.receipt_ref && (
+                        {e.receipt_ref ? (
                           <p className="mt-0.5 truncate text-xs text-muted">
                             {e.receipt_ref}
                           </p>
+                        ) : (
+                          e.billable && (
+                            <p className="mt-0.5 truncate text-xs font-semibold text-waiting">
+                              no receipt reference
+                            </p>
+                          )
                         )}
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
@@ -340,89 +348,11 @@ export default function TripDetail({
               <span className="text-sm text-secondary">Own cost</span>
               <span className="text-sm">{formatINR(ownCost)}</span>
             </div>
+            <p className="mt-2 text-[11px] text-muted">
+              Records, not a claim. The invoice itself is raised monthly from
+              your own workbook; the month pack hands it these rows.
+            </p>
           </Card>
-        )}
-      </section>
-
-      {/* --- bills ------------------------------------------------------ */}
-      <section className="mt-6">
-        <div className="mb-2">
-          <BandHead
-            title="Bills"
-            action={
-              <button
-                onClick={() => setBuilding(true)}
-                disabled={claimable <= 0}
-                className={btnSmall + " disabled:opacity-40"}
-              >
-                Build bill
-              </button>
-            }
-          />
-        </div>
-        {bills.length === 0 ? (
-          <Empty title="No bill yet.">
-            {claimable > 0
-              ? "Build bill drafts the line items from the billable expenses. You can edit every line before saving."
-              : "Mark an expense billable and the bill builder opens."}
-          </Empty>
-        ) : (
-          <div className="space-y-2">
-            {bills.map((b) => (
-              <Card key={b.id}>
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="truncate font-medium">{b.number}</p>
-                    <p className="mt-0.5 text-xs text-secondary">
-                      {dayLabel(b.date)} · to the {b.bill_to}
-                    </p>
-                  </div>
-                  <span className="shrink-0 text-sm font-semibold">
-                    {formatINR(b.amount)}
-                  </span>
-                </div>
-                <div className="mt-2.5 flex flex-wrap items-center gap-2">
-                  <span
-                    className={
-                      "rounded-full px-2.5 py-0.5 text-[11px] font-semibold " +
-                      (b.status === "paid"
-                        ? "bg-ok-soft text-ok"
-                        : b.status === "sent"
-                          ? "bg-waiting-soft text-waiting"
-                          : "bg-surface-2 text-secondary")
-                    }
-                  >
-                    {b.status}
-                  </span>
-                  <Link href={`/trips/bill/${b.id}`} className={btnSmall + " py-2"}>
-                    Open and print
-                  </Link>
-                  {b.status === "draft" && (
-                    <button
-                      onClick={() => billStatus(b, "sent")}
-                      disabled={pending}
-                      className={btnSmall}
-                    >
-                      Mark sent
-                    </button>
-                  )}
-                  {b.status === "sent" && (
-                    <button
-                      onClick={() => billStatus(b, "paid")}
-                      disabled={pending}
-                      className={btnSmall}
-                    >
-                      Mark paid
-                    </button>
-                  )}
-                </div>
-                <p className="mt-2 text-[11px] text-muted">
-                  The app never sends a bill. Sending it, and saying it was
-                  sent, stays with you.
-                </p>
-              </Card>
-            ))}
-          </div>
         )}
       </section>
 
@@ -463,17 +393,6 @@ export default function TripDetail({
           tripId={trip.id!}
           defaultDate={trip.start_date ?? todayKey}
           onClose={() => setExpenseEditing(null)}
-        />
-      )}
-
-      {building && (
-        <BillBuilder
-          tripId={trip.id!}
-          expenses={expenses}
-          suggestedNumber={suggestedNumber}
-          defaultDate={todayKey}
-          defaultAddress={trip.billable_to ?? ""}
-          onClose={() => setBuilding(false)}
         />
       )}
     </div>
@@ -699,7 +618,7 @@ function ExpenseForm({
             checked={billable}
             onChange={(e) => setBillable(e.target.checked)}
           />
-          Billable, goes on the reimbursement bill
+          Billable, goes into the monthly claim
         </label>
         <Field label="Receipt reference">
           <input
@@ -711,7 +630,8 @@ function ExpenseForm({
         </Field>
         <p className="text-xs text-muted">
           A note about where the receipt lives, not the receipt itself. The app
-          never stores documents.
+          never stores documents. A billable expense without one becomes a
+          chase at invoice time.
         </p>
 
         {err && <p className="text-sm text-overdue">{err}</p>}
@@ -847,8 +767,9 @@ function Checklist({
       {live.length === 0 ? (
         <Empty title="No checklist yet.">
           The standard travel checklist: book onward, book return, collect the
-          receipts, build the bill, and the hotel step this trip calls for.
-          Each becomes a task dated from this trip, with its own reminder.
+          receipts, and the hotel step this trip calls for. Each becomes a task
+          dated from this trip, with its own reminder. Raising the invoice is
+          one recurring monthly task, not a step per trip.
           <span className="mt-3 block">
             <button onClick={seed} disabled={pending} className={btnSmall}>
               {pending ? "Adding" : "Add the standard checklist"}

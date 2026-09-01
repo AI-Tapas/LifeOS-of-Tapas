@@ -14,6 +14,7 @@ import {
   type TriageTask,
 } from "../tasks/triage.ts";
 import { rollUpTrips, type TripStep } from "../tasks/trip-rollup.ts";
+import { briefGapLine, type MonthExpense } from "../trips/month.ts";
 import {
   addDays,
   civilKey,
@@ -80,6 +81,9 @@ export interface ComposeBriefInput {
   // this filter the same item appears twice: once in the ranked bands and
   // again under Also today. Optional so older fixtures stay valid.
   reminderExtEventIds?: string[];
+  // Every trip expense, for the receipt-gap line. Optional so older fixtures
+  // stay valid.
+  tripExpenses?: MonthExpense[];
   pendingApprovalsCount: number;
   accountsNeedingReconnect: BriefAccountIssue[];
   appBaseUrl: string;
@@ -161,6 +165,11 @@ export function composeBrief(input: ComposeBriefInput): ComposedBrief {
     (t) => t.source === "email" && t.created_at >= todayMidnightIso
   );
 
+  // Receipts still missing, but only from the 25th onward. Run all month and
+  // it becomes wallpaper; run it at the end and it lands while the month can
+  // still be fixed.
+  const receiptGapLine = briefGapLine(input.tripExpenses ?? [], civilKey(today));
+
   const dateHeading = `${formatWeekdayLongIST(nowIso)}, ${formatDateIST(nowIso)}`;
   const narrative = topItem ? `The one thing to do first today: ${topItem.title}.` : "Desk clear.";
   const topTitle = topItem ? truncate(topItem.title, MAX_SUBJECT_ITEM_LEN) : null;
@@ -175,6 +184,7 @@ export function composeBrief(input: ComposeBriefInput): ComposedBrief {
     events: meetings,
     pendingApprovalsCount,
     scannedTasks,
+    receiptGapLine,
     nowIso,
     appBaseUrl,
   });
@@ -187,6 +197,7 @@ export function composeBrief(input: ComposeBriefInput): ComposedBrief {
     events: meetings,
     pendingApprovalsCount,
     scannedTasks,
+    receiptGapLine,
     nowIso,
     appBaseUrl,
   });
@@ -221,6 +232,7 @@ interface RenderInput {
   events: BriefEvent[];
   pendingApprovalsCount: number;
   scannedTasks: BriefTask[];
+  receiptGapLine: string | null;
   nowIso: string;
   appBaseUrl: string;
 }
@@ -345,6 +357,19 @@ function renderHtml(r: RenderInput): string {
       </table>`
     : `<p style="margin:0;font-size:13px;color:${COLORS.muted};font-family:${FONT};">No meetings today. A clear runway for the Do first list.</p>`;
 
+  const receiptBlock = r.receiptGapLine
+    ? `
+    <tr><td style="padding:16px 32px 0 32px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+        <td style="border-radius:10px;background-color:${COLORS.todayBg};padding:12px 14px;">
+          <a href="${r.appBaseUrl}/trips/month" style="text-decoration:none;font-size:13px;color:${COLORS.todayText};font-family:${FONT};">
+            ${esc(r.receiptGapLine)} Open the month pack.
+          </a>
+        </td>
+      </tr></table>
+    </td></tr>`
+    : "";
+
   const approvalsBlock = r.pendingApprovalsCount
     ? `
     <tr><td style="padding:16px 32px 0 32px;">
@@ -386,6 +411,7 @@ function renderHtml(r: RenderInput): string {
           ${eventsHtml}
         </div>
       </td></tr>
+      ${receiptBlock}
       ${approvalsBlock}
       ${scannedBlock}
       <tr><td style="padding:24px 32px 28px 32px;">
@@ -442,6 +468,13 @@ function renderText(r: RenderInput): string {
     lines.push("No meetings today. A clear runway for the Do first list.");
   }
   lines.push("");
+
+  if (r.receiptGapLine) {
+    lines.push(
+      `${r.receiptGapLine} Open the month pack: ${r.appBaseUrl}/trips/month`,
+      ""
+    );
+  }
 
   if (r.pendingApprovalsCount) {
     lines.push(

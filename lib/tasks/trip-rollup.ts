@@ -31,6 +31,9 @@ export interface RollupTrip {
   title: string;
   start_date: string | null;
   end_date: string | null;
+  // The city is what he reads to know which session a line is, now that no
+  // branch name is recorded against a trip (M6d).
+  cities?: string[] | null;
 }
 
 // A checklist step as the callers load it: an ordinary task plus the trip it
@@ -43,7 +46,7 @@ export interface TripStep extends TriageTask {
 export interface TripRollup extends TriageTask {
   kind: "trip";
   trip_id: string;
-  // "AICA session, Rajkot branch, 9 to 10 September 2026"
+  // "AICA session, Rajkot, 9 to 10 September 2026"
   label: string;
   done: number;
   total: number;
@@ -86,6 +89,7 @@ export function rollUpTrips(steps: TripStep[], nowMs: number): TripRollup[] {
     if (!lead) continue;
     const trip = all[0].trip;
     const dates = tripDatesLabel(trip.start_date, trip.end_date);
+    const city = tripCityLabel(trip);
 
     out.push({
       kind: "trip",
@@ -94,7 +98,9 @@ export function rollUpTrips(steps: TripStep[], nowMs: number): TripRollup[] {
       id: `trip:${tripId}`,
       trip_id: tripId,
       title: trip.title,
-      label: dates === "No dates yet" ? trip.title : `${trip.title}, ${dates}`,
+      label: [trip.title, city, dates === "No dates yet" ? "" : dates]
+        .filter(Boolean)
+        .join(", "),
       // Rank inherited whole from the leading step, so the trip sits in the
       // band that step earned, no higher and no lower.
       priority: lead.priority,
@@ -121,4 +127,18 @@ export function splitTripTasks<T extends TriageTask & { trip_id: string | null }
     standalone: tasks.filter((t) => !t.trip_id),
     rollups: rollUpTrips(steps, nowMs),
   };
+}
+
+// The city, unless the title already carries it. Titles are free text he
+// writes himself ("AICA session, Rajkot branch"), so naming Rajkot twice on
+// one line reads worse than not naming it at all.
+// ponytail: a case-insensitive substring test, not a place-name matcher. If a
+// title ever names a different city than the field, both appear; that is the
+// honest outcome anyway.
+export function tripCityLabel(trip: RollupTrip): string {
+  const cities = (trip.cities ?? []).filter(Boolean);
+  if (!cities.length) return "";
+  const title = trip.title.toLowerCase();
+  const fresh = cities.filter((c) => !title.includes(c.toLowerCase()));
+  return fresh.join(", ");
 }

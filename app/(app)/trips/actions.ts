@@ -4,15 +4,11 @@ import { revalidatePath } from "next/cache";
 import { requireUser } from "@/lib/auth/require-user";
 import {
   addTripExpense,
-  createBillDraft,
   createTrip,
-  deleteBill,
   dueAt,
   seedTripChecklist,
   deleteTrip,
   deleteTripExpense,
-  setBillStatus,
-  updateBill,
   updateTrip,
   updateTripExpense,
   type ExpenseInput,
@@ -26,11 +22,6 @@ import {
   buildChecklist,
 } from "@/lib/trips/checklist";
 import { civilKey, civilToday } from "@/lib/datetime";
-import type { BillLineItem } from "@/lib/trips/bill";
-import type { Database } from "@/lib/database.types";
-
-type BillRecipient = Database["public"]["Enums"]["bill_recipient"];
-type BillStatus = Database["public"]["Enums"]["bill_status"];
 
 // Every action is a thin owner-session shell over lib/trips/write.ts, which
 // the assistant and the MCP connector call with the same arguments.
@@ -39,10 +30,11 @@ export async function createTripAction(input: TripInput): Promise<WriteResult> {
   const { supabase, user } = await requireUser("/trips");
   const r = await createTrip(supabase, user.id, input);
   revalidatePath("/trips");
-  if (input.with_checklist) {
-    revalidatePath("/tasks");
-    revalidatePath("/");
-  }
+  revalidatePath("/trips/month");
+  // A chapter_aed trip seeds its AED invoice reminder whether or not the
+  // checklist was asked for, so the task surfaces revalidate either way.
+  revalidatePath("/tasks");
+  revalidatePath("/");
   return r;
 }
 
@@ -53,6 +45,7 @@ export async function updateTripAction(
   const { supabase, user } = await requireUser("/trips");
   const r = await updateTrip(supabase, user.id, id, patch);
   revalidatePath("/trips");
+  revalidatePath("/trips/month");
   revalidatePath(`/trips/${id}`);
   return r;
 }
@@ -65,12 +58,15 @@ export async function addChecklistAction(tripId: string): Promise<WriteResult> {
   const { data: trip } = await supabase
     .from("trips")
     .select(
-      "title, purpose, start_date, end_date, billable_to, hotel_arrangement, work_stream_id"
+      "title, purpose, start_date, end_date, bills_to, cities, hotel_arrangement, work_stream_id"
     )
     .eq("id", tripId)
     .maybeSingle();
   if (!trip) return { ok: false, message: "Trip not found." };
-  const ids = await seedTripChecklist(supabase, user.id, tripId, trip);
+  const ids = await seedTripChecklist(supabase, user.id, tripId, {
+    ...trip,
+    cities: Array.isArray(trip.cities) ? (trip.cities as string[]) : [],
+  });
   revalidatePath("/trips");
   revalidatePath(`/trips/${tripId}`);
   revalidatePath("/tasks");
@@ -95,13 +91,18 @@ export async function syncHotelStepAction(tripId: string): Promise<WriteResult> 
   const { data: trip } = await supabase
     .from("trips")
     .select(
-      "title, purpose, start_date, end_date, billable_to, hotel_arrangement, work_stream_id"
+      "title, purpose, start_date, end_date, bills_to, cities, hotel_arrangement, work_stream_id"
     )
     .eq("id", tripId)
     .maybeSingle();
   if (!trip) return { ok: false, message: "Trip not found." };
 
-  const steps = buildChecklist(trip, civilKey(civilToday()));
+  const steps = buildChecklist(
+    // cities is jsonb, so the generated type is Json: normalise it the same
+    // way every other caller does.
+    { ...trip, cities: Array.isArray(trip.cities) ? (trip.cities as string[]) : [] },
+    civilKey(civilToday())
+  );
   if (!trip.start_date) {
     return {
       ok: false,
@@ -209,6 +210,7 @@ export async function addExpenseAction(input: ExpenseInput): Promise<WriteResult
   const { supabase, user } = await requireUser("/trips");
   const r = await addTripExpense(supabase, user.id, input);
   revalidatePath("/trips");
+  revalidatePath("/trips/month");
   revalidatePath(`/trips/${input.trip_id}`);
   return r;
 }
@@ -221,6 +223,7 @@ export async function updateExpenseAction(
   const { supabase, user } = await requireUser("/trips");
   const r = await updateTripExpense(supabase, user.id, id, patch);
   revalidatePath("/trips");
+  revalidatePath("/trips/month");
   revalidatePath(`/trips/${tripId}`);
   return r;
 }
@@ -232,68 +235,7 @@ export async function deleteExpenseAction(
   const { supabase, user } = await requireUser("/trips");
   const r = await deleteTripExpense(supabase, user.id, id);
   revalidatePath("/trips");
-  revalidatePath(`/trips/${tripId}`);
-  return r;
-}
-
-export async function createBillAction(input: {
-  trip_id: string;
-  bill_to: BillRecipient;
-  bill_to_address: string | null;
-  number: string;
-  date: string;
-  line_items: BillLineItem[];
-}): Promise<WriteResult> {
-  const { supabase, user } = await requireUser("/trips");
-  const r = await createBillDraft(supabase, user.id, input);
-  revalidatePath("/trips");
-  revalidatePath(`/trips/${input.trip_id}`);
-  return r;
-}
-
-export async function updateBillAction(
-  id: string,
-  tripId: string,
-  patch: {
-    number?: string;
-    date?: string;
-    bill_to?: BillRecipient;
-    bill_to_address?: string | null;
-    line_items?: BillLineItem[];
-    pdf_ref?: string | null;
-  }
-): Promise<WriteResult> {
-  const { supabase, user } = await requireUser("/trips");
-  const r = await updateBill(supabase, user.id, id, patch);
-  revalidatePath("/trips");
-  revalidatePath(`/trips/${tripId}`);
-  revalidatePath(`/trips/bill/${id}`);
-  return r;
-}
-
-// Marking a bill sent or paid is Tapas's own act, here in the app. The
-// assistant has no tool for it and the connectors cannot reach it: the app
-// never sends a bill, so only he can record that one went out.
-export async function setBillStatusAction(
-  id: string,
-  tripId: string,
-  status: BillStatus
-): Promise<WriteResult> {
-  const { supabase, user } = await requireUser("/trips");
-  const r = await setBillStatus(supabase, user.id, id, status);
-  revalidatePath("/trips");
-  revalidatePath(`/trips/${tripId}`);
-  revalidatePath(`/trips/bill/${id}`);
-  return r;
-}
-
-export async function deleteBillAction(
-  id: string,
-  tripId: string
-): Promise<{ ok: boolean; message?: string }> {
-  const { supabase, user } = await requireUser("/trips");
-  const r = await deleteBill(supabase, user.id, id);
-  revalidatePath("/trips");
+  revalidatePath("/trips/month");
   revalidatePath(`/trips/${tripId}`);
   return r;
 }

@@ -40,7 +40,8 @@ const TRIP: ChecklistTrip = {
   purpose: "aica",
   start_date: "2026-09-03",
   end_date: "2026-09-04",
-  billable_to: "ICAI Rajkot Branch",
+  bills_to: "icai_monthly",
+  cities: ["Rajkot"],
 };
 
 function keys(hotel: HotelArrangement): string[] {
@@ -79,11 +80,11 @@ test("self asks him to book, seven days out with the tickets", () => {
 });
 
 test("staying with family produces no hotel step at all", () => {
-  assert.deepEqual(keys("relative"), ["onward", "return", "receipts", "bill"]);
+  assert.deepEqual(keys("relative"), ["onward", "return", "receipts"]);
 });
 
 test("a day return produces no hotel step at all", () => {
-  assert.deepEqual(keys("same_day"), ["onward", "return", "receipts", "bill"]);
+  assert.deepEqual(keys("same_day"), ["onward", "return", "receipts"]);
 });
 
 test("the four values differ from one another, which is the whole point", () => {
@@ -97,7 +98,7 @@ test("only the hotel step moves: the other steps are untouched", () => {
   for (const h of HOTEL_ARRANGEMENTS) {
     assert.equal(step(h, "return")!.due_date, "2026-08-27");
     assert.equal(step(h, "receipts")!.due_date, "2026-09-04");
-    assert.equal(step(h, "bill")!.due_date, "2026-09-06");
+    // No bill step to check: since M6d nothing per trip raises an invoice.
   }
 });
 

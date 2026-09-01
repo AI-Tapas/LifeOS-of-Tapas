@@ -5,6 +5,10 @@
 // so ONE implementation serves the add-trip drawer, the trip screen and the
 // connector tool. There is no second copy.
 //
+// No step builds a bill. Tapas invoices monthly to the ICAI AI committee,
+// never per trip (M6d), so the reimbursement lives in one recurring monthly
+// task and in the month pack at /trips/month.
+//
 // A step is an ordinary task carrying trip_id. That is deliberate: it keeps
 // the due date, the priority, the undo path and the Google Calendar reminder
 // that a bespoke checklist row would have thrown away.
@@ -54,7 +58,9 @@ export interface ChecklistTrip {
   purpose: string; // trip_purpose: aica | conference | leisure | other
   start_date: string | null;
   end_date: string | null;
-  billable_to: string | null;
+  // trip_bills_to: icai_monthly | chapter_aed | none
+  bills_to: string;
+  cities: string[];
   // Null on every row written before milestone 6c, and on any trip he has not
   // answered for. Resolved, never guessed at write time: see below.
   hotel_arrangement?: HotelArrangement | null;
@@ -126,11 +132,7 @@ export function buildChecklist(
   if (!trip.start_date) return [];
   const start = trip.start_date;
   const end = trip.end_date ?? start;
-  const isAica = trip.purpose === "aica";
   const hotel = resolveHotelArrangement(trip);
-  // Only a trip somebody reimburses ends in a bill. For AICA that is always
-  // the institute; otherwise it takes an explicit payer.
-  const billable = isAica || !!trip.billable_to;
   const context = `Trip: ${trip.title}.`;
 
   const steps: ChecklistStep[] = [
@@ -166,14 +168,20 @@ export function buildChecklist(
     due_date: shift(end, 0, todayKey),
   });
 
-  if (billable) {
+  // A monthly ICAI trip ends in no step of its own: it feeds the one
+  // recurring "Raise the AICA invoice for last month" task, seeded by
+  // migration 20260901000300. Only an overseas chapter needs a reminder here,
+  // because that invoice is raised separately, in AED, once or twice a year,
+  // and the stated risk is forgetting it altogether.
+  if (trip.bills_to === "chapter_aed") {
+    const city = trip.cities[0] ?? "";
     steps.push({
-      key: "bill",
-      title: "Build the reimbursement bill",
-      note: `${context} Built from the trip's billable expenses${
-        trip.billable_to ? `, addressed to ${trip.billable_to}` : ""
-      }.`,
-      due_date: shift(end, 2, todayKey),
+      key: "aed",
+      title: `Raise the AED invoice to the ${city || "overseas"} chapter`,
+      note:
+        `${context} This trip is NOT on the monthly ICAI claim. ` +
+        "It is invoiced separately to the chapter, in AED.",
+      due_date: shift(end, 3, todayKey),
     });
   }
 

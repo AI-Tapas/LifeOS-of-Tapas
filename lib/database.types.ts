@@ -963,7 +963,7 @@ export type Database = {
       }
       trips: {
         Row: {
-          billable_to: string | null
+          bills_to: Database["public"]["Enums"]["trip_bills_to"]
           cities: Json | null
           end_date: string | null
           hotel_arrangement:
@@ -980,7 +980,7 @@ export type Database = {
           work_stream_id: string
         }
         Insert: {
-          billable_to?: string | null
+          bills_to?: Database["public"]["Enums"]["trip_bills_to"]
           cities?: Json | null
           end_date?: string | null
           hotel_arrangement?:
@@ -997,7 +997,7 @@ export type Database = {
           work_stream_id: string
         }
         Update: {
-          billable_to?: string | null
+          bills_to?: Database["public"]["Enums"]["trip_bills_to"]
           cities?: Json | null
           end_date?: string | null
           hotel_arrangement?:
@@ -1134,6 +1134,7 @@ export type Database = {
       task_priority: "low" | "medium" | "high"
       task_source: "manual" | "email" | "assistant"
       task_status: "inbox" | "todo" | "doing" | "done" | "dropped"
+      trip_bills_to: "icai_monthly" | "chapter_aed" | "none"
       trip_expense_category: "transport" | "hotel" | "per_diem" | "other"
       trip_purpose: "aica" | "conference" | "leisure" | "other"
       trip_status:
@@ -1332,6 +1333,7 @@ export const Constants = {
       task_priority: ["low", "medium", "high"],
       task_source: ["manual", "email", "assistant"],
       task_status: ["inbox", "todo", "doing", "done", "dropped"],
+      trip_bills_to: ["icai_monthly", "chapter_aed", "none"],
       trip_expense_category: ["transport", "hotel", "per_diem", "other"],
       trip_purpose: ["aica", "conference", "leisure", "other"],
       trip_status: ["planned", "booked", "done", "cancelled"],
