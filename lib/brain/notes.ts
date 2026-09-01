@@ -82,5 +82,5 @@ export function notePreview(body: string | null, max = 120): string {
     .replace(/[`*_>#]/g, "")
     .replace(/\s+/g, " ")
     .trim();
-  return flat.length > max ? `${flat.slice(0, max - 1)}...` : flat;
+  return flat.length > max ? `${flat.slice(0, max - 3)}...` : flat;
 }

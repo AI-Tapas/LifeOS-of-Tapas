@@ -23,6 +23,9 @@ import MonthPack from "@/components/trips/month-pack";
 import InvestmentsPanel, { type HoldingRow } from "@/components/money/investments-panel";
 import ObligationsPanel, { type ObligationRow } from "@/components/money/obligations-panel";
 import WorkStreamsPanel, { type WorkStreamView } from "@/components/settings/work-streams-panel";
+import NotesPanel, { type NoteRow } from "@/components/brain/notes-panel";
+import PeoplePanel, { type PersonRow } from "@/components/brain/people-panel";
+import { RECOVERY_ADVICE, recoveryLine, recoveryTrips } from "@/lib/health/recovery";
 import { parseLegs } from "@/lib/trips/bill";
 import type { MonthExpense, MonthTrip } from "@/lib/trips/month";
 import type { TripStep } from "@/lib/tasks/trip-rollup";
@@ -549,6 +552,73 @@ const rateStreams: WorkStreamView[] = [
   },
 ];
 
+const brainPeople: PersonRow[] = [
+  {
+    id: "p1",
+    name: "Rakesh Mehta",
+    org: "ICAI Bhavnagar branch",
+    role: "Branch chairman",
+    emails: ["rakesh.mehta@example.org"],
+    phones: [],
+    context_md: "Runs the Level 1 batch in Bhavnagar and arranges the hotel there.",
+    unverified: false,
+  },
+  {
+    id: "p2",
+    name: "Sunrise Traders, accounts",
+    org: "Sunrise Traders",
+    role: null,
+    emails: ["accounts@sunrise.example"],
+    phones: [],
+    context_md: null,
+    unverified: true,
+  },
+];
+
+const brainNotes: NoteRow[] = [
+  {
+    id: "n1",
+    type: "meeting",
+    title: "Bhavnagar branch call",
+    body_md:
+      "Mehta will confirm the hotel by the 12th. Level 1 batch shifts to the second week of October, so the L2 dates move with it.",
+    occurred_on: "2026-08-24",
+    work_stream_id: "w1",
+    project_id: null,
+    people_ids: ["p1"],
+    task_id: null,
+    trip_id: "t4",
+    created_at: "2026-08-24T12:00:00.000Z",
+  },
+  {
+    id: "n2",
+    type: "decision",
+    title: "GST position on works contracts",
+    body_md:
+      "Sticking with the composite supply reading until the circular is withdrawn. To be verified against the September circular.",
+    occurred_on: null,
+    work_stream_id: "w2",
+    project_id: null,
+    people_ids: ["p2"],
+    task_id: "t1",
+    trip_id: null,
+    created_at: "2026-08-20T09:30:00.000Z",
+  },
+  {
+    id: "n3",
+    type: "idea",
+    title: "Quarterly GST digest",
+    body_md: "One page a quarter, sent to the branches. Reuses the batch material.",
+    occurred_on: null,
+    work_stream_id: null,
+    project_id: null,
+    people_ids: [],
+    task_id: null,
+    trip_id: null,
+    created_at: "2026-08-11T06:00:00.000Z",
+  },
+];
+
 export default async function DevPreviewPage() {
   // Hidden in production unless the local-only harness flag is set (the
   // sandbox's dev server cannot compile CSS reliably, so visual checks run
@@ -591,6 +661,31 @@ export default async function DevPreviewPage() {
           Reply to GST notice for Sunrise Traders.
         </strong>
       </p>
+
+      <div className="mt-5 rounded-2xl border border-brand/30 bg-brand-soft p-3.5">
+        <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-brand-deep">
+          Recovery day
+        </p>
+        <p className="mt-1.5 text-sm font-medium text-foreground">
+          {recoveryLine(
+            recoveryTrips(
+              [
+                {
+                  id: "t4",
+                  title: "AICA session, Bhavnagar branch",
+                  status: "done",
+                  session_label: "L1D2",
+                  session_date: "2026-08-24",
+                  end_date: "2026-08-25",
+                  cities: ["Bhavnagar"],
+                },
+              ],
+              { y: 2026, m: 8, d: 25 }
+            )
+          )}
+        </p>
+        <p className="mt-1.5 text-xs text-secondary">{RECOVERY_ADVICE}</p>
+      </div>
 
       <div className="mt-5 rounded-2xl border border-brand/30 bg-brand-soft p-3.5">
         <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-brand-deep">
@@ -717,6 +812,21 @@ export default async function DevPreviewPage() {
       <hr className="my-8" />
       <p className="mb-4 rounded bg-amber-100 p-1 text-center text-xs">dev preview: settings, rate per work stream (B4)</p>
       <WorkStreamsPanel streams={rateStreams} />
+
+      <hr className="my-8" />
+      <p className="mb-4 rounded bg-amber-100 p-1 text-center text-xs">dev preview: brain, notes with followable references (M7c)</p>
+      <NotesPanel
+        notes={brainNotes}
+        workStreams={workStreams}
+        people={brainPeople.map((p) => ({ id: p.id, name: p.name }))}
+        tasks={[{ id: "t1", name: "File GSTR-1 for Vraj Textiles" }]}
+        trips={[{ id: "t4", name: "L1D2 - 18 May - AICA session, Bhavnagar branch" }]}
+      />
+
+      <div className="mt-8">
+        <p className="mb-4 rounded bg-amber-100 p-1 text-center text-xs">dev preview: brain, people with an unverified record (M7c)</p>
+        <PeoplePanel people={brainPeople} />
+      </div>
 
       </div>
       <Nav queueCount={2} />
