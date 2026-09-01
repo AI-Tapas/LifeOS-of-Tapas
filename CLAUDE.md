@@ -814,7 +814,16 @@ column.
   the deploy instead of destroying data. If it ever fails, read the rows with
   Tapas; do not weaken the guard.
 - `components/placeholder.tsx` ("This module arrives in a later milestone")
-  was deleted: nothing had imported it since Brain and Money were built.
+  was deleted: nothing had imported it since Brain and Money were built. So
+  were three exported functions nothing imported: `renderUntrustedNote`
+  (mcp-api.ts), `newestStaleness` (events/sync.ts, superseded by the inline
+  `isStale` on the calendar page) and `sameCivil` (datetime.ts).
+- The month pack's Copy button no longer fails silently. `navigator.clipboard`
+  is refused outright on an insecure origin and can be denied by the browser,
+  and the old catch set a flag nothing rendered, so a failure looked exactly
+  like a success on the app's ONLY handover to his invoice run. It now says the
+  copy failed and renders the text in a read-only box to select by hand. Do not
+  reduce this back to a silent catch.
 - The V1 acceptance walk-through, and the list of everything the closeout
   sweep found, live in `checkpoints/M8-v1-acceptance.md` in the project folder
   (not in this repo).
