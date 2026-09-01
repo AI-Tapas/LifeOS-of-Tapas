@@ -156,9 +156,13 @@ and email-verification rules live in lib/accounts.ts.
 - Tool registry: lib/assistant/tools.ts is the fixed tool list and the
   security boundary. Buckets enforced in lib/assistant/execute.ts:
   autonomous (tasks, reminders, notes, people, obligations, solo events,
-  app-DB email drafts) execute immediately and are undoable; confirm
-  (send_email, propose_event_with_invites) only ever insert a proposed
-  assistant_actions row. Stub: gst wiki. There is no tool that mutates
+  trips) execute immediately and are undoable; confirm (draft_email,
+  send_email, propose_event_with_invites) only ever insert a proposed
+  assistant_actions row. draft_email is in the confirm list because the
+  executor has always turned it into a proposed send_email row, and G1/B11
+  made the declared bucket agree with what happens; the M4 line that called
+  it autonomous was stale from 1 September 2026 and is corrected here.
+  Stub: gst wiki. There is no tool that mutates
   assistant_actions.status, fetches URLs, or reads documents, and since M6d
   no tool bills or invoices anything.
 - Approval gate: approve happens only in the owner-session server action
@@ -245,8 +249,9 @@ and email-verification rules live in lib/accounts.ts.
   tsconfig and eslint; stdio transport, and it fetches its tool list from the
   app so it cannot drift).
 - Tool surface (31 registry tools, shared by the in-app assistant and both
-  connectors): create/update/delete for tasks, notes, people, obligations,
-  finance items and projects; solo calendar events including edit and delete
+  connectors): create/update/delete for tasks, notes, people, obligations and
+  finance items; add_project only, with no update or delete for a project;
+  create, update and log for trips; solo calendar events including edit and delete
   (delete_event refuses anything with source other than 'app', so a synced
   event is never removed); draft_email; scan_mail; undo_action;
   reject_queued_action. Eleven read tools mirror them, so nothing writable is
@@ -266,8 +271,9 @@ and email-verification rules live in lib/accounts.ts.
   a live owner session and a two-tap consent screen at /connect, so a token
   exists only because Tapas approved it. Settings lists connections and can
   revoke them. Rules are pure in lib/mcp/oauth-core.ts and tested offline.
-- Tests: npm run test:m4 (offline, the R6 red-team controls). rls.test.mjs
-  adds audit_log append-only and payload-immutability trigger proofs.
+- Tests: npm run test:m4 (63 offline, the R6 red-team controls and the four
+  G1 governance controls). rls.test.mjs adds audit_log append-only and
+  payload-immutability trigger proofs.
 
 ## Travel Desk (Milestones 6 and 6d)
 
@@ -306,7 +312,7 @@ and email-verification rules live in lib/accounts.ts.
 - Assistant tools: create_trip, update_trip, log_trip_leg, add_trip_expense,
   all autonomous and undoable, mirrored by the read tool lifeos_list_trips
   (which now reports bills_to and receipts_missing).
-- Tests: npm run test:m6 (25 offline). app/dev-preview renders the trips
+- Tests: npm run test:m6 (29 offline). app/dev-preview renders the trips
   screens and the month pack with mock data for visual checks without a
   database.
 
@@ -372,7 +378,7 @@ What the app does instead:
   is open. No script means light, which is the primary theme by design.
 - `@custom-variant dark` in globals.css repoints Tailwind's `dark:` utilities
   at the same attribute. Without it an explicit choice half-applies: the
-  tokens flip and the ~37 `dark:` classes do not. Do not remove it.
+  tokens flip and the ~44 `dark:` classes do not. Do not remove it.
 - The Settings control reads the value through `useSyncExternalStore`, not an
   effect: localStorage is external state, and reading it in an effect both
   trips react-hooks/set-state-in-effect and paints the wrong option briefly.
@@ -410,9 +416,10 @@ What the app does instead:
   both connectors can attach travel admin to a trip (including the 36 tasks
   already in the live database). lifeos_list_trips returns checklist_done and
   checklist_total. No new tool, no bucket change, no new approval path.
-- Tests: npm run test:m6b (26 offline tests: rollup counts and rank
-  inheritance, checklist date derivation and the past-date clamp, the brief
-  ranking the same rows, and the tool-schema rules).
+- Tests: npm run test:m6b (34 offline tests: rollup counts and rank
+  inheritance, the city in the label, checklist date derivation and the
+  past-date clamp, the chapter_aed reminder, the brief ranking the same rows,
+  and the tool-schema rules).
 
 ## Hotel arrangement (Milestone 6c)
 
@@ -456,9 +463,10 @@ What the app does instead:
 - Expenses: on relative and same_day the hotel category is ordered last in
   the expense drawer, never removed. Plans change, and a night he did pay for
   must still be recordable.
-- Tests: npm run test:m6c (21 offline tests: the four checklists, the
+- Tests: npm run test:m6c (22 offline tests: the four checklists, the
   night-before line, the branch default and the same-dates exception, null
   rows resolving to branch, and the tool-schema rules).
+
 ## Priority provenance (B3)
 
 - The problem B3 fixes: Home ranks urgent-and-important first, then
@@ -499,11 +507,7 @@ What the app does instead:
   /assistant?ask=priorities, which types (never sends) "Review my task
   priorities" into the chat box. No batch UI and no scheduled re-prioritising:
   a chat pass is a conversation he can argue with, which is the point.
-- Tests: npm run test:b3 (17 offline).
-- Tests: npm run test:m6b (31 offline tests: rollup counts and rank
-  inheritance, the city in the label, checklist date derivation and the
-  past-date clamp, the chapter_aed reminder, the brief ranking the same
-  rows, and the tool-schema rules).
+- Tests: npm run test:b3 (20 offline).
 
 ## Reminder mode: the calendar is for interrupts (Milestone 7a)
 
@@ -618,7 +622,8 @@ no migration: B12 reuses the meta jsonb audit_log has always had.
   would just repeat itself). A trip with neither field reads exactly as it
   did before.
 - Both fields are on create_trip and update_trip, so a schedule import fills
-  them. prompts/RECIPE-aica-schedule-intake.md carries the mapping.
+  them. `prompts/RECIPE-aica-schedule-intake.md` carries the mapping; it lives
+  in the project folder, not in this repo.
 
 ## Money completed (M7b: investments, B2, B4)
 

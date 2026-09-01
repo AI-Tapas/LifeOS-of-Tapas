@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /* Tailwind's dark: variant follows prefers-color-scheme by default. The theme
-   setting in Settings writes an explicit data-theme, so the ~37 dark: classes
+   setting in Settings writes an explicit data-theme, so the ~44 dark: classes
    in the app have to follow the same signal as the tokens below. Without this
    line an explicit choice half-applies: tokens flip, utilities do not. */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
