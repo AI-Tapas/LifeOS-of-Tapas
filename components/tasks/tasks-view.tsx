@@ -10,6 +10,7 @@ import {
   Empty,
   Field,
   PageHeader,
+  PriorityReason,
   RemindChips,
   SectionLabel,
   btnPrimary,
@@ -18,6 +19,7 @@ import {
 } from "@/components/ui";
 import { formatDateIST, formatTimeIST, istInstant, istDayKey } from "@/lib/datetime";
 import { triage, needsDeadline } from "@/lib/tasks/triage";
+import { unratedPrompt } from "@/lib/tasks/priority";
 import { rollUpTrips, type TripRollup, type TripStep } from "@/lib/tasks/trip-rollup";
 import {
   createTaskAction,
@@ -37,6 +39,11 @@ export interface TaskRow {
   notes: string | null;
   status: "inbox" | "todo" | "doing" | "done" | "dropped";
   priority: "low" | "medium" | "high";
+  // Whose judgment the priority is, and the one short sentence behind it.
+  // Optional so the dev-preview fixtures stay small; a row without them
+  // simply shows no attribution, which is what an unrated task should show.
+  priority_source?: "manual" | "assistant";
+  priority_reason?: string | null;
   due_ts: string | null;
   work_stream_id: string;
   project_id: string | null;
@@ -297,6 +304,11 @@ function TaskItem({
           {task.recurring_rule && <span>repeats {task.recurring_rule}</span>}
           {task.is_billable && <span>billable</span>}
         </div>
+        <PriorityReason
+          reason={task.priority_reason}
+          source={task.priority_source}
+          className="mt-0.5"
+        />
       </button>
       {extraActions}
     </div>
@@ -374,6 +386,11 @@ function OverviewTab({
   const bands = triage(ranked, now);
   const starved = bands.important.filter((t) => !t.rollup && needsDeadline(t));
   const inboxCount = tasks.filter((t) => !t.trip_id && t.status === "inbox").length;
+  // Nobody has rated most of these. The ranking above is only as good as
+  // tasks.priority, and while everything sits on the default "medium" the
+  // top band is ordering on the clock alone: the very method he named as his
+  // problem. One line, one link, no new machinery.
+  const unrated = unratedPrompt(open);
 
   const stats: { label: string; value: number; tone: string; go: Tab }[] = [
     { label: "Do first", value: bands.do_first.length, tone: bands.do_first.length ? "text-overdue" : "", go: "board" },
@@ -417,6 +434,20 @@ function OverviewTab({
           </button>
         ))}
       </div>
+
+      {unrated && (
+        <p className="mt-3 rounded-xl border border-brand/30 bg-brand-soft p-3 text-xs text-secondary">
+          {unrated.count} of {unrated.total} open tasks have no priority set by
+          anyone, so this ranking is running on due dates alone.{" "}
+          <Link
+            href="/assistant?ask=priorities"
+            className="font-medium text-brand-deep underline-offset-2 hover:underline"
+          >
+            Go through them with the assistant
+          </Link>
+          . It proposes one and says why; you can argue with every one.
+        </p>
+      )}
 
       {starved.length > 0 && (
         <p className="mt-3 rounded-xl border border-waiting/30 bg-waiting-soft p-3 text-xs text-waiting">
@@ -891,6 +922,10 @@ interface FormFields {
 }
 
 function taskToFields(t: TaskRow | null, workStreams: WorkStreamRow[]): FormFields {
+  // priority_source and priority_reason are deliberately NOT form fields.
+  // Saving a changed priority here records it as his and clears the reason,
+  // decided server-side in lib/tasks/write.ts. Nothing on this screen can
+  // write priority_source directly.
   const rec = (t?.recurring_rule ?? "").split(":");
   return {
     title: t?.title ?? "",
@@ -1077,6 +1112,18 @@ function TaskForm({
             <option value="medium">Medium</option>
             <option value="high">High</option>
           </select>
+          {task?.priority_source === "assistant" && task.priority_reason && (
+            <div className="mt-1.5">
+              <PriorityReason
+                reason={task.priority_reason}
+                source={task.priority_source}
+              />
+              <p className="mt-0.5 text-[11px] text-muted">
+                Change it and it becomes yours: this reason goes, and nothing
+                the assistant does will move it again.
+              </p>
+            </div>
+          )}
         </Field>
         <label className="flex items-center gap-2 text-sm">
           <input

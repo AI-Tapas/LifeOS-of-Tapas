@@ -19,7 +19,9 @@ export async function buildAppContext(supabase: Db): Promise<string> {
       supabase.from("work_streams").select("name, kind, active").order("name"),
       supabase
         .from("tasks")
-        .select("id, title, status, priority, due_ts, source, work_stream_id, work_streams(name)")
+        .select(
+          "id, title, status, priority, priority_source, priority_reason, due_ts, source, work_stream_id, work_streams(name)"
+        )
         .in("status", ["inbox", "todo", "doing"])
         .order("due_ts", { ascending: true, nullsFirst: false })
         .limit(30),
@@ -61,12 +63,27 @@ export async function buildAppContext(supabase: Db): Promise<string> {
   const trusted = (tasks ?? []).filter((t) => t.source !== "email");
   const fromMail = (tasks ?? []).filter((t) => t.source === "email");
 
-  lines.push("", "Open tasks (id | title | stream | priority | due | status):");
+  // "set by" is not decoration: a priority marked Tapas is his own judgment
+  // and may never be changed, whatever the assistant now thinks. The reason
+  // column is there so a rating it gave earlier can be revisited honestly.
+  const rating = (t: {
+    priority: string;
+    priority_source: string;
+    priority_reason: string | null;
+  }) =>
+    `${t.priority} | ${
+      t.priority_source === "manual" ? "Tapas, do not change" : "assistant"
+    }${t.priority_reason ? ` | ${t.priority_reason}` : ""}`;
+
+  lines.push(
+    "",
+    "Open tasks (id | title | stream | priority | set by | why | due | status):"
+  );
   if (!trusted.length) lines.push("  none");
   for (const t of trusted) {
     const stream = (t.work_streams as { name: string } | null)?.name ?? "?";
     lines.push(
-      `  ${t.id} | ${t.title} | ${stream} | ${t.priority} | ${
+      `  ${t.id} | ${t.title} | ${stream} | ${rating(t)} | ${
         t.due_ts ? formatDateIST(t.due_ts) : "no due date"
       } | ${t.status}`
     );
@@ -76,7 +93,7 @@ export async function buildAppContext(supabase: Db): Promise<string> {
     const body = fromMail
       .map(
         (t) =>
-          `${t.id} | ${t.title} | ${t.priority} | ${
+          `${t.id} | ${t.title} | ${rating(t)} | ${
             t.due_ts ? formatDateIST(t.due_ts) : "no due date"
           } | ${t.status}`
       )

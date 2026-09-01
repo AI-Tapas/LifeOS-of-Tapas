@@ -204,6 +204,31 @@ export function DueBadge({
   );
 }
 
+// The one short sentence behind a priority the assistant proposed. A
+// footnote, not a banner: it is there so he can look at "Do first" and
+// disagree with it, and nothing more.
+//
+// Rendered as plain text. The reason on a task derived from scanned mail is
+// written by an outsider, so it is never markup, never a link, and is capped
+// to a single line by lib/tasks/priority.ts before it is stored. A priority
+// he set himself carries no reason and no attribution.
+export function PriorityReason({
+  reason,
+  source,
+  className = "",
+}: {
+  reason?: string | null;
+  source?: "manual" | "assistant";
+  className?: string;
+}) {
+  if (!reason || source === "manual") return null;
+  return (
+    <p className={"text-[11px] leading-snug text-muted " + className}>
+      <span className="font-medium text-secondary">Assistant:</span> {reason}
+    </p>
+  );
+}
+
 export function Field({
   label,
   children,

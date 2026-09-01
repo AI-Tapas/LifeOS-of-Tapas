@@ -57,6 +57,13 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${hankenGrotesk.variable} ${spectral.variable} ${geistMono.variable} h-full antialiased`}
+      // The boot script below writes data-theme on this element before React
+      // hydrates, which is the whole point: it stops the app flashing light
+      // before turning dark. React then sees an attribute the server did not
+      // render and warns. The warning is correct and the behaviour is
+      // deliberate, so it is suppressed on this element only, which is the
+      // standard way to run a pre-paint theme script.
+      suppressHydrationWarning
     >
       <head>
         {/* Resolves the theme setting before first paint, so the app never

@@ -125,11 +125,17 @@ export async function syncHotelStepAction(tripId: string): Promise<WriteResult> 
   if (hotelRow && hotelRow.status !== "todo") {
     held = true;
   } else if (hotelRow && wantHotel) {
-    const r = await updateTask(supabase, user.id, hotelRow.id, {
-      title: wantHotel.title,
-      notes: wantHotel.note,
-      due_ts: dueAt(wantHotel.due_date),
-    });
+    const r = await updateTask(
+      supabase,
+      user.id,
+      hotelRow.id,
+      {
+        title: wantHotel.title,
+        notes: wantHotel.note,
+        due_ts: dueAt(wantHotel.due_date),
+      },
+      "app"
+    );
     if (!r.ok) return { ok: false, message: r.message };
     done.push("the hotel step now matches");
   } else if (hotelRow && !wantHotel) {
@@ -139,16 +145,21 @@ export async function syncHotelStepAction(tripId: string): Promise<WriteResult> 
     if (!r.ok) return { ok: false, message: r.message ?? "Could not drop the step." };
     done.push("the hotel step is dropped");
   } else if (!hotelRow && wantHotel && rows.length > 0) {
-    const r = await createTask(supabase, user.id, {
-      title: wantHotel.title,
-      notes: wantHotel.note,
-      status: "todo",
-      priority: "medium",
-      due_ts: dueAt(wantHotel.due_date),
-      work_stream_id: trip.work_stream_id,
-      trip_id: tripId,
-      source: "manual",
-    });
+    const r = await createTask(
+      supabase,
+      user.id,
+      {
+        title: wantHotel.title,
+        notes: wantHotel.note,
+        status: "todo",
+        priority: "medium",
+        due_ts: dueAt(wantHotel.due_date),
+        work_stream_id: trip.work_stream_id,
+        trip_id: tripId,
+        source: "manual",
+      },
+      "app"
+    );
     if (!r.ok) return { ok: false, message: r.message };
     done.push("a hotel step is added");
   }
@@ -156,9 +167,13 @@ export async function syncHotelStepAction(tripId: string): Promise<WriteResult> 
   // The onward step's note carries the night-before line, which a day return
   // makes wrong. Same rule: only while it is untouched.
   if (onwardRow && wantOnward && onwardRow.status === "todo" && onwardRow.notes !== wantOnward.note) {
-    const r = await updateTask(supabase, user.id, onwardRow.id, {
-      notes: wantOnward.note,
-    });
+    const r = await updateTask(
+      supabase,
+      user.id,
+      onwardRow.id,
+      { notes: wantOnward.note },
+      "app"
+    );
     if (!r.ok) return { ok: false, message: r.message };
     done.push("the onward step's note is corrected");
   }

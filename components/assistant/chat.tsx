@@ -40,10 +40,12 @@ function saveTurns(turns: Turn[]): void {
   }
 }
 
-export default function AssistantChat() {
+export default function AssistantChat({ prefill }: { prefill?: string }) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [restored, setRestored] = useState(false);
-  const [input, setInput] = useState("");
+  // Typed in for him, never sent for him: the point of this pass is that he
+  // can argue with every proposal, which starts with him hitting send.
+  const [input, setInput] = useState(prefill ?? "");
   const [busy, setBusy] = useState(false);
   const [scanBusy, setScanBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);

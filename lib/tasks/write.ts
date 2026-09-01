@@ -6,10 +6,23 @@
 //
 // Status changes still flow through runStatusTransition, so completion,
 // reminder cleanup and recurring spawn behave identically whoever asks.
+//
+// Priority provenance is enforced here for the same reason: every caller
+// inherits it. `origin` says who is asking, and only "app" (his own forms)
+// may record a priority as his. An assistant path can never overwrite a
+// priority he set by hand, and can never set one without a reason. The
+// decision itself is pure, in lib/tasks/priority.ts, and proved offline by
+// scripts/b3.test.ts.
 
 import { syncTaskReminder, removeTaskReminder } from "@/lib/reminders/writer";
 import { nextDueIso, isValidRecurringRule } from "@/lib/tasks/recurring";
 import { runStatusTransition, type TransitionOutcome } from "@/lib/tasks/transitions";
+import {
+  decidePriorityWrite,
+  type PriorityFields,
+  type PriorityOrigin,
+  type PrioritySource,
+} from "@/lib/tasks/priority";
 import type { Database } from "@/lib/database.types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -33,10 +46,20 @@ export interface TaskInput {
   remind_offsets?: number[];
   source?: Database["public"]["Enums"]["task_source"];
   external_ref?: string | null;
+  // One short sentence of why the priority is what it is. Required whenever
+  // an assistant path sets a priority; ignored on the app's own forms, where
+  // the priority is his and needs no defence.
+  priority_reason?: string | null;
+  // Read on the "undo" origin only, to put a snapshot back exactly as it was.
+  // No tool schema declares this field, so a model cannot reach it.
+  priority_source?: PrioritySource;
 }
 
 export type TaskResult =
-  | { ok: true; id: string; reminderNote?: string }
+  // priorityNote is set when a priority change was dropped because the row
+  // carries his own rating. The rest of the write still went ahead, and the
+  // caller says so rather than reporting a change that did not happen.
+  | { ok: true; id: string; reminderNote?: string; priorityNote?: string }
   | { ok: false; message: string };
 
 function reminderNote(
@@ -49,7 +72,8 @@ function reminderNote(
 export async function createTask(
   supabase: Db,
   userId: string,
-  input: TaskInput
+  input: TaskInput,
+  origin: PriorityOrigin
 ): Promise<TaskResult> {
   if (!input.title.trim()) return { ok: false, message: "A title is required." };
   if (!input.work_stream_id) {
@@ -58,6 +82,12 @@ export async function createTask(
   if (!isValidRecurringRule(input.recurring_rule)) {
     return { ok: false, message: "Invalid recurring rule." };
   }
+  const decision = decidePriorityWrite(origin, input, null);
+  if (decision.kind === "refuse") return { ok: false, message: decision.message };
+  const priorityFields =
+    decision.kind === "write"
+      ? decision.fields
+      : { priority: input.priority ?? "medium" };
   const { data, error } = await supabase
     .from("tasks")
     .insert({
@@ -65,7 +95,7 @@ export async function createTask(
       title: input.title.trim(),
       notes: input.notes ?? null,
       status: input.status ?? "inbox",
-      priority: input.priority ?? "medium",
+      ...priorityFields,
       due_ts: input.due_ts ?? null,
       work_stream_id: input.work_stream_id,
       project_id: input.project_id ?? null,
@@ -91,10 +121,27 @@ export async function updateTask(
   supabase: Db,
   userId: string,
   id: string,
-  patch: Partial<TaskInput>
+  patch: Partial<TaskInput>,
+  origin: PriorityOrigin
 ): Promise<TaskResult> {
   if (patch.recurring_rule !== undefined && !isValidRecurringRule(patch.recurring_rule)) {
     return { ok: false, message: "Invalid recurring rule." };
+  }
+  // The priority columns are decided against the row as it stands, so an
+  // assistant path can see that he has already rated this task and leave it
+  // alone. One small read, only when a priority is actually in the patch.
+  let priorityFields: Partial<PriorityFields> = {};
+  let priorityNote: string | undefined;
+  if (patch.priority !== undefined || patch.priority_reason !== undefined) {
+    const { data: cur } = await supabase
+      .from("tasks")
+      .select("priority, priority_source")
+      .eq("id", id)
+      .single();
+    const decision = decidePriorityWrite(origin, patch, cur ?? null);
+    if (decision.kind === "refuse") return { ok: false, message: decision.message };
+    if (decision.kind === "write") priorityFields = decision.fields;
+    if (decision.kind === "keep") priorityNote = decision.note;
   }
   // Fields first, WITHOUT status: status (and completed_at, reminder cleanup
   // and spawning) belongs to the shared transition helper below.
@@ -103,7 +150,7 @@ export async function updateTask(
     .update({
       ...(patch.title !== undefined ? { title: patch.title.trim() } : {}),
       ...(patch.notes !== undefined ? { notes: patch.notes } : {}),
-      ...(patch.priority !== undefined ? { priority: patch.priority } : {}),
+      ...priorityFields,
       ...(patch.due_ts !== undefined ? { due_ts: patch.due_ts } : {}),
       ...(patch.work_stream_id !== undefined
         ? { work_stream_id: patch.work_stream_id }
@@ -129,7 +176,7 @@ export async function updateTask(
   } else {
     note = reminderNote(await syncTaskReminder(userId, id));
   }
-  return { ok: true, id, reminderNote: note };
+  return { ok: true, id, reminderNote: note, priorityNote };
 }
 
 // The ONE status-transition path. Semantics and guards live in
@@ -182,7 +229,7 @@ async function spawnNextOccurrence(
   const { data: t } = await supabase
     .from("tasks")
     .select(
-      "title, notes, priority, due_ts, work_stream_id, project_id, trip_id, recurring_rule, is_billable, remind_offsets"
+      "title, notes, priority, priority_source, priority_reason, due_ts, work_stream_id, project_id, trip_id, recurring_rule, is_billable, remind_offsets"
     )
     .eq("id", taskId)
     .single();
@@ -197,7 +244,11 @@ async function spawnNextOccurrence(
       title: t.title,
       notes: t.notes,
       status: "todo",
+      // The next occurrence inherits the rating, so a monthly filing he
+      // marked high does not quietly reset to medium every month.
       priority: t.priority,
+      priority_source: t.priority_source,
+      priority_reason: t.priority_reason,
       due_ts: next,
       work_stream_id: t.work_stream_id,
       project_id: t.project_id,

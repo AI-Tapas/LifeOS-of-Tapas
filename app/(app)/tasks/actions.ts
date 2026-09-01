@@ -26,7 +26,9 @@ type TaskStatus = Database["public"]["Enums"]["task_status"];
 
 export async function createTaskAction(input: TaskInput): Promise<TaskResult> {
   const { supabase, user } = await requireUser("/tasks");
-  const r = await createTask(supabase, user.id, input);
+  // "app": his own form. This is the ONLY origin that records a priority
+  // as his, and it is why nothing the assistant does can overwrite one.
+  const r = await createTask(supabase, user.id, input, "app");
   if (r.ok) revalidatePath("/tasks");
   return r;
 }
@@ -36,7 +38,7 @@ export async function updateTaskAction(
   patch: Partial<TaskInput>
 ): Promise<TaskResult> {
   const { supabase, user } = await requireUser("/tasks");
-  const r = await updateTask(supabase, user.id, id, patch);
+  const r = await updateTask(supabase, user.id, id, patch, "app");
   if (r.ok) revalidatePath("/tasks");
   return r;
 }

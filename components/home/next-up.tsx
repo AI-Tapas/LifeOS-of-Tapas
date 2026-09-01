@@ -8,7 +8,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { BandHead, DueBadge } from "@/components/ui";
+import { BandHead, DueBadge, PriorityReason } from "@/components/ui";
 import {
   setTaskStatusAction,
   updateTaskAction,
@@ -21,6 +21,11 @@ export interface NextUpRow {
   stream: string;
   due_ts: string | null;
   needs_deadline: boolean;
+  // Why this task ranks where it ranks, when the assistant is the one who
+  // decided. Shown as a quiet footnote under the row: this list is an
+  // assertion about his work, so it says what it is asserting and why.
+  priority_source?: "manual" | "assistant";
+  priority_reason?: string | null;
   // Set when the row stands for a whole trip's checklist rather than one
   // task. It ranks by its most urgent open step, and opens the trip: there
   // is nothing here to tick, because the steps live on that screen.
@@ -186,6 +191,13 @@ function Row({
             {row.title}
           </p>
           <p className="text-[11px] text-neutral-500">{row.stream}</p>
+          {!done && (
+            <PriorityReason
+              reason={row.priority_reason}
+              source={row.priority_source}
+              className="mt-0.5"
+            />
+          )}
         </div>
         <DueBadge dueTs={row.due_ts} nowIso={nowIso} />
       </div>

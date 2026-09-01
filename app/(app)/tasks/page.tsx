@@ -15,7 +15,7 @@ export default async function TasksPage() {
       supabase
         .from("tasks")
         .select(
-          "id, title, notes, status, priority, due_ts, work_stream_id, project_id, trip_id, recurring_rule, is_billable, remind_offsets"
+          "id, title, notes, status, priority, priority_source, priority_reason, due_ts, work_stream_id, project_id, trip_id, recurring_rule, is_billable, remind_offsets"
         )
         .order("created_at", { ascending: false }),
       // The trip behind each checklist step, so the overview can show one

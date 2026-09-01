@@ -154,7 +154,10 @@ export async function seedTripChecklist(
       work_stream_id: trip.work_stream_id,
       trip_id: tripId,
       source: "manual",
-    });
+      // "app": a checklist step is routine travel admin the app generated,
+      // never a judgment call. Recording it as his over-protects it (the
+      // assistant will not re-rate it), which is the safe direction.
+    }, "app");
     if (r.ok) ids.push(r.id);
   }
   return ids;

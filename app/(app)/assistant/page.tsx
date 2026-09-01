@@ -54,6 +54,11 @@ export default async function AssistantPage({
   const sp = await searchParams;
   const rawTab = Array.isArray(sp.tab) ? sp.tab[0] : sp.tab;
   const tab = TABS.some((t) => t.key === rawTab) ? (rawTab as string) : "chat";
+  // ?ask= is a flag, not free text: it selects one of a fixed set of openers
+  // and nothing from the URL is ever put in the box verbatim. The line is
+  // typed into the input, not sent, so he opens the conversation himself.
+  const rawAsk = Array.isArray(sp.ask) ? sp.ask[0] : sp.ask;
+  const prefill = rawAsk === "priorities" ? "Review my task priorities" : undefined;
 
   const supabase = await createClient();
   const [{ data: pendingRows }, { data: historyRows }, { data: auditRows }, { data: accounts }, { data: people }, { data: sentBefore }] =
@@ -206,7 +211,7 @@ export default async function AssistantPage({
         ))}
       </div>
 
-      {tab === "chat" && <AssistantChat />}
+      {tab === "chat" && <AssistantChat prefill={prefill} />}
 
       {tab === "queue" && (
         <div className="space-y-3">

@@ -123,6 +123,42 @@ const tasks: TaskRow[] = [
     is_billable: false,
     remind_offsets: [7, 3, 1, 0],
   },
+  // B3: a priority the assistant proposed, with the one line behind it. The
+  // footnote under the row is the whole point, so it is in the preview.
+  {
+    id: "t3",
+    title: "Reply to the GST notice for Sunrise Traders",
+    notes: null,
+    status: "todo",
+    priority: "high",
+    priority_source: "assistant",
+    priority_reason: "statutory deadline, penalty for late filing",
+    due_ts: "2026-09-02T04:00:00Z",
+    work_stream_id: "w1",
+    project_id: null,
+    trip_id: null,
+    recurring_rule: null,
+    is_billable: true,
+    remind_offsets: [7, 3, 1, 0],
+  },
+  // And the state B3 exists to fix: open tasks nobody has rated, which puts
+  // the standing line on the Tasks overview.
+  ...(["Chase the Bhavnagar coordinator", "Renew the office broadband", "Read the circular on ITC"].map(
+    (title, i) => ({
+      id: `u${i}`,
+      title,
+      notes: null,
+      status: "todo" as const,
+      priority: "medium" as const,
+      due_ts: null,
+      work_stream_id: "w2",
+      project_id: null,
+      trip_id: null,
+      recurring_rule: null,
+      is_billable: false,
+      remind_offsets: [7, 3, 1, 0],
+    })
+  )),
 ];
 
 const nextUpBands: NextUpBands = {
@@ -148,6 +184,8 @@ const nextUpBands: NextUpBands = {
       stream: "Tax Strategia",
       due_ts: "2026-08-25T04:00:00Z",
       needs_deadline: false,
+      priority_source: "assistant",
+      priority_reason: "statutory deadline, penalty for late filing",
     },
   ],
   important: [
@@ -164,6 +202,8 @@ const nextUpBands: NextUpBands = {
       stream: "Personal",
       due_ts: null,
       needs_deadline: true,
+      priority_source: "assistant",
+      priority_reason: "open since March, and he asked for his health to be treated as priority",
     },
   ],
   urgent: [
