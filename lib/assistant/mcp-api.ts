@@ -173,7 +173,7 @@ export const READ_TOOL_DESCRIPTIONS: Record<string, string> = {
   lifeos_list_projects:
     "List projects and the work stream each belongs to, for filing tasks under one.",
   lifeos_list_trips:
-    "List trips with their purpose, dates, cities, how each is billed (bills_to: icai_monthly, chapter_aed or none), how the hotel is arranged (branch, self, relative or same_day), how much billable expense each carries, the legs logged against them, and checklist progress (checklist_done of checklist_total). Life OS holds these records; it does not produce an invoice or a bill.",
+    "List trips with their session (session_label like L1D2, and session_date, the day he actually teaches, which is not the travel start), purpose, dates, cities, how each is billed (bills_to: icai_monthly, chapter_aed or none), how the hotel is arranged (branch, self, relative or same_day), how much billable expense each carries, the legs logged against them, and checklist progress (checklist_done of checklist_total). Life OS holds these records; it does not produce an invoice or a bill.",
   lifeos_list_action_history:
     "List assistant actions that already ran, with their ids, so one can be undone with lifeos_undo_action.",
   lifeos_list_pending_actions:
@@ -415,7 +415,7 @@ export async function runReadTool(
     let q = supabase
       .from("trips")
       .select(
-        "id, title, purpose, status, start_date, end_date, cities, legs, bills_to, notes, hotel_arrangement, work_streams(name), trip_expenses(amount, billable, receipt_ref), tasks(status)",
+        "id, title, purpose, status, start_date, end_date, cities, legs, bills_to, notes, hotel_arrangement, session_label, session_date, work_streams(name), trip_expenses(amount, billable, receipt_ref), tasks(status)",
         { count: "exact" }
       )
       .order("start_date", { ascending: false, nullsFirst: false })
@@ -445,6 +445,11 @@ export async function runReadTool(
         title: t.title,
         purpose: t.purpose,
         status: t.status,
+        // Which session this trip is for, and the day he actually teaches.
+        // Writable through create_trip and update_trip, so it has to be
+        // readable here: nothing writable is invisible.
+        session_label: t.session_label,
+        session_date: t.session_date,
         start_date: t.start_date,
         end_date: t.end_date,
         cities: t.cities,
