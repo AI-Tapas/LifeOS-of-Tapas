@@ -434,12 +434,16 @@ function ObligationForm({
             )}
           </div>
         )}
-        <Field label="Account reference (free text)">
+        {/* A short human label, the same rule as an investment's institution:
+            which card or account this is paid from, never a number. The hint
+            used to read "HDFC card ...1234", which invited exactly the digits
+            M7b forbids one screen away. */}
+        <Field label="Paid from (a short label, no account numbers)">
           <input
             value={f.accountRef}
             onChange={(e) => setF({ ...f, accountRef: e.target.value })}
             className={inputCls}
-            placeholder="e.g. HDFC card ...1234"
+            placeholder="e.g. HDFC credit card"
           />
         </Field>
         <div className="flex gap-4">

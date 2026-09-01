@@ -210,7 +210,9 @@ and email-verification rules live in lib/accounts.ts.
   type; the OpenAI strict idiom (all-required plus nullable) is therefore
   off by default and opt-in via LLM_STRICT=on. Strict mode itself is off on
   BOTH dialects: Anthropic strict compiles a grammar capped at 16 union-typed
-  and 24 optional parameters, and this tool set has 31 optional ones. Nothing
+  and 24 optional parameters, and this tool set has 92 optional ones (147
+  parameters in all, counted at M8; the number grows every milestone, so read
+  the census rather than this line). Nothing
   in the security model depends on strict; lib/assistant/execute.ts validates
   every argument server-side and the approval gate is independent of it.
   scripts/m4.test.ts walks every schema, fails on any union, and records the
@@ -247,7 +249,7 @@ and email-verification rules live in lib/accounts.ts.
   finance items and projects; solo calendar events including edit and delete
   (delete_event refuses anything with source other than 'app', so a synced
   event is never removed); draft_email; scan_mail; undo_action;
-  reject_queued_action. Ten read tools mirror them, so nothing writable is
+  reject_queued_action. Eleven read tools mirror them, so nothing writable is
   invisible. send_email and propose_event_with_invites stay confirm-bucket,
   and NO tool approves: approval is owner-session only, in the app.
 - Remote MCP connector (ChatGPT, Claude web and mobile): POST /api/mcp/http
@@ -765,3 +767,45 @@ applied to the cloud database.
   Nothing writes that key any more.
 - Tests: `npm run test:m7c` (39 offline). app/dev-preview renders the notes
   and people panels and the recovery-day card with mock data.
+
+## Closeout (M8)
+
+Two migrations, `20260901000800_m8_drop_billing_remnants.sql` and
+`20260901000900_m8_persona_refresh.sql`. No new screen, no new tool, no new
+column.
+
+- The GST wiki hook, `lookup_gst_wiki`, is present and INACTIVE by design:
+  bucket `stub`, disclosure `none`, and one fixed sentence saying the wiki is
+  not connected. An inactive stub reads nothing, which is why `none` is the
+  honest class; connecting the wiki later needs a class Tapas approves by
+  name, and that is a decision rather than a diff.
+  `scripts/m8.test.ts` is what keeps that true: the registry module imports
+  nothing at all, the executor answers a stub before it builds an owner client
+  and without awaiting anything, no shipped file outside the registry may even
+  name the tool, and the tool carries no parameter that could address a URL,
+  a path or a file. Routing is by tool NAME (B11), so a hostile argument still
+  lands on the same sentence.
+- The quarterly persona refresh is one recurring task in the Personal stream,
+  `recurring_rule` 'monthly:3' on the M1 machinery, first due on the first day
+  of the next quarter at 09:30 IST. `reminder_mode` is 'calendar': four
+  entries a year is not the clutter M7a removed, and this is the same case as
+  the chapter AED invoice step, rare enough that nothing else in his week
+  raises it. Priority is 'medium', not 'high', because B3 makes a seeded row
+  count as his own hand and a permanent 'high' would dilute the Do-first band.
+  SQL cannot call Google Calendar, so the migration also writes the `reminders`
+  row in the pending state (`channel` 'gcal', `created` false) the writer
+  already uses when ca.tapasnr is unreachable; `retryPendingReminders`, which
+  runs on every calendar sync, then creates the event.
+- The M6d debt is cleared: `lib/trips/bill.ts` is now `lib/trips/core.ts`, and
+  the `bills` and `billing_profile` tables, the `bill_recipient` and
+  `bill_status` enums and the `billing_profile` insert in `seed_new_user` are
+  dropped. The drop migration RAISES rather than running if any bills row
+  exists or any billing_profile row holds typed content, so a surprise stops
+  the deploy instead of destroying data. If it ever fails, read the rows with
+  Tapas; do not weaken the guard.
+- `components/placeholder.tsx` ("This module arrives in a later milestone")
+  was deleted: nothing had imported it since Brain and Money were built.
+- The V1 acceptance walk-through, and the list of everything the closeout
+  sweep found, live in `checkpoints/M8-v1-acceptance.md` in the project folder
+  (not in this repo).
+- Tests: `npm run test:m8` (15 offline).
