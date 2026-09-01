@@ -17,7 +17,7 @@
 // morning brief all call this, so they cannot drift apart.
 
 import { triage, type TriageTask } from "./triage.ts";
-import { sessionLine, travelDiffersFromSession, tripDatesLabel } from "../trips/bill.ts";
+import { sessionLine, travelDiffersFromSession, tripDatesLabel } from "../trips/core.ts";
 
 // The statuses that mean "still owed". Matches Home's own task query.
 export const OPEN_STATUSES = ["inbox", "todo", "doing"] as const;

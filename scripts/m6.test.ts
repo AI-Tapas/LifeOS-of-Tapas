@@ -30,7 +30,7 @@ import {
   sessionLine,
   shortDayLabel,
   travelDiffersFromSession,
-} from "../lib/trips/bill.ts";
+} from "../lib/trips/core.ts";
 import {
   briefGapLine,
   buildMonthPack,

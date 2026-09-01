@@ -4,8 +4,10 @@
 //
 // M6d removed the bill builder from this app: Life OS does not produce a
 // bill, it feeds the monthly invoice run (lib/trips/month.ts). Bill
-// numbering, bill line items and amount-in-words went with it. The file name
-// is unchanged only to keep the M6d diff small.
+// numbering, bill line items and amount-in-words went with it. This file was
+// called bill.ts until M8, which was a lie about its contents; it is named
+// for what it is now, the same core.ts convention lib/reminders and
+// lib/assistant use.
 
 // Relative .ts import so node --test (type stripping, no bundler) resolves it,
 // the same convention lib/tasks/triage.ts and lib/brief/compose.ts use.

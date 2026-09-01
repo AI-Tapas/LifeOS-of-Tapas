@@ -21,7 +21,7 @@ import {
 } from "@/lib/money/investments";
 import type { FinanceKeyDateType } from "@/lib/reminders/core";
 import { civilKey, civilToday, formatDateIST, formatDateTimeIST } from "@/lib/datetime";
-import { parseLegs } from "@/lib/trips/bill";
+import { parseLegs } from "@/lib/trips/core";
 import { fenceUntrusted } from "@/lib/assistant/prompt";
 
 export const READ_TOOL_NAMES = MCP_READ_TOOLS;

@@ -8,7 +8,7 @@
 // (lib/trips/month.ts). Nothing in this file writes a bills row.
 
 import { buildChecklist, type HotelArrangement } from "./checklist.ts";
-import { parseLegs, type TripLeg } from "./bill.ts";
+import { parseLegs, type TripLeg } from "./core.ts";
 import { createTask } from "@/lib/tasks/write";
 import { syncTripEvent, removeTripEvent } from "@/lib/reminders/writer";
 import { civilKey, civilToday, istInstant } from "@/lib/datetime";

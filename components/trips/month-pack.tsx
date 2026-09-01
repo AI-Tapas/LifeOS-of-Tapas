@@ -13,7 +13,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { BandHead, Card, Empty, PageHeader, SectionLabel, btnSmall } from "@/components/ui";
 import { formatINR } from "@/lib/datetime";
-import { MODE_LABELS, dayLabel, type TransportMode } from "@/lib/trips/bill";
+import { MODE_LABELS, dayLabel, type TransportMode } from "@/lib/trips/core";
 import {
   buildMonthPack,
   categoryLabel,

@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/ui";
 import NotesPanel, { type NoteRow, type NamedRow } from "@/components/brain/notes-panel";
 import PeoplePanel, { type PersonRow } from "@/components/brain/people-panel";
-import { sessionLine } from "@/lib/trips/bill";
+import { sessionLine } from "@/lib/trips/core";
 
 export const dynamic = "force-dynamic";
 

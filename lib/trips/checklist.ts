@@ -14,9 +14,9 @@
 // that a bespoke checklist row would have thrown away.
 
 // Relative .ts imports so node --test (type stripping, no bundler) resolves
-// them, the same convention lib/tasks/triage.ts and lib/trips/bill.ts use.
+// them, the same convention lib/tasks/triage.ts and lib/trips/core.ts use.
 import { addDays, civilKey, type CivilDate } from "../datetime.ts";
-import { TRANSPORT_HELP } from "./bill.ts";
+import { TRANSPORT_HELP } from "./core.ts";
 import type { ReminderMode } from "../reminders/core.ts";
 
 // Mirrors the hotel_arrangement enum (migration 20260901000100).

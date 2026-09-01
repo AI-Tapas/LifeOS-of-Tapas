@@ -33,7 +33,7 @@ import {
   deleteTripExpense,
   updateTrip,
 } from "@/lib/trips/write";
-import { TRANSPORT_MODES, type TransportMode, type TripLeg } from "@/lib/trips/bill";
+import { TRANSPORT_MODES, type TransportMode, type TripLeg } from "@/lib/trips/core";
 import { HOTEL_ARRANGEMENTS, type HotelArrangement } from "@/lib/trips/checklist";
 import { isFinanceKeyDateType, isReminderMode } from "@/lib/reminders/core";
 import {

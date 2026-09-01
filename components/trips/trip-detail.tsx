@@ -35,7 +35,7 @@ import {
   type ExpenseCategory,
   type TransportMode,
   type TripLeg,
-} from "@/lib/trips/bill";
+} from "@/lib/trips/core";
 import {
   BillsToChip,
   PurposeChip,

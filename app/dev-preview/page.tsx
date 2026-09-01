@@ -26,7 +26,7 @@ import WorkStreamsPanel, { type WorkStreamView } from "@/components/settings/wor
 import NotesPanel, { type NoteRow } from "@/components/brain/notes-panel";
 import PeoplePanel, { type PersonRow } from "@/components/brain/people-panel";
 import { RECOVERY_ADVICE, recoveryLine, recoveryTrips } from "@/lib/health/recovery";
-import { parseLegs } from "@/lib/trips/bill";
+import { parseLegs } from "@/lib/trips/core";
 import type { MonthExpense, MonthTrip } from "@/lib/trips/month";
 import type { TripStep } from "@/lib/tasks/trip-rollup";
 import type { ChecklistRow } from "@/components/trips/trip-detail";
