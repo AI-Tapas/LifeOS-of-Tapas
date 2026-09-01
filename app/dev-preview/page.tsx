@@ -228,6 +228,18 @@ const pendingItem = {
   cc: [],
 };
 
+// B10: an autonomous action whose target did not resolve. Nothing was done, so
+// the card offers no approval, only Dismiss.
+const unresolvedItem = {
+  id: "p2",
+  kind: "update_task",
+  title: 'The task "7b3c1d9e-0000-0000-0000-000000000000" could not be resolved, so nothing was done.',
+  created_at_label: "1 Sept 2026, 9:12 am",
+  account_label: "unknown account",
+  unresolved_reason:
+    'The task "7b3c1d9e-0000-0000-0000-000000000000" could not be resolved, so nothing was done.',
+};
+
 // --- Travel Desk fixtures (M6) ---------------------------------------------
 const trips: TripRow[] = [
   {
@@ -483,6 +495,9 @@ export default async function DevPreviewPage() {
 
       <p className="mb-4 mt-8 rounded bg-amber-100 p-1 text-center text-xs">dev preview: approval queue card</p>
       <PendingCard item={pendingItem} />
+
+      <p className="mb-4 mt-8 rounded bg-amber-100 p-1 text-center text-xs">dev preview: downgraded action card (B10)</p>
+      <PendingCard item={unresolvedItem} />
 
       <p className="mb-4 mt-8 rounded bg-amber-100 p-1 text-center text-xs">dev preview: calendar week</p>
       <CalendarView

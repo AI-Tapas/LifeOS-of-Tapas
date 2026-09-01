@@ -104,9 +104,9 @@ export function PendingCard({ item }: { item: PendingView }) {
         <>
           <p className="mt-2 text-sm">{item.unresolved_reason}</p>
           <p className="mt-1 text-sm text-secondary">
-            The assistant tried {item.kind.replace(/_/g, " ")} and stopped rather than
-            guess. Nothing was changed.
+            Nothing was changed. The assistant stopped rather than guess.
           </p>
+          <p className="mt-2 text-xs text-muted">Action: {item.kind}</p>
         </>
       ) : (
         <p className="mt-2 text-sm">
