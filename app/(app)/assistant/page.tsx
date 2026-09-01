@@ -123,6 +123,11 @@ export default async function AssistantPage({
       created_at_label: formatDateTimeIST(row.created_at),
       account_label: accountLabel(row.account_id),
     };
+    // A B10 downgrade: an autonomous tool whose target did not resolve. It ran
+    // nothing, it is bound to no account, and its title is the reason.
+    if (row.kind !== "send_email" && row.kind !== "propose_event_with_invites") {
+      return { ...base, unresolved_reason: row.title };
+    }
     if (row.kind === "send_email") {
       return {
         ...base,

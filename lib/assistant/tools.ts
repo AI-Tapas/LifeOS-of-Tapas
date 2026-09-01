@@ -649,6 +649,91 @@ export const STUB_KINDS = new Set(
 // executor may perform these, and only from status 'approved'.
 export const SEND_CLASS = new Set(["send_email", "propose_event_with_invites"]);
 
+// ---------------------------------------------------------------------------
+// B10: where each autonomous tool's target comes from.
+//
+// An autonomous grant used to be attached to the tool name alone, so any call
+// to update_task ran under the autonomous bucket whatever it was pointed at.
+// The grant belongs to the pair: the verb AND the thing it acts on. Every
+// autonomous tool that acts on something already in existence declares here
+// which argument names its target and where that target has to be found; the
+// executor refuses to run one whose target does not resolve, and queues it
+// for Tapas instead. A tool absent from this table creates something new and
+// so has nothing to resolve.
+//
+// create_task's optional trip_id is deliberately not here: it is optional, so
+// there is nothing to fail closed on when it is absent, and a bad one is
+// refused by the foreign key before anything is written.
+//
+// It lives in this pure module rather than in the executor so scripts/m4.test
+// can prove that no id-taking autonomous tool was left out of it.
+// ---------------------------------------------------------------------------
+export type TargetTable =
+  | "tasks"
+  | "notes"
+  | "people"
+  | "recurring_obligations"
+  | "finance_items"
+  | "events"
+  | "trips"
+  | "assistant_actions";
+
+export interface ToolTarget {
+  // The input key naming the target, e.g. "task_id".
+  arg: string;
+  // The word for it in the reason Tapas reads, e.g. "task".
+  label: string;
+  // Where the id must be found. Absent when the target is not a row.
+  table?: TargetTable;
+}
+
+export const TOOL_TARGETS: Record<string, ToolTarget> = {
+  update_task: { arg: "task_id", label: "task", table: "tasks" },
+  set_reminder: { arg: "task_id", label: "task", table: "tasks" },
+  delete_task: { arg: "task_id", label: "task", table: "tasks" },
+  update_note: { arg: "note_id", label: "note", table: "notes" },
+  delete_note: { arg: "note_id", label: "note", table: "notes" },
+  update_person: { arg: "person_id", label: "person", table: "people" },
+  delete_person: { arg: "person_id", label: "person", table: "people" },
+  update_obligation: {
+    arg: "obligation_id",
+    label: "obligation",
+    table: "recurring_obligations",
+  },
+  delete_obligation: {
+    arg: "obligation_id",
+    label: "obligation",
+    table: "recurring_obligations",
+  },
+  update_finance_item: {
+    arg: "finance_item_id",
+    label: "holding",
+    table: "finance_items",
+  },
+  delete_finance_item: {
+    arg: "finance_item_id",
+    label: "holding",
+    table: "finance_items",
+  },
+  update_event_solo: { arg: "event_id", label: "event", table: "events" },
+  delete_event: { arg: "event_id", label: "event", table: "events" },
+  update_trip: { arg: "trip_id", label: "trip", table: "trips" },
+  log_trip_leg: { arg: "trip_id", label: "trip", table: "trips" },
+  add_trip_expense: { arg: "trip_id", label: "trip", table: "trips" },
+  undo_action: {
+    arg: "action_id",
+    label: "queued action",
+    table: "assistant_actions",
+  },
+  reject_queued_action: {
+    arg: "action_id",
+    label: "queued action",
+    table: "assistant_actions",
+  },
+  // Not a row id: the account slot must name a connected account.
+  add_event_solo: { arg: "account", label: "account" },
+};
+
 export function toolByName(name: string): ToolDef | undefined {
   return TOOLS.find((t) => t.name === name);
 }

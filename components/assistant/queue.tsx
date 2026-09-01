@@ -31,6 +31,10 @@ export interface PendingView {
   cc?: RecipientFlag[];
   event_line?: string; // for invites: date/time/location line
   attendees?: RecipientFlag[];
+  // Set on a B10 downgrade: the assistant could not find what it was pointed
+  // at, so it performed nothing and left this here to be seen. There is
+  // nothing to approve, only to dismiss.
+  unresolved_reason?: string;
 }
 
 export interface HistoryView {
@@ -82,16 +86,34 @@ export function PendingCard({ item }: { item: PendingView }) {
       else setMessage(r.message ?? "Something went wrong.");
     });
 
+  // A downgraded action has nothing to approve: its target did not resolve, so
+  // approving it would change nothing. Only the dismiss control is offered.
+  const unresolved = !!item.unresolved_reason;
+
   return (
     <div className="rounded-2xl border border-waiting/40 bg-surface p-4 shadow-[var(--shadow-card)]">
       <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-waiting">
         <span className="pulse-dot inline-block h-2 w-2 rounded-full bg-waiting" aria-hidden />
-        {item.kind === "send_email" ? "Email awaiting your approval" : "Invite awaiting your approval"}
+        {unresolved
+          ? "Not done: nothing matched"
+          : item.kind === "send_email"
+            ? "Email awaiting your approval"
+            : "Invite awaiting your approval"}
       </p>
-      <p className="mt-2 text-sm">
-        <span className="text-secondary">From account:</span>{" "}
-        <span className="font-medium">{item.account_label}</span>
-      </p>
+      {unresolved ? (
+        <>
+          <p className="mt-2 text-sm">{item.unresolved_reason}</p>
+          <p className="mt-1 text-sm text-secondary">
+            The assistant tried {item.kind.replace(/_/g, " ")} and stopped rather than
+            guess. Nothing was changed.
+          </p>
+        </>
+      ) : (
+        <p className="mt-2 text-sm">
+          <span className="text-secondary">From account:</span>{" "}
+          <span className="font-medium">{item.account_label}</span>
+        </p>
+      )}
 
       {item.to && (
         <div className="mt-2 text-sm">
@@ -138,7 +160,7 @@ export function PendingCard({ item }: { item: PendingView }) {
       {message && <p className="mt-2 text-sm text-overdue">{message}</p>}
 
       <div className="mt-3 flex flex-wrap gap-2">
-        {!armed ? (
+        {unresolved ? null : !armed ? (
           <button
             type="button"
             onClick={() => setArmed(true)}
@@ -167,9 +189,9 @@ export function PendingCard({ item }: { item: PendingView }) {
           disabled={pending}
           className="press min-h-11 rounded-xl border border-border-strong px-4 py-2 text-sm font-medium disabled:opacity-50"
         >
-          Reject
+          {unresolved ? "Dismiss" : "Reject"}
         </button>
-        {armed && !pending && (
+        {!unresolved && armed && !pending && (
           <button
             type="button"
             onClick={() => setArmed(false)}

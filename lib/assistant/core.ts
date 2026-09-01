@@ -128,6 +128,65 @@ export async function runApprovedExecution(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Fail closed when the affected object cannot be resolved (B10).
+//
+// An autonomous grant has until now been attached to the tool name alone: any
+// call to update_task ran under the autonomous bucket, whatever it was pointed
+// at. It should be attached to the tool AND to the thing it acts on. A call
+// whose target does not resolve to something the owner actually has does not
+// inherit the grant. It does not run, and it does not quietly do nothing
+// either: it lands in the queue as proposed, carrying the reason, where Tapas
+// can see that the assistant tried and what it could not find.
+//
+// Dependency-injected, so scripts/m4.test.ts proves it offline exactly the way
+// runApprovedExecution is proved.
+// ---------------------------------------------------------------------------
+
+// How one autonomous tool's target is derived: the input key that names it,
+// and the word for it in the reason Tapas reads.
+export interface TargetSpec {
+  arg: string;
+  label: string;
+}
+
+export interface AutonomousDeps<T> {
+  // True when the named target exists and belongs to the owner. False when the
+  // lookup came back empty, which is a downgrade, never an error to swallow.
+  resolveTarget(value: string): Promise<boolean>;
+  perform(): Promise<T>;
+  recordExecuted(done: T): Promise<{ actionId: string | null }>;
+  // Insert the proposed row that carries the reason.
+  downgrade(reason: string): Promise<{ actionId: string }>;
+}
+
+export type AutonomousOutcome<T> =
+  | { basis: "autonomous_bucket"; actionId: string | null; done: T }
+  | { basis: "downgraded_to_queue"; actionId: string; reason: string };
+
+export async function runAutonomousAction<T>(
+  input: Record<string, unknown>,
+  spec: TargetSpec | undefined,
+  deps: AutonomousDeps<T>
+): Promise<AutonomousOutcome<T>> {
+  if (spec) {
+    const raw = input[spec.arg];
+    const value = typeof raw === "string" ? raw.trim() : "";
+    // A missing argument is a malformed call rather than an unresolvable
+    // target: the performer refuses it with a message the model can act on,
+    // and nothing reaches the queue. Only a lookup that came back empty is a
+    // downgrade, because there the model named something and it was not there.
+    if (value && !(await deps.resolveTarget(value))) {
+      const reason = `The ${spec.label} "${value}" could not be resolved, so nothing was done.`;
+      const { actionId } = await deps.downgrade(reason);
+      return { basis: "downgraded_to_queue", actionId, reason };
+    }
+  }
+  const done = await deps.perform();
+  const { actionId } = await deps.recordExecuted(done);
+  return { basis: "autonomous_bucket", actionId, done };
+}
+
 // Calendar invitations, their replies and cancellations are already handled by
 // the calendar itself, so they must never become tasks. Gmail marks them with
 // a text/calendar part, which is decisive; the subject prefixes catch the

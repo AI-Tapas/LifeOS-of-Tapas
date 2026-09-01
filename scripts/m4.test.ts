@@ -18,6 +18,9 @@
 //   6. Disclosure classes (B8): every tool declares what it may SEE, the union
 //      cannot express document content, and a mail-body tool cannot run as a
 //      hidden step inside another tool.
+//   7. Fail closed on an unresolved target (B10): an autonomous tool pointed at
+//      something that does not exist is queued for Tapas, never run and never
+//      silently dropped.
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -27,6 +30,7 @@ import {
   CONFIRM_KINDS,
   SEND_CLASS,
   SCAN_TOOL,
+  TOOL_TARGETS,
   toolByName,
   disclosureOf,
   assertNoAttendees,
@@ -38,8 +42,10 @@ import {
   checkDisclosure,
   hashPayload,
   runApprovedExecution,
+  runAutonomousAction,
   validateScanProposals,
   type ApprovedExecutionDeps,
+  type AutonomousDeps,
   type GateActionRow,
 } from "../lib/assistant/core.ts";
 import {
@@ -941,6 +947,116 @@ test("a mail-body tool cannot run as a hidden step inside another tool", () => {
   for (const d of TOOL_DISCLOSURES) {
     if (d === "mail_body") continue;
     assert.equal(checkDisclosure(d, true).ok, true, `${d} must not be nesting-gated`);
+  }
+});
+
+
+// --- 7. fail closed when the target cannot be resolved (B10) ------------------
+//
+// An autonomous grant used to sit on the tool name alone. It belongs to the
+// pair: the verb and the thing it acts on. These prove that a call pointed at
+// nothing does not inherit the grant, and that it leaves a visible trace
+// instead of doing nothing at all.
+
+function autonomousHarness(resolves: boolean) {
+  const calls: string[] = [];
+  const deps: AutonomousDeps<{ summary: string }> = {
+    resolveTarget: async (value) => {
+      calls.push(`resolve:${value}`);
+      return resolves;
+    },
+    perform: async () => {
+      calls.push("perform");
+      return { summary: "task updated" };
+    },
+    recordExecuted: async () => {
+      calls.push("recordExecuted");
+      return { actionId: "executed-1" };
+    },
+    downgrade: async (reason) => {
+      calls.push(`downgrade:${reason}`);
+      return { actionId: "queued-1" };
+    },
+  };
+  return { deps, calls };
+}
+
+const TASK_TARGET = TOOL_TARGETS.update_task;
+
+test("an autonomous tool pointed at a row that does not exist is queued, not run", async () => {
+  // Both spellings of "there is nothing there": a well-formed id matching no
+  // row, and an id that is not an id at all.
+  for (const badId of ["11111111-2222-3333-4444-555555555555", "not-an-id"]) {
+    const h = autonomousHarness(false);
+    const outcome = await runAutonomousAction({ task_id: badId, title: "x" }, TASK_TARGET, h.deps);
+
+    assert.equal(outcome.basis, "downgraded_to_queue", `${badId} must downgrade`);
+    assert.equal(
+      outcome.basis === "downgraded_to_queue" ? outcome.actionId : null,
+      "queued-1",
+      "the downgrade must land as a real queue row Tapas can see"
+    );
+    assert.match(
+      outcome.basis === "downgraded_to_queue" ? outcome.reason : "",
+      /could not be resolved/,
+      "the reason has to be showable in the queue"
+    );
+    // Not an execution, and not a silent no-op either.
+    assert.equal(h.calls.includes("perform"), false, "nothing may be performed");
+    assert.equal(h.calls.includes("recordExecuted"), false);
+    assert.equal(
+      h.calls.some((c) => c.startsWith("downgrade:")),
+      true,
+      "doing nothing quietly is not an option"
+    );
+  }
+});
+
+test("a target that resolves keeps the autonomous grant, and a tool with no target is untouched", async () => {
+  const found = autonomousHarness(true);
+  const ran = await runAutonomousAction({ task_id: "real-id" }, TASK_TARGET, found.deps);
+  assert.equal(ran.basis, "autonomous_bucket");
+  assert.deepEqual(found.calls, ["resolve:real-id", "perform", "recordExecuted"]);
+
+  // create_task invents a row, so it has nothing to look up and never asks.
+  const creating = autonomousHarness(false);
+  const created = await runAutonomousAction({ title: "new" }, undefined, creating.deps);
+  assert.equal(created.basis, "autonomous_bucket");
+  assert.deepEqual(creating.calls, ["perform", "recordExecuted"]);
+
+  // A missing argument is a malformed call, not an unresolvable target: the
+  // performer refuses it with a message the model can act on, and nothing
+  // reaches the queue.
+  const empty = autonomousHarness(false);
+  await runAutonomousAction({}, TASK_TARGET, empty.deps);
+  assert.equal(empty.calls.some((c) => c.startsWith("resolve:")), false);
+  assert.equal(empty.calls.some((c) => c.startsWith("downgrade:")), false);
+});
+
+test("every autonomous tool that acts on an existing row declares its target", () => {
+  // The control that keeps the table honest as tools are added: a new tool
+  // taking an id and forgetting to declare it fails here rather than running
+  // autonomously against whatever the model made up.
+  for (const t of TOOLS) {
+    if (t.bucket !== "autonomous") continue;
+    const s = t.input_schema as unknown as { required?: string[] };
+    const idArg = (s.required ?? []).find((k) => k.endsWith("_id"));
+    if (!idArg) continue;
+    const target = TOOL_TARGETS[t.name];
+    assert.ok(target, `${t.name} takes ${idArg} but declares no target`);
+    assert.equal(target.arg, idArg, `${t.name} must resolve ${idArg}`);
+    assert.ok(target.label, `${t.name} needs a word for its target Tapas can read`);
+  }
+  // The one target that is not a row: add_event_solo writes to an account, and
+  // an account that is not connected does not resolve.
+  assert.deepEqual(TOOL_TARGETS.add_event_solo, { arg: "account", label: "account" });
+  // Every declared target names an argument its tool actually has.
+  for (const [name, target] of Object.entries(TOOL_TARGETS)) {
+    const tool = toolByName(name);
+    assert.ok(tool, `TOOL_TARGETS names ${name}, which is not a tool`);
+    const props = (tool.input_schema as unknown as { properties: Record<string, unknown> })
+      .properties;
+    assert.ok(target.arg in props, `${name} has no ${target.arg} argument`);
   }
 });
 

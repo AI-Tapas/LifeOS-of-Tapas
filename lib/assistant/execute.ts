@@ -44,8 +44,15 @@ import {
   SEND_CLASS,
   assertNoAttendees,
   disclosureOf,
+  TOOL_TARGETS,
+  type ToolTarget,
 } from "./tools";
-import { checkDisclosure, hashPayload, runApprovedExecution } from "./core";
+import {
+  checkDisclosure,
+  hashPayload,
+  runApprovedExecution,
+  runAutonomousAction,
+} from "./core";
 import {
   removeObligationReminder,
   syncObligationReminder,
@@ -330,6 +337,64 @@ interface Performed {
   accountId?: string;
 }
 
+// ponytail: this re-reads a row most performers read again for their undo
+// payload. One extra select on a single-user app is cheaper than threading the
+// row through every performer signature, and holding the gate in one place is
+// the whole point of the control.
+async function targetResolves(
+  supabase: Db,
+  userId: string,
+  spec: ToolTarget,
+  value: string
+): Promise<boolean> {
+  if (!spec.table) {
+    // An account slot resolves only when that account is connected directly.
+    try {
+      await resolveAccount(supabase, value);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  // user_id is scoped explicitly: the service actor bypasses RLS, so the row
+  // is proved the owner's here rather than assumed. A malformed id makes
+  // Postgres refuse the comparison, which lands as "not found" as well.
+  const { data } = await supabase
+    .from(spec.table)
+    .select("id")
+    .eq("id", value)
+    .eq("user_id", userId)
+    .maybeSingle();
+  return !!data;
+}
+
+// The proposed row a downgrade lands as. No account is bound to it and nothing
+// was performed; the reason is the title, which is what the queue card shows.
+async function downgradeToQueue(
+  supabase: Db,
+  userId: string,
+  name: string,
+  input: Record<string, unknown>,
+  reason: string
+): Promise<{ actionId: string }> {
+  const { data, error } = await supabase
+    .from("assistant_actions")
+    .insert({
+      user_id: userId,
+      kind: name,
+      mode: "draft",
+      status: "proposed",
+      title: reason.slice(0, 200),
+      payload: input as Json,
+    })
+    .select("id")
+    .single();
+  if (error || !data) {
+    throw new Error(error?.message ?? "Could not queue the action.");
+  }
+  return { actionId: data.id };
+}
+
 async function performAutonomous(
   supabase: Db,
   userId: string,
@@ -339,27 +404,50 @@ async function performAutonomous(
   if (!AUTONOMOUS_KINDS.has(name)) {
     throw new Error(`${name} is not an autonomous tool.`);
   }
-  const done = await performers[name](supabase, userId, input);
-  const { data } = await supabase
-    .from("assistant_actions")
-    .insert({
-      user_id: userId,
+  const spec = TOOL_TARGETS[name];
+  const outcome = await runAutonomousAction<Performed>(input, spec, {
+    resolveTarget: (value) => targetResolves(supabase, userId, spec, value),
+    perform: () => performers[name](supabase, userId, input),
+    recordExecuted: async (done) => {
+      const { data } = await supabase
+        .from("assistant_actions")
+        .insert({
+          user_id: userId,
+          kind: name,
+          mode: "auto",
+          status: "executed",
+          account_id: done.accountId ?? null,
+          title: done.summary.slice(0, 200),
+          payload: input as Json,
+          payload_hash: hashPayload(input),
+          executed_at: new Date().toISOString(),
+          result: { undo: done.undo } as Json,
+        })
+        .select("id")
+        .single();
+      return { actionId: data?.id ?? null };
+    },
+    downgrade: (reason) => downgradeToQueue(supabase, userId, name, input, reason),
+  });
+
+  if (outcome.basis === "downgraded_to_queue") {
+    await audit(supabase, userId, "downgrade_to_queue", outcome.actionId, {
       kind: name,
-      mode: "auto",
-      status: "executed",
-      account_id: done.accountId ?? null,
-      title: done.summary.slice(0, 200),
-      payload: input as Json,
-      payload_hash: hashPayload(input),
-      executed_at: new Date().toISOString(),
-      result: { undo: done.undo } as Json,
-    })
-    .select("id")
-    .single();
-  await audit(supabase, userId, "execute_autonomous", data?.id ?? null, {
+      reason: outcome.reason,
+    });
+    return {
+      reply:
+        outcome.reason +
+        ` It is in the approval queue as action ${outcome.actionId} for Tapas to see.` +
+        " Check the id and ask again if you have a better one.",
+      actionId: outcome.actionId,
+      queued: true,
+    };
+  }
+  await audit(supabase, userId, "execute_autonomous", outcome.actionId, {
     kind: name,
   });
-  return { reply: done.summary, actionId: data?.id };
+  return { reply: outcome.done.summary, actionId: outcome.actionId ?? undefined };
 }
 
 type Performer = (
@@ -1053,6 +1141,19 @@ export async function approveAndExecute(
   if (!action) return { ok: false, message: "Action not found." };
   if (action.status !== "proposed") {
     return { ok: false, message: `This action is already ${action.status}.` };
+  }
+  // A B10 downgrade sits in the same queue but is not an approval request: its
+  // target did not resolve, so approving would change nothing and would strand
+  // the row in 'approved' with no executor willing to run it. Refused before
+  // the status flip, so only Reject can move it.
+  if (!SEND_CLASS.has(action.kind)) {
+    return {
+      ok: false,
+      message:
+        "This is here because the assistant could not find what it was pointed at, " +
+        "not for approval. Approving it would change nothing. Dismiss it, and ask " +
+        "again naming something that exists.",
+    };
   }
   // Approval binds the exact payload: the hash recorded here is what the
   // executor verifies. CAS on status=proposed so a double tap approves once.
