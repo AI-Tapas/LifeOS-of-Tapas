@@ -275,17 +275,16 @@ and email-verification rules live in lib/accounts.ts.
   20260901000300_m6d_invoice_feed.sql replaced trips.billable_to (free text)
   with trips.bills_to, enum trip_bills_to: icai_monthly (the default),
   chapter_aed, none.
-- The bills and billing_profile TABLES are UNUSED. Nothing in the app reads
-  or writes them since M6d; they are left in place only because dropping a
-  table is irreversible. A later migration can remove them, along with the
-  bill_recipient and bill_status enums and the billing_profile insert in
-  seed_new_user.
+- The bills and billing_profile TABLES, and the bill_recipient and bill_status
+  enums, were dropped in M8 (migration 20260901000800). Nothing had read or
+  written them since M6d. Do not reintroduce them: see "Billing: what this app
+  does NOT do" below.
 - receipt_ref stays a reference string. There is no upload path, no storage
   bucket and no attachment UI anywhere in this module, and scripts/m6.test.ts
   fails if any tool grows a file-shaped parameter.
-- lib/trips/bill.ts is pure trip logic despite its name (M6d emptied it of
-  bills): transport modes, leg parsing, the billable rollup, and the date
-  labels. Renaming it was left out of M6d to keep that diff small.
+- lib/trips/core.ts is the pure trip logic: transport modes, leg parsing, the
+  billable rollup, the date labels and the session line. It was called bill.ts
+  until M8, which had not been true since M6d emptied it of bills.
 - lib/trips/month.ts is the month pack, pure: which month a trip belongs to,
   what the ICAI claim excludes, the receipt gaps, and the plain text the Copy
   button puts on the clipboard.
@@ -610,7 +609,7 @@ no migration: B12 reuses the meta jsonb audit_log has always had.
   prints them as the level).
 - session_date is the teaching day. It is NOT start_date, and often not
   end_date either.
-- sessionLine() and travelDiffersFromSession() in lib/trips/bill.ts are pure
+- sessionLine() and travelDiffersFromSession() in lib/trips/core.ts are pure
   and drive the card: "L1D2 - 4 Sept - Bangalore" leads, the descriptive
   title sits under it, and the travel span is labelled "Travel ..." and only
   shown when it says something the session date does not (a day return

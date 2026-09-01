@@ -288,99 +288,6 @@ export type Database = {
         }
         Relationships: []
       }
-      bills: {
-        Row: {
-          amount: number
-          bill_to: Database["public"]["Enums"]["bill_recipient"]
-          bill_to_address: string | null
-          date: string
-          id: string
-          line_items: Json
-          number: string
-          pdf_ref: string | null
-          status: Database["public"]["Enums"]["bill_status"]
-          trip_id: string | null
-          user_id: string
-          work_stream_id: string
-        }
-        Insert: {
-          amount: number
-          bill_to: Database["public"]["Enums"]["bill_recipient"]
-          bill_to_address?: string | null
-          date: string
-          id?: string
-          line_items?: Json
-          number: string
-          pdf_ref?: string | null
-          status?: Database["public"]["Enums"]["bill_status"]
-          trip_id?: string | null
-          user_id?: string
-          work_stream_id: string
-        }
-        Update: {
-          amount?: number
-          bill_to?: Database["public"]["Enums"]["bill_recipient"]
-          bill_to_address?: string | null
-          date?: string
-          id?: string
-          line_items?: Json
-          number?: string
-          pdf_ref?: string | null
-          status?: Database["public"]["Enums"]["bill_status"]
-          trip_id?: string | null
-          user_id?: string
-          work_stream_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "bills_trip_id_fkey"
-            columns: ["trip_id"]
-            isOneToOne: false
-            referencedRelation: "trips"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "bills_work_stream_id_fkey"
-            columns: ["work_stream_id"]
-            isOneToOne: false
-            referencedRelation: "work_streams"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      billing_profile: {
-        Row: {
-          address: string
-          bill_prefix: string
-          email: string | null
-          footer: string | null
-          name: string
-          phone: string | null
-          updated_at: string
-          user_id: string
-        }
-        Insert: {
-          address?: string
-          bill_prefix?: string
-          email?: string | null
-          footer?: string | null
-          name?: string
-          phone?: string | null
-          updated_at?: string
-          user_id?: string
-        }
-        Update: {
-          address?: string
-          bill_prefix?: string
-          email?: string | null
-          footer?: string | null
-          name?: string
-          phone?: string | null
-          updated_at?: string
-          user_id?: string
-        }
-        Relationships: []
-      }
       calendars: {
         Row: {
           account_id: string
@@ -1174,8 +1081,6 @@ export type Database = {
       assistant_persona_source: "interview" | "seeded" | "edited"
       mcp_grant_kind: "code" | "access" | "refresh"
       audit_actor: "user" | "assistant"
-      bill_recipient: "institute" | "client" | "other"
-      bill_status: "draft" | "sent" | "paid"
       event_source: "synced" | "app" | "reminder"
       finance_item_kind: "fd" | "mf" | "stock" | "ncd" | "other"
       finance_key_date_type: "maturity" | "review"
@@ -1373,8 +1278,6 @@ export const Constants = {
       assistant_persona_source: ["interview", "seeded", "edited"],
       mcp_grant_kind: ["code", "access", "refresh"],
       audit_actor: ["user", "assistant"],
-      bill_recipient: ["institute", "client", "other"],
-      bill_status: ["draft", "sent", "paid"],
       event_source: ["synced", "app", "reminder"],
       finance_item_kind: ["fd", "mf", "stock", "ncd", "other"],
       finance_key_date_type: ["maturity", "review"],
