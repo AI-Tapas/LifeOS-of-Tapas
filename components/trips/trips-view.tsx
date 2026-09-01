@@ -2,19 +2,32 @@
 
 // Trips overview. It leads with the month ahead, grouped, because the first
 // job on this screen is triaging the whole month, not reading a flat table.
-// Past trips sit below, newest first, for the billing tail.
+// Past trips sit below, newest first, for the invoicing tail.
+//
+// The city is the strongest thing on a trip line after its own name. With the
+// branch name gone (M6d), the city is what he actually reads to know which
+// session a row is.
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { BandHead, Empty, PageHeader, SectionLabel, btnPrimary } from "@/components/ui";
-import { formatINR, formatMonthYear } from "@/lib/datetime";
+import {
+  BandHead,
+  Empty,
+  PageHeader,
+  SectionLabel,
+  btnPrimary,
+  btnSmall,
+} from "@/components/ui";
+import { formatINR } from "@/lib/datetime";
 import { tripDatesLabel } from "@/lib/trips/bill";
 import {
+  BillsToChip,
   PurposeChip,
   StatusTrail,
   type TripPurpose,
   type TripStatus,
 } from "@/components/trips/bits";
+import { monthLabel, type BillsTo } from "@/lib/trips/month";
 import TripForm, { type WorkStreamRow } from "@/components/trips/trip-form";
 
 export type { WorkStreamRow };
@@ -28,7 +41,7 @@ export interface TripRow {
   end_date: string | null;
   cities: string[];
   status: TripStatus;
-  billable_to: string | null;
+  bills_to: BillsTo;
   notes: string | null;
   stream_name: string;
   billable_total: number;
@@ -36,7 +49,8 @@ export interface TripRow {
   // Checklist progress: steps done and steps still owed, dropped ones aside.
   checklist_done: number;
   checklist_total: number;
-  bill_count: number;
+  // Billable expenses on this trip with no receipt reference.
+  receipts_missing: number;
 }
 
 // A trip is still ahead until the day after it ends.
@@ -50,11 +64,6 @@ function monthKey(t: TripRow): string {
   return t.start_date ? t.start_date.slice(0, 7) : "";
 }
 
-function monthLabel(key: string): string {
-  if (!key) return "No dates yet";
-  return formatMonthYear({ y: Number(key.slice(0, 4)), m: Number(key.slice(5, 7)), d: 1 });
-}
-
 function daysBetween(a: string, b: string): number {
   return Math.round((Date.parse(b) - Date.parse(a)) / 86400000);
 }
@@ -63,10 +72,17 @@ export default function TripsView({
   trips,
   workStreams,
   todayKey,
+  receiptGapCount,
+  receiptGapMonths,
 }: {
   trips: TripRow[];
   workStreams: WorkStreamRow[];
   todayKey: string;
+  // Billable expenses with no receipt reference, in the month running and the
+  // one just gone. Chasing them now is far cheaper than chasing them at
+  // invoice time.
+  receiptGapCount: number;
+  receiptGapMonths: string[];
 }) {
   const [adding, setAdding] = useState(false);
 
@@ -88,14 +104,14 @@ export default function TripsView({
   }, [trips, todayKey]);
 
   const claimable = trips
-    .filter((t) => t.status !== "billed" && t.billable_total > 0)
+    .filter((t) => t.bills_to === "icai_monthly" && t.billable_total > 0)
     .reduce((sum, t) => sum + t.billable_total, 0);
 
   return (
     <div>
       <PageHeader
         title="Trips"
-        subtitle="The month ahead, then what is left to bill"
+        subtitle="The month ahead, then the month you invoice"
         action={
           <button onClick={() => setAdding(true)} className={btnPrimary}>
             + Trip
@@ -103,25 +119,42 @@ export default function TripsView({
         }
       />
 
-      {claimable > 0 && (
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Link href="/trips/month" className={btnSmall + " py-2"}>
+          Month pack
+        </Link>
+        {claimable > 0 && (
+          <span className="text-xs text-secondary">
+            {formatINR(claimable)} of billable expense recorded for the monthly
+            claim.
+          </span>
+        )}
+      </div>
+
+      {receiptGapCount > 0 && (
         <p className="mt-3 rounded-xl border border-waiting/30 bg-waiting-soft p-3 text-xs text-waiting">
-          {formatINR(claimable)} of billable expense is not on a bill yet. Open
-          the trip and build the bill.
+          {receiptGapCount} billable{" "}
+          {receiptGapCount === 1 ? "expense has" : "expenses have"} no receipt
+          reference in {receiptGapMonths.map(monthLabel).join(" or ")}. Chase
+          them now, not at invoice time.
         </p>
       )}
 
       {months.length === 0 ? (
         <div className="mt-5">
           <Empty title="No trips ahead.">
-            Use + Trip to plan one. An AICA trip collects its expenses here and
-            turns them into the institute reimbursement bill.
+            Use + Trip to plan one. An AICA trip collects its legs and expenses
+            here, and the month pack hands them to your invoice run.
           </Empty>
         </div>
       ) : (
         months.map(([key, items]) => (
           <section key={key || "undated"} className="mt-5">
             <div className="mb-2">
-              <BandHead title={monthLabel(key)} count={items.length} />
+              <BandHead
+                title={key ? monthLabel(key) : "No dates yet"}
+                count={items.length}
+              />
             </div>
             <div className="space-y-2">
               {items.map((t, i) => (
@@ -166,14 +199,30 @@ function TripCard({ trip }: { trip: TripRow }) {
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="truncate font-medium">{trip.title}</p>
+          {/* The city, not the branch: the one word that says which session
+              this row is. Deliberately larger than the date line. */}
+          <p className="mt-0.5 truncate text-sm font-semibold text-brand-deep">
+            {trip.cities.length ? trip.cities.join(", ") : "No city recorded"}
+          </p>
           <p className="mt-0.5 text-xs text-secondary">
             {tripDatesLabel(trip.start_date, trip.end_date)}
             {trip.stream_name ? ` · ${trip.stream_name}` : ""}
-            {trip.cities.length ? ` · ${trip.cities.join(", ")}` : ""}
           </p>
         </div>
         <PurposeChip purpose={trip.purpose} />
       </div>
+      {trip.bills_to !== "icai_monthly" && (
+        <div className="mt-1.5">
+          <BillsToChip billsTo={trip.bills_to} />
+        </div>
+      )}
+      {trip.receipts_missing > 0 && (
+        <p className="mt-1.5 text-xs text-waiting">
+          {trip.receipts_missing} billable{" "}
+          {trip.receipts_missing === 1 ? "expense has" : "expenses have"} no
+          receipt reference
+        </p>
+      )}
       {trip.checklist_total > 0 && (
         <p className="mt-1.5 text-xs text-secondary">
           Checklist: {trip.checklist_done} of {trip.checklist_total} done

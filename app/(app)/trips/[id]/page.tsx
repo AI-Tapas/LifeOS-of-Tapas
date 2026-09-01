@@ -1,12 +1,10 @@
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import TripDetail, {
-  type BillSummary,
   type ChecklistRow,
   type ExpenseRow,
 } from "@/components/trips/trip-detail";
 import { parseLegs } from "@/lib/trips/bill";
-import { suggestBillNumber } from "@/lib/trips/write";
 import { civilKey, civilToday } from "@/lib/datetime";
 import type { TripFormValues } from "@/components/trips/trip-form";
 
@@ -23,14 +21,14 @@ export default async function TripDetailPage({
   const { data: trip } = await supabase
     .from("trips")
     .select(
-      "id, purpose, title, work_stream_id, start_date, end_date, cities, legs, status, billable_to, notes, work_streams(name)"
+      "id, purpose, title, work_stream_id, start_date, end_date, cities, legs, status, bills_to, notes, work_streams(name)"
     )
     .eq("id", id)
     .maybeSingle();
   if (!trip) notFound();
 
   const today = civilKey(civilToday());
-  const [{ data: expenses }, { data: checklist }, { data: bills }, { data: streams }, suggestedNumber] =
+  const [{ data: expenses }, { data: checklist }, { data: streams }] =
     await Promise.all([
       supabase
         .from("trip_expenses")
@@ -44,16 +42,10 @@ export default async function TripDetailPage({
         .eq("trip_id", id)
         .order("due_ts", { ascending: true, nullsFirst: false }),
       supabase
-        .from("bills")
-        .select("id, number, date, bill_to, amount, status")
-        .eq("trip_id", id)
-        .order("date", { ascending: false }),
-      supabase
         .from("work_streams")
         .select("id, name")
         .eq("active", true)
         .order("name"),
-      suggestBillNumber(supabase, today),
     ]);
 
   const values: TripFormValues = {
@@ -65,7 +57,7 @@ export default async function TripDetailPage({
     end_date: trip.end_date,
     cities: Array.isArray(trip.cities) ? (trip.cities as string[]) : [],
     status: trip.status,
-    billable_to: trip.billable_to,
+    bills_to: trip.bills_to,
     notes: trip.notes,
   };
 
@@ -80,12 +72,7 @@ export default async function TripDetailPage({
           ...e,
           amount: Number(e.amount),
         }))}
-        bills={((bills ?? []) as BillSummary[]).map((b) => ({
-          ...b,
-          amount: Number(b.amount),
-        }))}
         workStreams={streams ?? []}
-        suggestedNumber={suggestedNumber}
         todayKey={today}
       />
     </main>

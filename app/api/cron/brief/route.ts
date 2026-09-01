@@ -8,6 +8,7 @@ import { serviceActor } from "@/lib/assistant/actor";
 import { sendBriefEmail } from "@/lib/brief/send";
 import { composeBrief, type BriefTask, type BriefEvent, type BriefAccountIssue } from "@/lib/brief/compose";
 import type { TripStep } from "@/lib/tasks/trip-rollup";
+import type { MonthExpense } from "@/lib/trips/month";
 import { cronAuthorized, alreadyRanToday } from "@/lib/cron/guard";
 import { civilKey, civilToday, istInstant } from "@/lib/datetime";
 import type { Json } from "@/lib/database.types";
@@ -40,7 +41,7 @@ export async function GET(req: Request): Promise<Response> {
     const dayStart = istInstant(today, 0, 0).toISOString();
     const dayEnd = istInstant(today, 23, 59).toISOString();
 
-    const [{ data: tasks }, { data: tripStepRows }, { data: streams }, { data: events }, { count: pendingCount }, { data: needsReauth }, { data: briefAccount }, { data: reminderRows }] =
+    const [{ data: tasks }, { data: tripStepRows }, { data: streams }, { data: events }, { count: pendingCount }, { data: needsReauth }, { data: briefAccount }, { data: reminderRows }, { data: expenseRows }] =
       await Promise.all([
         supabase
           .from("tasks")
@@ -51,7 +52,7 @@ export async function GET(req: Request): Promise<Response> {
         // shows one rolled-up line per trip instead of a row per step.
         supabase
           .from("tasks")
-          .select("id, title, status, priority, due_ts, trip_id, trips(id, title, start_date, end_date)")
+          .select("id, title, status, priority, due_ts, trip_id, trips(id, title, start_date, end_date, cities)")
           .eq("user_id", userId)
           .not("trip_id", "is", null),
         supabase.from("work_streams").select("id, name").eq("user_id", userId),
@@ -81,6 +82,12 @@ export async function GET(req: Request): Promise<Response> {
           .select("ext_event_id")
           .eq("user_id", userId)
           .not("ext_event_id", "is", null),
+        // Trip expenses, for the receipt-gap line the brief carries from the
+        // 25th of the month onward.
+        supabase
+          .from("trip_expenses")
+          .select("id, trip_id, category, amount, date, billable, receipt_ref")
+          .eq("user_id", userId),
       ]);
 
     const streamName = new Map((streams ?? []).map((s) => [s.id, s.name]));
@@ -103,7 +110,11 @@ export async function GET(req: Request): Promise<Response> {
         priority: t.priority,
         due_ts: t.due_ts,
         status: t.status,
-        trip: t.trips as NonNullable<typeof t.trips>,
+        trip: {
+          ...(t.trips as NonNullable<typeof t.trips>),
+          // cities is jsonb, so it arrives as Json; the rollup wants strings.
+          cities: Array.isArray(t.trips!.cities) ? (t.trips!.cities as string[]) : [],
+        },
       }));
     const briefEvents: BriefEvent[] = (events ?? []).map((e) => {
       const acc = e.accounts as { slot: string | null; label: string | null } | null;
@@ -130,6 +141,17 @@ export async function GET(req: Request): Promise<Response> {
       reminderExtEventIds: (reminderRows ?? [])
         .map((r) => r.ext_event_id)
         .filter((v): v is string => v !== null),
+      tripExpenses: (expenseRows ?? []).map(
+        (e): MonthExpense => ({
+          id: e.id,
+          trip_id: e.trip_id,
+          category: e.category,
+          amount: Number(e.amount),
+          date: e.date,
+          billable: e.billable,
+          receipt_ref: e.receipt_ref,
+        })
+      ),
       pendingApprovalsCount: pendingCount ?? 0,
       accountsNeedingReconnect,
       appBaseUrl,

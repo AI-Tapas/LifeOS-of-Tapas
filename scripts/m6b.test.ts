@@ -13,12 +13,15 @@
 //   4. The rollup and the brief cannot drift: the brief ranks the same rows.
 //   5. The tool surface carries trip_id and with_checklist as single-typed
 //      optional parameters, the house rule the m4 suite also enforces.
+//   6. M6d: the rollup line names the city, the per-trip bill step is gone,
+//      and a chapter_aed trip produces its own AED invoice reminder.
 
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
   rollUpTrips,
   splitTripTasks,
+  tripCityLabel,
   type TripStep,
 } from "../lib/tasks/trip-rollup.ts";
 import { triage } from "../lib/tasks/triage.ts";
@@ -33,6 +36,7 @@ const RAJKOT = {
   title: "AICA session, Rajkot branch",
   start_date: "2026-09-03",
   end_date: "2026-09-04",
+  cities: ["Rajkot"],
 };
 
 function step(over: Partial<TripStep> & { id: string }): TripStep {
@@ -53,17 +57,39 @@ const PART_DONE: TripStep[] = [
   step({ id: "s2", title: "Book return ticket", due_ts: "2026-08-27T04:00:00Z", status: "done" }),
   step({ id: "s3", title: "Confirm hotel with the branch", due_ts: "2026-08-29T04:00:00Z", status: "done" }),
   step({ id: "s4", title: "Collect and keep travel receipts", due_ts: "2026-09-04T04:00:00Z" }),
-  step({ id: "s5", title: "Build the reimbursement bill", due_ts: "2026-09-06T04:00:00Z" }),
 ];
 
-test("five steps become one honest line", () => {
+test("four steps become one honest line", () => {
   const [row] = rollUpTrips(PART_DONE, NOW);
   assert.equal(rollUpTrips(PART_DONE, NOW).length, 1);
   assert.equal(row.done, 2);
-  assert.equal(row.total, 5);
-  assert.equal(row.progress, "2 of 5 done");
+  assert.equal(row.total, 4);
+  assert.equal(row.progress, "2 of 4 done");
   assert.equal(row.trip_id, "trip-1");
+  // The title already names Rajkot, so the city is not repeated.
   assert.equal(row.label, "AICA session, Rajkot branch, 3 to 4 September 2026");
+});
+
+test("the line names the city when the title does not", () => {
+  const surat = {
+    id: "trip-9",
+    title: "AICA session",
+    start_date: "2026-09-07",
+    end_date: "2026-09-08",
+    cities: ["Surat"],
+  };
+  const [row] = rollUpTrips([step({ id: "z1", trip: surat })], NOW);
+  assert.equal(row.label, "AICA session, Surat, 7 to 8 September 2026");
+  assert.equal(
+    tripCityLabel(surat),
+    "Surat",
+    "the city is what he reads now that no branch name is recorded"
+  );
+  assert.equal(
+    tripCityLabel(RAJKOT),
+    "",
+    "and it is not said twice when the title already carries it"
+  );
 });
 
 test("the line names the step the trip is waiting on", () => {
@@ -78,16 +104,16 @@ test("a trip with every step done produces no row at all", () => {
 
 test("a dropped step leaves the denominator", () => {
   const withDropped = [
-    ...PART_DONE.slice(0, 4),
-    step({ id: "s5", title: "Build the reimbursement bill", status: "dropped" }),
+    ...PART_DONE.slice(0, 3),
+    step({ id: "s4", title: "Collect and keep travel receipts", status: "dropped" }),
   ];
   const [row] = rollUpTrips(withDropped, NOW);
-  assert.equal(row.total, 4);
-  assert.equal(row.progress, "2 of 4 done");
+  assert.equal(row.total, 3);
+  assert.equal(row.progress, "2 of 3 done");
 });
 
 test("two trips make two lines, never one merged list", () => {
-  const surat = { id: "trip-2", title: "AICA session, Surat branch", start_date: "2026-09-07", end_date: "2026-09-08" };
+  const surat = { id: "trip-2", title: "AICA session, Surat branch", start_date: "2026-09-07", end_date: "2026-09-08", cities: ["Surat"] };
   const rows = rollUpTrips(
     [...PART_DONE, step({ id: "s6", trip: surat, due_ts: "2026-08-31T04:00:00Z" })],
     NOW
@@ -119,7 +145,7 @@ test("an overdue step drags the whole trip into the band it earned", () => {
 test("a high-priority overdue step puts the trip in Do first", () => {
   const steps = [
     step({ id: "s1", priority: "high", due_ts: "2026-08-20T04:00:00Z" }),
-    step({ id: "s2", due_ts: "2026-09-06T04:00:00Z" }),
+    step({ id: "s2", due_ts: "2026-09-04T04:00:00Z" }),
   ];
   const [row] = rollUpTrips(steps, NOW);
   assert.equal(triage([row], NOW).do_first.length, 1);
@@ -162,10 +188,11 @@ const TRIP = {
   purpose: "aica",
   start_date: "2026-09-03",
   end_date: "2026-09-04",
-  billable_to: "ICAI Rajkot Branch",
+  bills_to: "icai_monthly",
+  cities: ["Rajkot"],
 };
 
-test("the standard checklist is five steps, dated from the trip", () => {
+test("the standard checklist is four steps, dated from the trip", () => {
   const steps = buildChecklist(TRIP, "2026-08-01");
   assert.deepEqual(
     steps.map((s) => [s.key, s.due_date]),
@@ -174,22 +201,28 @@ test("the standard checklist is five steps, dated from the trip", () => {
       ["return", "2026-08-27"], // 7 days before the start
       ["hotel", "2026-08-29"], // 5 days before the start
       ["receipts", "2026-09-04"], // the end date
-      ["bill", "2026-09-06"], // 2 days after the end date
     ]
   );
+});
+
+test("no step builds a bill any more", () => {
+  // M6d: the invoice is one recurring monthly task, seeded by migration, not
+  // a step on every trip.
+  const steps = buildChecklist(TRIP, "2026-08-01");
+  assert.ok(!steps.some((s) => s.key === "bill"));
+  assert.doesNotMatch(JSON.stringify(steps), /reimbursement bill/i);
 });
 
 test("a trip starting inside seven days still produces a usable list", () => {
   // Entered on 1 September for a trip starting on the 3rd: the two booking
   // steps would fall on 27 August, which has gone.
   const steps = buildChecklist(TRIP, "2026-09-01");
-  assert.equal(steps.length, 5);
+  assert.equal(steps.length, 4);
   assert.equal(steps[0].due_date, "2026-09-01");
   assert.equal(steps[1].due_date, "2026-09-01");
   assert.equal(steps[2].due_date, "2026-09-01");
   // Dates still ahead are untouched.
   assert.equal(steps[3].due_date, "2026-09-04");
-  assert.equal(steps[4].due_date, "2026-09-06");
 });
 
 test("no step is ever dated in the past", () => {
@@ -204,7 +237,45 @@ test("a trip with no start date offers no checklist rather than guessing", () =>
 test("a one-day trip counts the end date from the start date", () => {
   const steps = buildChecklist({ ...TRIP, end_date: null }, "2026-08-01");
   assert.equal(steps[3].due_date, "2026-09-03");
-  assert.equal(steps[4].due_date, "2026-09-05");
+});
+
+// --- 3b. the overseas chapter, which must not be forgotten -------------------
+
+const DUBAI = {
+  title: "AICA session, Dubai chapter",
+  purpose: "aica",
+  start_date: "2026-09-03",
+  end_date: "2026-09-04",
+  bills_to: "chapter_aed",
+  cities: ["Dubai"],
+};
+
+test("a chapter_aed trip gets its own AED invoice reminder, named by city", () => {
+  const steps = buildChecklist(DUBAI, "2026-08-01");
+  const aed = steps.find((s) => s.key === "aed");
+  assert.ok(aed, "the one step that must exist for an overseas chapter");
+  assert.equal(aed!.title, "Raise the AED invoice to the Dubai chapter");
+  // Three days after the trip ends.
+  assert.equal(aed!.due_date, "2026-09-07");
+  assert.match(aed!.note, /NOT on the monthly ICAI claim/);
+  assert.match(aed!.note, /in AED/);
+});
+
+test("a monthly ICAI trip gets no invoice step of its own", () => {
+  assert.ok(!buildChecklist(TRIP, "2026-08-01").some((s) => s.key === "aed"));
+  assert.ok(
+    !buildChecklist({ ...TRIP, bills_to: "none" }, "2026-08-01").some(
+      (s) => s.key === "aed"
+    )
+  );
+});
+
+test("the AED reminder falls back rather than naming no chapter", () => {
+  const steps = buildChecklist({ ...DUBAI, cities: [] }, "2026-08-01");
+  assert.equal(
+    steps.find((s) => s.key === "aed")!.title,
+    "Raise the AED invoice to the overseas chapter"
+  );
 });
 
 test("AICA copy names the preference order and the branch's hotel", () => {
@@ -215,22 +286,19 @@ test("AICA copy names the preference order and the branch's hotel", () => {
   assert.match(steps[2].note, /confirmation, not a booking/);
 });
 
-test("a non-AICA trip drops the branch wording, and the bill without a payer", () => {
+test("a non-AICA trip drops the branch wording", () => {
   const leisure = {
     title: "Family trip",
     purpose: "leisure",
     start_date: "2026-09-03",
     end_date: "2026-09-04",
-    billable_to: null,
+    bills_to: "none",
+    cities: ["Mount Abu"],
   };
   const steps = buildChecklist(leisure, "2026-08-01");
   assert.deepEqual(steps.map((s) => s.key), ["onward", "return", "hotel", "receipts"]);
   assert.equal(steps[2].title, "Confirm the hotel");
   assert.ok(!/branch/i.test(steps[2].note));
-
-  // Named a payer, so the reimbursement step comes back.
-  const billed = buildChecklist({ ...leisure, billable_to: "Cygnet" }, "2026-08-01");
-  assert.deepEqual(billed.map((s) => s.key).at(-1), "bill");
 });
 
 test("no checklist step invites a document into the app", () => {
@@ -273,7 +341,7 @@ test("the brief shows one line per trip, not a line per step", () => {
     appBaseUrl: "https://example.test",
   });
   assert.ok(text.includes("AICA session, Rajkot branch, 3 to 4 September 2026"));
-  assert.ok(text.includes("2 of 5 done, next: Book onward ticket"));
+  assert.ok(text.includes("2 of 4 done, next: Book onward ticket"));
   // The steps themselves are not lines of their own.
   assert.ok(!text.includes("- Book onward ticket"));
   assert.ok(!text.includes("- Collect and keep travel receipts"));
@@ -306,7 +374,7 @@ test("a brief with no trips is unchanged", () => {
     appBaseUrl: "https://example.test",
   });
   assert.ok(plain.text.includes("File reply to SCN issued to R N PEB"));
-  assert.ok(!plain.text.includes("of 5 done"));
+  assert.ok(!plain.text.includes("of 4 done"));
 });
 
 // --- 5. the tool surface -----------------------------------------------------
@@ -325,6 +393,11 @@ test("create_trip can seed the checklist, and it is off unless asked", () => {
   const props = tool.input_schema.properties as Record<string, { type: string }>;
   assert.equal(props.with_checklist.type, "boolean");
   assert.ok(!((tool.input_schema.required ?? []) as string[]).includes("with_checklist"));
+  assert.doesNotMatch(
+    JSON.stringify(props.with_checklist),
+    /build the bill/i,
+    "the checklist no longer ends in a bill"
+  );
 });
 
 test("the new parameters keep the one-concrete-type rule", () => {
@@ -339,8 +412,12 @@ test("the new parameters keep the one-concrete-type rule", () => {
   for (const t of TOOLS) walk(t.input_schema);
 });
 
-test("nothing new can approve, send or mark a bill", () => {
+test("nothing can approve, and nothing bills at all", () => {
   const kinds = TOOLS.map((t) => t.name);
-  assert.ok(!kinds.some((k) => /approve|mark_bill|send_bill/i.test(k)));
+  assert.ok(!kinds.some((k) => /approve/i.test(k)));
+  assert.ok(
+    !kinds.some((k) => /bill|invoice/i.test(k)),
+    "M6d removed billing from this app entirely"
+  );
   assert.equal(toolByName("create_trip")!.bucket, "autonomous");
 });

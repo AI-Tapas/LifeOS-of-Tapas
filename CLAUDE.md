@@ -24,11 +24,10 @@ the stale lock and retry; do not attribute it to OneDrive or re-diagnose.
 1. Confidential boundary: the app stores task metadata, due dates, and
    reference links only. No document contents, no file uploads of client
    documents, ever. Do not add schema, storage buckets, or UI that invites
-   them. Columns like receipt_ref and pdf_ref are reference strings, not
-   files.
+   them. Columns like receipt_ref are reference strings, not files.
 2. Confirmation: no irreversible or in-the-user's-name action (send mail,
-   invite people, send bills) may execute without explicit user confirmation,
-   enforced in code. assistant_actions.status must pass through 'approved'
+   invite people) may execute without explicit user confirmation, enforced in
+   code. assistant_actions.status must pass through 'approved'
    before 'executed'.
 3. Secrets: LLM and OAuth secrets are server-side only. Never ship them to
    the client, never prefix them NEXT_PUBLIC_.
@@ -51,7 +50,7 @@ the stale lock and retry; do not attribute it to OneDrive or re-diagnose.
   table.
 - FK on delete policy: cascade for containment (account to calendars to
   events, trip to expenses, reminder parents), set null for loose links
-  (tasks.project_id, bills.trip_id, notes refs), restrict for work_stream
+  (tasks.project_id, tasks.trip_id, notes refs), restrict for work_stream
   references.
 - After schema changes regenerate types: npm run db:types (stack must be
   running). lib/database.types.ts was hand-authored to match the migrations
@@ -159,8 +158,9 @@ and email-verification rules live in lib/accounts.ts.
   autonomous (tasks, reminders, notes, people, obligations, solo events,
   app-DB email drafts) execute immediately and are undoable; confirm
   (send_email, propose_event_with_invites) only ever insert a proposed
-  assistant_actions row. Stubs: gst wiki, trips, bills. There is no tool
-  that mutates assistant_actions.status, fetches URLs, or reads documents.
+  assistant_actions row. Stub: gst wiki. There is no tool that mutates
+  assistant_actions.status, fetches URLs, or reads documents, and since M6d
+  no tool bills or invoices anything.
 - Approval gate: approve happens only in the owner-session server action
   (app/(app)/assistant/actions.ts -> approveAndExecute). Approval records a
   sha256 payload hash; the executor (runApprovedExecution in
@@ -265,44 +265,97 @@ and email-verification rules live in lib/accounts.ts.
 - Tests: npm run test:m4 (offline, the R6 red-team controls). rls.test.mjs
   adds audit_log append-only and payload-immutability trigger proofs.
 
-## Travel Desk (Milestone 6)
+## Travel Desk (Milestones 6 and 6d)
 
-- Schema: trips, trip_expenses and bills shipped in M1 with the right shapes.
-  Migration 20260828000100_m6_travel_desk.sql adds only what was missing:
-  trip_status gains 'underway' and 'billed' (the trail is planned, underway,
-  done, billed; 'booked' and 'cancelled' stay valid), bills gains
-  bill_to_address (the enum says which kind of payer, the bill still has to
-  print a name and address), and billing_profile holds the letterhead. The
-  seed_new_user trigger now seeds a billing_profile row too.
-- receipt_ref and pdf_ref stay reference strings. There is no upload path, no
-  storage bucket and no attachment UI anywhere in this module, and
-  scripts/m6.test.ts fails if any tool grows a file-shaped parameter.
-- lib/trips/bill.ts is pure: leg and line-item parsing, line items derived
-  from billable expenses, the billable rollup, Indian amount-in-words, and
-  financial-year bill numbering (AICA/2026-27/001, restarting each April).
-  Relative .ts imports so node --test can run it.
+- Schema: trips and trip_expenses shipped in M1. Migration
+  20260828000100_m6_travel_desk.sql added the status trail ('underway',
+  'billed'; 'booked' and 'cancelled' stay valid). Migration
+  20260901000100_m6d_invoice_feed.sql replaced trips.billable_to (free text)
+  with trips.bills_to, enum trip_bills_to: icai_monthly (the default),
+  chapter_aed, none.
+- The bills and billing_profile TABLES are UNUSED. Nothing in the app reads
+  or writes them since M6d; they are left in place only because dropping a
+  table is irreversible. A later migration can remove them, along with the
+  bill_recipient and bill_status enums and the billing_profile insert in
+  seed_new_user.
+- receipt_ref stays a reference string. There is no upload path, no storage
+  bucket and no attachment UI anywhere in this module, and scripts/m6.test.ts
+  fails if any tool grows a file-shaped parameter.
+- lib/trips/bill.ts is pure trip logic despite its name (M6d emptied it of
+  bills): transport modes, leg parsing, the billable rollup, and the date
+  labels. Renaming it was left out of M6d to keep that diff small.
+- lib/trips/month.ts is the month pack, pure: which month a trip belongs to,
+  what the ICAI claim excludes, the receipt gaps, and the plain text the Copy
+  button puts on the clipboard.
 - lib/trips/write.ts is the one write path, same pattern as lib/tasks/write.ts:
   browser server actions, the in-app assistant and the MCP connectors all go
-  through it. createBillDraft can only ever write status 'draft'.
-  setBillStatus (sent, paid) exists only for the Trips screen: no assistant or
-  connector tool can reach it, because the app never sends a bill.
+  through it. Nothing in it writes a bills row.
 - Screens: /trips groups the month ahead and lists past trips below;
-  /trips/[id] carries legs, expenses by category and the bills; /trips/bill/[id]
-  is the print view. The PDF is the browser's own Save as PDF driven by the
-  @media print block in globals.css (everything hidden except .print-sheet),
-  so no PDF library is installed.
+  /trips/[id] carries legs, checklist and expenses by category; /trips/month
+  is the month pack. There is no print view and no @media print block: the
+  app produces no document.
 - His working rules live where each fits: the transport preference order and
   the AICA "arrive the night before, the branch books the hotel" note sit in
   the leg and trip forms; the more-than-a-day gap between trips shows as an
   observation with no merge button (chaining is a question, never automatic);
-  and the same three rules are in HARD_RULES so the assistant says the same
-  thing in chat.
-- Assistant tools: the three trip stubs became real autonomous, undoable tools
-  (create_trip, update_trip, log_trip_leg, add_trip_expense,
-  create_bill_draft), mirrored by the read tools lifeos_list_trips and
-  lifeos_list_bills.
-- Tests: npm run test:m6 (offline). app/dev-preview renders the three trips
-  screens with mock data for visual checks without a database.
+  and the same rules are in HARD_RULES so the assistant says the same thing
+  in chat.
+- Assistant tools: create_trip, update_trip, log_trip_leg, add_trip_expense,
+  all autonomous and undoable, mirrored by the read tool lifeos_list_trips
+  (which now reports bills_to and receipts_missing).
+- Tests: npm run test:m6 (25 offline). app/dev-preview renders the trips
+  screens and the month pack with mock data for visual checks without a
+  database.
+
+## Billing: what this app does NOT do (Milestone 6d)
+
+M6 built a per-trip reimbursement bill, addressed to "ICAI <city> Branch",
+numbered AICA/2026-27/001, printed from the browser. Every specific was
+wrong, because the milestone was written without asking how Tapas bills. He
+bills MONTHLY, to the ICAI AI committee and never to a branch, as two
+invoices (professional fees and a reimbursement claim with a line-item
+annexure), numbered from ONE continuous series across all his clients
+(TR-2026-00NN) that no AICA-only view could derive. It is produced by a
+formula-driven workbook on his own machine, signed with his DSC and mirrored
+into Zoho Books.
+
+So Life OS holds the month accurately and hands it over. Do not rebuild any
+of the following, in any milestone:
+
+- No bill or invoice row, number, series, total, fee computation or PDF.
+- No letterhead, no print stylesheet, no amount-in-words.
+- No Zoho call, no workbook write.
+- The month pack shows no total he could mistake for a claim.
+
+Two rules that belong to his invoice process and must stay out of this app:
+overseas rows are handled by the bills_to exclusion and nothing more, and
+industry sessions are relabelled on the invoice itself. Record what a trip
+actually is; let the invoice run do the formatting.
+
+What the app does instead:
+
+- bills_to on every trip. chapter_aed (Dubai, Abu Dhabi) is excluded from the
+  month pack entirely, says so on the trip, and seeds its own task, "Raise
+  the AED invoice to the <city> chapter", due three days after the trip ends,
+  attached as a checklist step. That step is seeded whether or not the
+  checklist was asked for: the overseas invoice happens once or twice a year
+  and forgetting it is the stated risk.
+- The city, not the branch, is the strongest element after a trip's own name
+  on the trips list, leads the trip detail, and appears in the rollup line
+  (lib/tasks/trip-rollup.ts tripCityLabel, which does not repeat a city the
+  title already carries).
+- Receipt chasing while the month is still open: a billable trip_expense with
+  an empty receipt_ref is marked and counted on the trip, raised as a
+  standing line on the trips list for the current and previous month, and
+  named in the morning brief from the 25th onward only (briefGapLine).
+- /trips/month gathers the chosen month (previous month by default):
+  sessions, travel legs, expenses by trip with the receipt reference or "no
+  receipt on file", the excluded trips with their reason, and the gaps as a
+  numbered list. One "Copy for the invoice run" button puts it on the
+  clipboard as plain text. That is the entire integration.
+- One recurring task, "Raise the AICA invoice for last month", monthly, due
+  on the 3rd, seeded into the ICAI stream by migration 20260901000100. It
+  replaced the per-trip "Build the reimbursement bill" step.
 
 ## Theme (Settings > Appearance)
 
@@ -333,25 +386,28 @@ and email-verification rules live in lib/accounts.ts.
   rollUpTrips, so they cannot drift. A rollup row inherits the priority and
   due date of the trip's most urgent incomplete step, so it lands in exactly
   the band that step would have earned alone; it names that step, counts
-  honestly ("2 of 5 done", dropped steps out of the denominator), and a trip
+  honestly ("2 of 4 done", dropped steps out of the denominator), and a trip
   with no open steps produces no row at all. The rollup id is `trip:<uuid>`,
-  never a task id.
+  never a task id. Since M6d the label also names the city.
 - The rollup applies to the ranked surfaces only. The Tasks Board, Inbox and
   Projects tabs still list every step as its own row, so nothing is
   unreachable from the task list itself.
-- lib/trips/checklist.ts is the one definition of the five standard steps and
+- lib/trips/checklist.ts is the one definition of the four standard steps and
   their dates (onward and return 7 days before the start, hotel 5 days
-  before, receipts on the end date, the bill 2 days after). A date that would
-  land in the past is clamped to today. No start date means no checklist
-  rather than guessed dates. Non-AICA trips lose the branch wording, and the
-  reimbursement step only appears when somebody actually pays.
+  before, receipts on the end date), plus the chapter_aed invoice reminder 3
+  days after the end. A date that would land in the past is clamped to today.
+  No start date means no checklist rather than guessed dates. Non-AICA trips
+  lose the branch wording. M6d removed the per-trip "build the bill" step.
 - Seeding runs through lib/trips/write.ts seedTripChecklist, called by
   createTrip when with_checklist is set. The add-trip drawer defaults it on,
   the connector tool defaults it off, and both go through that one function.
+  A chapter_aed trip additionally seeds the AED step alone (scope
+  'aed_only') even when the checklist was declined.
 - create_task and update_task take an optional trip_id, so the assistant and
   both connectors can attach travel admin to a trip (including the 36 tasks
   already in the live database). lifeos_list_trips returns checklist_done and
   checklist_total. No new tool, no bucket change, no new approval path.
-- Tests: npm run test:m6b (26 offline tests: rollup counts and rank
-  inheritance, checklist date derivation and the past-date clamp, the brief
-  ranking the same rows, and the tool-schema rules).
+- Tests: npm run test:m6b (31 offline tests: rollup counts and rank
+  inheritance, the city in the label, checklist date derivation and the
+  past-date clamp, the chapter_aed reminder, the brief ranking the same
+  rows, and the tool-schema rules).

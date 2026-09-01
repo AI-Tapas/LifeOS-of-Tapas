@@ -1,9 +1,10 @@
 "use client";
 
-// Shared display bits for the Travel Desk: the purpose chip, the status
-// trail and the date line. Kept in one file so the list, the detail screen
-// and the bill builder all speak the same visual language.
+// Shared display bits for the Travel Desk: the purpose chip, the billed-to
+// chip and the status trail. Kept in one file so the list, the detail screen
+// and the month pack all speak the same visual language.
 
+import { BILLS_TO_LABELS, type BillsTo } from "@/lib/trips/month";
 import type { Database } from "@/lib/database.types";
 
 export type TripPurpose = Database["public"]["Enums"]["trip_purpose"];
@@ -106,5 +107,26 @@ export function StatusTrail({
         );
       })}
     </div>
+  );
+}
+
+// How the trip is billed. Only ever shown for the two cases that are NOT the
+// monthly ICAI claim: an overseas chapter, which must be invoiced separately
+// in AED, and a trip nobody reimburses. The default case needs no chip.
+export function BillsToChip({ billsTo }: { billsTo: BillsTo }) {
+  if (billsTo === "icai_monthly") return null;
+  const tone =
+    billsTo === "chapter_aed"
+      ? "border-waiting/30 bg-waiting-soft text-waiting"
+      : "border-border bg-surface-2 text-secondary";
+  return (
+    <span
+      className={
+        "inline-block rounded-full border px-2.5 py-0.5 text-[11px] font-semibold " +
+        tone
+      }
+    >
+      {BILLS_TO_LABELS[billsTo]}
+    </span>
   );
 }

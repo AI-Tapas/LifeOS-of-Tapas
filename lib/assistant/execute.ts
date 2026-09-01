@@ -27,9 +27,7 @@ import {
 import {
   addTripExpense,
   addTripLeg,
-  createBillDraft,
   createTrip,
-  deleteBill,
   deleteTrip,
   deleteTripExpense,
   updateTrip,
@@ -809,10 +807,10 @@ const performers: Record<string, Performer> = {
 
   // --- travel desk ---------------------------------------------------------
   // Trips, their legs and their expenses are Tapas's own records, so they sit
-  // in the autonomous bucket and every one of them is undoable.
-  // create_bill_draft is autonomous too, and can ONLY ever write a draft: no
-  // tool here or anywhere else marks a bill sent or paid, and nothing in this
-  // module posts a bill to anybody.
+  // in the autonomous bucket and every one of them is undoable. There is no
+  // bill tool: M6d removed it. Nothing here writes a bills row, computes an
+  // invoice number or posts a claim to anybody; the app only holds the month
+  // and hands it over.
 
   async create_trip(supabase, userId, input) {
     const title = s(input.title);
@@ -828,7 +826,9 @@ const performers: Record<string, Performer> = {
       cities: Array.isArray(input.cities)
         ? (input.cities as unknown[]).filter((c): c is string => typeof c === "string")
         : [],
-      billable_to: s(input.billable_to),
+      bills_to:
+        (s(input.bills_to) as Database["public"]["Enums"]["trip_bills_to"] | null) ??
+        undefined,
       notes: s(input.notes),
       // Same seeding path as the add-trip drawer: one implementation, so the
       // steps and their dates cannot differ between the app and a connector.
@@ -846,7 +846,7 @@ const performers: Record<string, Performer> = {
     if (!tripId) throw new Error("trip_id is required.");
     const { data: prev } = await supabase
       .from("trips")
-      .select("title, status, start_date, end_date, billable_to, notes")
+      .select("title, status, start_date, end_date, bills_to, notes")
       .eq("id", tripId)
       .single();
     if (!prev) throw new Error("Trip not found.");
@@ -857,7 +857,13 @@ const performers: Record<string, Performer> = {
         : {}),
       ...(s(input.start_date) ? { start_date: s(input.start_date) } : {}),
       ...(s(input.end_date) ? { end_date: s(input.end_date) } : {}),
-      ...(input.billable_to !== undefined ? { billable_to: s(input.billable_to) } : {}),
+      ...(s(input.bills_to)
+        ? {
+            bills_to: s(
+              input.bills_to
+            ) as Database["public"]["Enums"]["trip_bills_to"],
+          }
+        : {}),
       ...(input.notes !== undefined ? { notes: s(input.notes) } : {}),
     });
     if (!r.ok) throw new Error(r.message);
@@ -912,27 +918,6 @@ const performers: Record<string, Performer> = {
         `${date}T00:00:00+05:30`
       )}${input.billable === true ? ", billable" : ""}.`,
       undo: { expense_id: r.id },
-    };
-  },
-
-  async create_bill_draft(supabase, userId, input) {
-    const tripId = s(input.trip_id);
-    if (!tripId) throw new Error("trip_id is required.");
-    const r = await createBillDraft(supabase, userId, {
-      trip_id: tripId,
-      bill_to:
-        (s(input.bill_to) as Database["public"]["Enums"]["bill_recipient"] | null) ??
-        undefined,
-      bill_to_address: s(input.bill_to_address),
-      number: s(input.number),
-      date: s(input.date),
-    });
-    if (!r.ok) throw new Error(r.message);
-    return {
-      summary:
-        `Bill ${r.note} drafted from the trip's billable expenses. It is a DRAFT: ` +
-        "nothing has been sent. Open Trips, check the lines, print it and send it yourself.",
-      undo: { bill_id: r.id },
     };
   },
 
@@ -1215,7 +1200,6 @@ const UNDOABLE = new Set([
   "update_trip",
   "log_trip_leg",
   "add_trip_expense",
-  "create_bill_draft",
 ]);
 
 export async function undoExecutedAction(
@@ -1432,7 +1416,7 @@ async function performUndo(
         status: prev.status as Database["public"]["Enums"]["trip_status"],
         start_date: (prev.start_date as string | null) ?? null,
         end_date: (prev.end_date as string | null) ?? null,
-        billable_to: (prev.billable_to as string | null) ?? null,
+        bills_to: prev.bills_to as Database["public"]["Enums"]["trip_bills_to"],
         notes: (prev.notes as string | null) ?? null,
       });
       if (!r.ok) throw new Error(r.message);
@@ -1450,11 +1434,6 @@ async function performUndo(
     case "add_trip_expense": {
       const r = await deleteTripExpense(supabase, userId, String(undo.expense_id));
       if (!r.ok) throw new Error(r.message ?? "Could not delete the expense.");
-      return;
-    }
-    case "create_bill_draft": {
-      const r = await deleteBill(supabase, userId, String(undo.bill_id));
-      if (!r.ok) throw new Error(r.message ?? "Could not delete the bill draft.");
       return;
     }
     default:

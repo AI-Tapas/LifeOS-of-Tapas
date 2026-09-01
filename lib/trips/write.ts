@@ -1,23 +1,14 @@
-// Trip, expense and bill writes with an explicit identity. Same pattern as
+// Trip and expense writes with an explicit identity. Same pattern as
 // lib/tasks/write.ts: every function takes the Supabase client and the user id
 // to act as and reads no cookies, so one implementation serves three callers,
 // the browser (cookie session), the in-app assistant, and the MCP connector.
 //
-// Bill rule enforced here, not by prompt: createBillDraft can only ever write
-// status 'draft'. Marking a bill sent or paid is setBillStatus, which is
-// reachable from the Trips screen alone. No assistant or connector tool calls
-// it, and nothing in this file sends anything to anybody.
+// There is no bill write here any more, and that is the point of M6d. Life OS
+// does not produce a bill: it holds the month accurately and hands it over
+// (lib/trips/month.ts). Nothing in this file writes a bills row.
 
 import { buildChecklist } from "./checklist.ts";
-import {
-  deriveLineItems,
-  lineItemsTotal,
-  nextBillNumber,
-  parseLegs,
-  type BillLineItem,
-  type BillableExpense,
-  type TripLeg,
-} from "./bill.ts";
+import { parseLegs, type TripLeg } from "./bill.ts";
 import { createTask } from "@/lib/tasks/write";
 import { civilKey, civilToday, istInstant } from "@/lib/datetime";
 import type { Database, Json } from "@/lib/database.types";
@@ -27,8 +18,7 @@ type Db = SupabaseClient<Database>;
 type TripPurpose = Database["public"]["Enums"]["trip_purpose"];
 type TripStatus = Database["public"]["Enums"]["trip_status"];
 type ExpenseCategory = Database["public"]["Enums"]["trip_expense_category"];
-type BillRecipient = Database["public"]["Enums"]["bill_recipient"];
-type BillStatus = Database["public"]["Enums"]["bill_status"];
+type BillsTo = Database["public"]["Enums"]["trip_bills_to"];
 
 export type WriteResult =
   | { ok: true; id: string; note?: string; checklistTaskIds?: string[] }
@@ -43,7 +33,8 @@ export interface TripInput {
   cities?: string[];
   legs?: TripLeg[];
   status?: TripStatus;
-  billable_to?: string | null;
+  // Who the trip is billed to, if anyone. Defaults to the monthly ICAI claim.
+  bills_to?: BillsTo;
   notes?: string | null;
   // Not a column: when true, createTrip also seeds the standard travel
   // checklist against the new trip. The add-trip drawer sets it, and so does
@@ -85,7 +76,7 @@ export async function createTrip(
       cities: (input.cities ?? []) as Json,
       legs: (input.legs ?? []) as unknown as Json,
       status: input.status ?? "planned",
-      billable_to: input.billable_to ?? null,
+      bills_to: input.bills_to ?? "icai_monthly",
       notes: input.notes ?? null,
     })
     .select("id")
@@ -94,15 +85,26 @@ export async function createTrip(
     return { ok: false, message: error?.message ?? "Could not save the trip." };
   }
 
-  if (input.with_checklist) {
-    const seeded = await seedTripChecklist(supabase, userId, data.id, {
-      title: input.title.trim(),
-      purpose: input.purpose,
-      start_date: input.start_date ?? null,
-      end_date: input.end_date ?? null,
-      billable_to: input.billable_to ?? null,
-      work_stream_id: input.work_stream_id,
-    });
+  const billsTo = input.bills_to ?? "icai_monthly";
+  // An overseas chapter trip always gets its AED reminder, checklist asked
+  // for or not: that invoice is raised once or twice a year and forgetting it
+  // is the stated risk. Everything else only arrives when he asks for it.
+  if (input.with_checklist || billsTo === "chapter_aed") {
+    const seeded = await seedTripChecklist(
+      supabase,
+      userId,
+      data.id,
+      {
+        title: input.title.trim(),
+        purpose: input.purpose,
+        start_date: input.start_date ?? null,
+        end_date: input.end_date ?? null,
+        bills_to: billsTo,
+        cities: input.cities ?? [],
+        work_stream_id: input.work_stream_id,
+      },
+      input.with_checklist ? "all" : "aed_only"
+    );
     return {
       ok: true,
       id: data.id,
@@ -129,11 +131,16 @@ export async function seedTripChecklist(
     purpose: TripPurpose;
     start_date: string | null;
     end_date: string | null;
-    billable_to: string | null;
+    bills_to: BillsTo;
+    cities: string[];
     work_stream_id: string;
-  }
+  },
+  // 'aed_only' seeds just the overseas-chapter invoice reminder, which is the
+  // one step that must exist whether or not he wanted the travel checklist.
+  scope: "all" | "aed_only" = "all"
 ): Promise<string[]> {
-  const steps = buildChecklist(trip, civilKey(civilToday()));
+  const all = buildChecklist(trip, civilKey(civilToday()));
+  const steps = scope === "all" ? all : all.filter((s) => s.key === "aed");
   const ids: string[] = [];
   for (const step of steps) {
     const r = await createTask(supabase, userId, {
@@ -178,7 +185,7 @@ export async function updateTrip(
       ...(patch.cities !== undefined ? { cities: patch.cities as Json } : {}),
       ...(patch.legs !== undefined ? { legs: patch.legs as unknown as Json } : {}),
       ...(patch.status !== undefined ? { status: patch.status } : {}),
-      ...(patch.billable_to !== undefined ? { billable_to: patch.billable_to } : {}),
+      ...(patch.bills_to !== undefined ? { bills_to: patch.bills_to } : {}),
       ...(patch.notes !== undefined ? { notes: patch.notes } : {}),
     })
     .eq("id", id);
@@ -191,9 +198,8 @@ export async function deleteTrip(
   _userId: string,
   id: string
 ): Promise<{ ok: boolean; message?: string }> {
-  // Expenses cascade with the trip; a bill written from it survives with
-  // trip_id set to null, which is the M1 FK policy on purpose: a claim
-  // already made must not vanish because the trip record was tidied away.
+  // Expenses cascade with the trip. Checklist steps do not: tasks.trip_id is
+  // on delete set null, so work he still owes becomes an ordinary task again.
   const { error } = await supabase.from("trips").delete().eq("id", id);
   if (error) return { ok: false, message: error.message };
   return { ok: true };
@@ -286,171 +292,6 @@ export async function deleteTripExpense(
   return { ok: true };
 }
 
-export async function loadBillableExpenses(
-  supabase: Db,
-  tripId: string
-): Promise<BillableExpense[]> {
-  const { data } = await supabase
-    .from("trip_expenses")
-    .select("id, category, amount, date, billable")
-    .eq("trip_id", tripId)
-    .order("date");
-  return (data ?? []) as BillableExpense[];
-}
-
-// ---------------------------------------------------------------------------
-// Bills
-// ---------------------------------------------------------------------------
-export interface BillDraftInput {
-  trip_id: string;
-  bill_to?: BillRecipient;
-  // The payer's name and address as it should print on the bill.
-  bill_to_address?: string | null;
-  number?: string | null;
-  date?: string | null;
-  line_items?: BillLineItem[];
-  pdf_ref?: string | null;
-}
-
-// The ONLY function that creates a bill row, and it can only ever write
-// status 'draft'. Nothing here sends anything: a draft is a document waiting
-// for Tapas.
-export async function createBillDraft(
-  supabase: Db,
-  userId: string,
-  input: BillDraftInput
-): Promise<WriteResult> {
-  const { data: trip } = await supabase
-    .from("trips")
-    .select("id, title, work_stream_id, billable_to")
-    .eq("id", input.trip_id)
-    .maybeSingle();
-  if (!trip) return { ok: false, message: "Trip not found." };
-
-  const date = input.date ?? todayIsoDate();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    return { ok: false, message: "A bill date as YYYY-MM-DD is required." };
-  }
-
-  const items =
-    input.line_items && input.line_items.length
-      ? input.line_items
-      : deriveLineItems(await loadBillableExpenses(supabase, input.trip_id));
-  if (!items.length) {
-    return {
-      ok: false,
-      message: "This trip has no billable expenses yet, so there is nothing to bill.",
-    };
-  }
-
-  const number = input.number?.trim() || (await suggestBillNumber(supabase, date));
-  const { data, error } = await supabase
-    .from("bills")
-    .insert({
-      user_id: userId,
-      trip_id: trip.id,
-      work_stream_id: trip.work_stream_id,
-      bill_to: input.bill_to ?? "institute",
-      bill_to_address: input.bill_to_address ?? trip.billable_to ?? null,
-      number,
-      date,
-      line_items: items as unknown as Json,
-      amount: lineItemsTotal(items),
-      status: "draft",
-      // A reference string, not a file: the PDF itself lives wherever he
-      // saves it from the print view.
-      pdf_ref: input.pdf_ref ?? number,
-    })
-    .select("id")
-    .single();
-  if (error || !data) {
-    return {
-      ok: false,
-      message:
-        error?.code === "23505"
-          ? `Bill number ${number} already exists. Use another one.`
-          : (error?.message ?? "Could not save the bill."),
-    };
-  }
-  return { ok: true, id: data.id, note: number };
-}
-
-export async function updateBill(
-  supabase: Db,
-  _userId: string,
-  id: string,
-  patch: {
-    number?: string;
-    date?: string;
-    bill_to?: BillRecipient;
-    bill_to_address?: string | null;
-    line_items?: BillLineItem[];
-    pdf_ref?: string | null;
-  }
-): Promise<WriteResult> {
-  const { error } = await supabase
-    .from("bills")
-    .update({
-      ...(patch.number !== undefined ? { number: patch.number.trim() } : {}),
-      ...(patch.date !== undefined ? { date: patch.date } : {}),
-      ...(patch.bill_to !== undefined ? { bill_to: patch.bill_to } : {}),
-      ...(patch.bill_to_address !== undefined
-        ? { bill_to_address: patch.bill_to_address }
-        : {}),
-      ...(patch.line_items !== undefined
-        ? {
-            line_items: patch.line_items as unknown as Json,
-            amount: lineItemsTotal(patch.line_items),
-          }
-        : {}),
-      ...(patch.pdf_ref !== undefined ? { pdf_ref: patch.pdf_ref } : {}),
-    })
-    .eq("id", id);
-  if (error) return { ok: false, message: error.message };
-  return { ok: true, id };
-}
-
-// Marking a bill sent or paid is Tapas's own act in the app. Deliberately not
-// reachable from any assistant or connector tool: the app never sends a bill,
-// so only he can say that it went out.
-export async function setBillStatus(
-  supabase: Db,
-  _userId: string,
-  id: string,
-  status: BillStatus
-): Promise<WriteResult> {
-  const { error } = await supabase.from("bills").update({ status }).eq("id", id);
-  if (error) return { ok: false, message: error.message };
-  return { ok: true, id };
-}
-
-export async function deleteBill(
-  supabase: Db,
-  _userId: string,
-  id: string
-): Promise<{ ok: boolean; message?: string }> {
-  const { error } = await supabase.from("bills").delete().eq("id", id);
-  if (error) return { ok: false, message: error.message };
-  return { ok: true };
-}
-
-// Next number in the series for the bill date's financial year, using his
-// stored prefix. Only ever a suggestion: the form leaves the field editable.
-export async function suggestBillNumber(
-  supabase: Db,
-  date: string
-): Promise<string> {
-  const [{ data: profile }, { data: bills }] = await Promise.all([
-    supabase.from("billing_profile").select("bill_prefix").maybeSingle(),
-    supabase.from("bills").select("number"),
-  ]);
-  return nextBillNumber(
-    profile?.bill_prefix?.trim() || "AICA",
-    date,
-    (bills ?? []).map((b) => b.number)
-  );
-}
-
 // ---------------------------------------------------------------------------
 function checkDates(
   start?: string | null,
@@ -472,9 +313,4 @@ function checkDates(
 function dueAt(dateOnly: string): string {
   const [y, m, d] = dateOnly.split("-").map(Number);
   return istInstant({ y, m, d }, 9, 30).toISOString();
-}
-
-// Today's IST calendar date as YYYY-MM-DD.
-function todayIsoDate(): string {
-  return civilKey(civilToday());
 }

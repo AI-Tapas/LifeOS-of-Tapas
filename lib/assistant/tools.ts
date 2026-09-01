@@ -98,7 +98,7 @@ export const TOOLS: ToolDef[] = [
       priority: enumOrNull(["low", "medium", "high"], "Task priority."),
       billable: boolOrNull("Whether the work is billable."),
       trip_id: strOrNull(
-        "Attach the task to a trip as a checklist step, using a trip id from lifeos_list_trips. The Tasks screen then shows one line for the trip instead of a row per step. Use it for travel admin (booking, hotel, receipts, the reimbursement bill), never for client work."
+        "Attach the task to a trip as a checklist step, using a trip id from lifeos_list_trips. The Tasks screen then shows one line for the trip instead of a row per step. Use it for travel admin (booking, hotel, receipts), never for client work."
       ),
     }),
   },
@@ -465,7 +465,7 @@ export const TOOLS: ToolDef[] = [
     name: "create_trip",
     bucket: "autonomous",
     description:
-      "Create a trip: an AICA session, a conference, leisure or other travel. Expenses and the reimbursement bill hang off it.",
+      "Create a trip: an AICA session, a conference, leisure or other travel. Its travel legs and expenses hang off it, and they feed the month pack Tapas invoices from. This app never produces an invoice or a bill.",
     input_schema: schema({
       purpose: enumOf(
         ["aica", "conference", "leisure", "other"],
@@ -482,12 +482,13 @@ export const TOOLS: ToolDef[] = [
         items: { type: "string" },
         description: "Cities the trip covers, in order.",
       }),
-      billable_to: strOrNull(
-        "Who reimburses it, e.g. ICAI Rajkot branch. Omit when he bears the cost."
+      bills_to: enumOrNull(
+        ["icai_monthly", "chapter_aed", "none"],
+        "How it is billed. icai_monthly (the default) goes into the monthly claim to the ICAI AI committee. chapter_aed is an overseas chapter, invoiced separately to the chapter in AED and never on the ICAI claim. none is not billable to anyone."
       ),
       notes: strOrNull("Anything worth remembering about the trip."),
       with_checklist: boolOrNull(
-        "Also add the standard travel checklist (book onward, book return, confirm hotel, collect receipts, build the bill), dated from the trip's own dates. Defaults to false. Needs a start date."
+        "Also add the standard travel checklist (book onward, book return, confirm hotel, collect receipts), dated from the trip's own dates. Defaults to false. Needs a start date."
       ),
     }),
   },
@@ -495,7 +496,7 @@ export const TOOLS: ToolDef[] = [
     name: "update_trip",
     bucket: "autonomous",
     description:
-      "Update a trip: its title, dates, who reimburses it, or where it sits on the trail (planned, underway, done, billed). Undo restores the previous values.",
+      "Update a trip: its title, dates, how it is billed, or where it sits on the trail (planned, underway, done, billed). Undo restores the previous values.",
     input_schema: schema({
       trip_id: str("The trip id from lifeos_list_trips."),
       title: strOrNull("New title. Omit to keep the current one."),
@@ -505,7 +506,10 @@ export const TOOLS: ToolDef[] = [
       ),
       start_date: { ...strOrNull(DATE_DESC + " Omit to keep.") },
       end_date: { ...strOrNull(DATE_DESC + " Omit to keep.") },
-      billable_to: strOrNull("Who reimburses it. Omit to keep."),
+      bills_to: enumOrNull(
+        ["icai_monthly", "chapter_aed", "none"],
+        "How it is billed: icai_monthly, chapter_aed (overseas, AED, never on the ICAI claim) or none. Omit to keep."
+      ),
       notes: strOrNull("New notes. Omit to keep."),
     }),
   },
@@ -530,7 +534,7 @@ export const TOOLS: ToolDef[] = [
     name: "add_trip_expense",
     bucket: "autonomous",
     description:
-      "Record one expense against a trip. Mark it billable when the institute or client reimburses it; billable expenses are what the bill is built from. Undo removes it.",
+      "Record one expense against a trip. Mark it billable when the institute or client reimburses it; billable expenses are what the monthly claim is assembled from. Always give a receipt_ref when there is one: a billable expense without it becomes a chase at invoice time. Undo removes it.",
     input_schema: schema({
       trip_id: str("The trip id from lifeos_list_trips."),
       category: enumOf(
@@ -543,26 +547,6 @@ export const TOOLS: ToolDef[] = [
       receipt_ref: strOrNull(
         "Where the receipt lives, as a short note, e.g. 'physical file' or a link he gave. Never the document itself."
       ),
-    }),
-  },
-  {
-    name: "create_bill_draft",
-    bucket: "autonomous",
-    description:
-      "Draft a reimbursement bill from a trip's billable expenses. It is ALWAYS a draft: nothing is sent, and no tool can mark a bill sent or paid. Tapas prints it and sends it himself.",
-    input_schema: schema({
-      trip_id: str("The trip id from lifeos_list_trips."),
-      bill_to: enumOrNull(
-        ["institute", "client", "other"],
-        "Who is billed. Defaults to institute."
-      ),
-      bill_to_address: strOrNull(
-        "The payer's name and address as it should print. Omit to use the trip's billable_to."
-      ),
-      number: strOrNull(
-        "Bill number. Omit to take the next one in the financial year series."
-      ),
-      date: { ...strOrNull(DATE_DESC + " Omit for today.") },
     }),
   },
 ];
@@ -678,7 +662,6 @@ export const MCP_READ_TOOLS = [
   "lifeos_list_finance_items",
   "lifeos_list_projects",
   "lifeos_list_trips",
-  "lifeos_list_bills",
   "lifeos_list_pending_actions",
   "lifeos_list_action_history",
 ] as const;

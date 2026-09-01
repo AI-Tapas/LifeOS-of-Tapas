@@ -11,6 +11,12 @@ import {
   type TripStatus,
 } from "@/components/trips/bits";
 import {
+  BILLS_TO_HELP,
+  BILLS_TO_LABELS,
+  BILLS_TO_VALUES,
+  type BillsTo,
+} from "@/lib/trips/month";
+import {
   createTripAction,
   deleteTripAction,
   updateTripAction,
@@ -30,7 +36,7 @@ export interface TripFormValues {
   end_date: string | null;
   cities: string[];
   status: TripStatus;
-  billable_to: string | null;
+  bills_to: BillsTo;
   notes: string | null;
 }
 
@@ -64,7 +70,7 @@ export default function TripForm({
   const [end, setEnd] = useState(trip?.end_date ?? "");
   const [cities, setCities] = useState((trip?.cities ?? []).join(", "));
   const [status, setStatus] = useState<TripStatus>(trip?.status ?? "planned");
-  const [billableTo, setBillableTo] = useState(trip?.billable_to ?? "");
+  const [billsTo, setBillsTo] = useState<BillsTo>(trip?.bills_to ?? "icai_monthly");
   const [notes, setNotes] = useState(trip?.notes ?? "");
   // Checked by default on a new trip: the five steps are what he runs every
   // time, and each one carries its own reminder. Never offered on an edit,
@@ -88,7 +94,7 @@ export default function TripForm({
         .map((c) => c.trim())
         .filter(Boolean),
       status,
-      billable_to: billableTo.trim() || null,
+      bills_to: billsTo,
       notes: notes.trim() || null,
       with_checklist: !isEdit && withChecklist,
     };
@@ -151,7 +157,7 @@ export default function TripForm({
           <p className="rounded-lg border border-brand/30 bg-brand-soft p-2.5 text-xs text-brand-deep">
             AICA: arrive the night before the session. The branch arranges the
             hotel, so plan transport only. Billable expenses on this trip feed
-            the institute reimbursement bill.
+            the month pack you invoice from.
           </p>
         )}
 
@@ -206,29 +212,43 @@ export default function TripForm({
           />
         </Field>
 
-        <div className="flex gap-2">
-          <Field label="Status">
-            <select
-              value={status}
-              onChange={(e) => setStatus(e.target.value as TripStatus)}
-              className={inputCls}
-            >
-              {STATUS_CHOICES.map((s) => (
-                <option key={s} value={s}>
-                  {STATUS_LABELS[s]}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="Billable to">
-            <input
-              value={billableTo}
-              onChange={(e) => setBillableTo(e.target.value)}
-              className={inputCls}
-              placeholder="e.g. ICAI Rajkot branch"
-            />
-          </Field>
-        </div>
+        <Field label="Status">
+          <select
+            value={status}
+            onChange={(e) => setStatus(e.target.value as TripStatus)}
+            className={inputCls}
+          >
+            {STATUS_CHOICES.map((s) => (
+              <option key={s} value={s}>
+                {STATUS_LABELS[s]}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <Field label="Billed to">
+          <select
+            value={billsTo}
+            onChange={(e) => setBillsTo(e.target.value as BillsTo)}
+            className={inputCls}
+          >
+            {BILLS_TO_VALUES.map((b) => (
+              <option key={b} value={b}>
+                {BILLS_TO_LABELS[b]}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <p className="text-xs text-secondary">{BILLS_TO_HELP[billsTo]}</p>
+        {billsTo === "chapter_aed" && (
+          <p className="rounded-lg border border-waiting/30 bg-waiting-soft p-2.5 text-xs text-waiting">
+            This trip stays off the monthly ICAI claim. Saving it adds one
+            task, {cities.split(",")[0].trim()
+              ? `"Raise the AED invoice to the ${cities.split(",")[0].trim()} chapter"`
+              : "to raise the AED invoice to the chapter"}, due three days
+            after the trip ends.
+          </p>
+        )}
 
         <Field label="Notes">
           <textarea
@@ -251,9 +271,10 @@ export default function TripForm({
               Add the standard travel checklist
               <span className="block text-xs text-secondary">
                 Book onward, book return, confirm the hotel, collect the
-                receipts, build the bill. Dated from this trip, each with its
-                own reminder, all under the trip rather than in the task list.
-                Needs a start date.
+                receipts. Dated from this trip, each with its own reminder, all
+                under the trip rather than in the task list. Needs a start
+                date. Raising the invoice is one recurring monthly task, not a
+                step per trip.
               </span>
             </span>
           </label>

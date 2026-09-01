@@ -18,12 +18,10 @@ import Timeline from "@/components/home/timeline";
 import { PendingCard } from "@/components/assistant/queue";
 import MotionDemo from "./motion-demo";
 import TripsView, { type TripRow } from "@/components/trips/trips-view";
-import TripDetail, {
-  type BillSummary,
-  type ExpenseRow,
-} from "@/components/trips/trip-detail";
-import BillSheet from "@/components/trips/bill-sheet";
-import { deriveLineItems, parseLegs } from "@/lib/trips/bill";
+import TripDetail, { type ExpenseRow } from "@/components/trips/trip-detail";
+import MonthPack from "@/components/trips/month-pack";
+import { parseLegs } from "@/lib/trips/bill";
+import type { MonthExpense, MonthTrip } from "@/lib/trips/month";
 import type { TripStep } from "@/lib/tasks/trip-rollup";
 import type { ChecklistRow } from "@/components/trips/trip-detail";
 
@@ -130,7 +128,7 @@ const nextUpBands: NextUpBands = {
     {
       id: "trip:t1",
       title: "AICA session, Rajkot branch, 3 to 4 September 2026",
-      stream: "2 of 5 done, next: Book onward ticket",
+      stream: "2 of 4 done, next: Book onward ticket",
       due_ts: "2026-08-20T04:00:00Z",
       needs_deadline: false,
       trip_id: "t1",
@@ -201,14 +199,14 @@ const trips: TripRow[] = [
     end_date: "2026-09-04",
     cities: ["Rajkot"],
     status: "planned",
-    billable_to: "ICAI Rajkot Branch",
+    bills_to: "icai_monthly",
     notes: null,
     stream_name: "ICAI",
     billable_total: 6550,
     expense_count: 5,
-    bill_count: 0,
+    receipts_missing: 2,
     checklist_done: 2,
-    checklist_total: 5,
+    checklist_total: 4,
   },
   {
     id: "t2",
@@ -219,14 +217,14 @@ const trips: TripRow[] = [
     end_date: "2026-09-08",
     cities: ["Surat"],
     status: "planned",
-    billable_to: "ICAI Surat Branch",
+    bills_to: "icai_monthly",
     notes: null,
     stream_name: "ICAI",
     billable_total: 0,
     expense_count: 0,
-    bill_count: 0,
+    receipts_missing: 0,
     checklist_done: 0,
-    checklist_total: 5,
+    checklist_total: 4,
   },
   {
     id: "t3",
@@ -237,14 +235,32 @@ const trips: TripRow[] = [
     end_date: "2026-10-16",
     cities: ["Mumbai"],
     status: "planned",
-    billable_to: null,
+    bills_to: "none",
     notes: null,
     stream_name: "Tax Strategia",
     billable_total: 0,
     expense_count: 0,
-    bill_count: 0,
+    receipts_missing: 0,
     checklist_done: 0,
     checklist_total: 0,
+  },
+  {
+    id: "t5",
+    purpose: "aica",
+    title: "AICA session, Dubai chapter",
+    work_stream_id: "w1",
+    start_date: "2026-05-24",
+    end_date: "2026-05-25",
+    cities: ["Dubai"],
+    status: "done",
+    bills_to: "chapter_aed",
+    notes: null,
+    stream_name: "ICAI",
+    billable_total: 41000,
+    expense_count: 2,
+    receipts_missing: 0,
+    checklist_done: 4,
+    checklist_total: 5,
   },
   {
     id: "t4",
@@ -255,14 +271,14 @@ const trips: TripRow[] = [
     end_date: "2026-05-19",
     cities: ["Bhavnagar"],
     status: "billed",
-    billable_to: "ICAI Bhavnagar Branch",
+    bills_to: "icai_monthly",
     notes: null,
     stream_name: "ICAI",
     billable_total: 6550,
     expense_count: 5,
-    bill_count: 1,
-    checklist_done: 5,
-    checklist_total: 5,
+    receipts_missing: 2,
+    checklist_done: 4,
+    checklist_total: 4,
   },
 ];
 
@@ -274,6 +290,7 @@ const rajkot = {
   title: "AICA session, Rajkot branch",
   start_date: "2026-09-03",
   end_date: "2026-09-04",
+  cities: ["Rajkot"],
 };
 
 const tripSteps: TripStep[] = [
@@ -281,7 +298,6 @@ const tripSteps: TripStep[] = [
   { id: "c2", title: "Book return ticket", priority: "medium", due_ts: "2026-08-27T04:00:00Z", status: "done", trip: rajkot },
   { id: "c3", title: "Confirm hotel with the branch", priority: "medium", due_ts: "2026-08-29T04:00:00Z", status: "done", trip: rajkot },
   { id: "c4", title: "Collect and keep travel receipts", priority: "medium", due_ts: "2026-09-04T04:00:00Z", status: "todo", trip: rajkot },
-  { id: "c5", title: "Build the reimbursement bill", priority: "medium", due_ts: "2026-09-06T04:00:00Z", status: "todo", trip: rajkot },
 ];
 
 const tripChecklist: ChecklistRow[] = [
@@ -289,7 +305,6 @@ const tripChecklist: ChecklistRow[] = [
   { id: "c2", title: "Book return ticket", notes: null, status: "done", due_ts: "2026-05-10T04:00:00Z" },
   { id: "c3", title: "Confirm hotel with the branch", notes: null, status: "done", due_ts: "2026-05-12T04:00:00Z" },
   { id: "c4", title: "Collect and keep travel receipts", notes: null, status: "todo", due_ts: "2026-05-19T04:00:00Z" },
-  { id: "c5", title: "Build the reimbursement bill", notes: null, status: "todo", due_ts: "2026-05-21T04:00:00Z" },
 ];
 
 const tripExpenses: ExpenseRow[] = [
@@ -300,16 +315,36 @@ const tripExpenses: ExpenseRow[] = [
   { id: "x5", category: "other", amount: 450, date: "2026-05-18", billable: false, receipt_ref: null },
 ];
 
-const tripBills: BillSummary[] = [
+// Month pack fixtures: one claimed trip, one overseas chapter trip that must
+// be excluded, and a receipt gap.
+const monthTrips: MonthTrip[] = [
   {
-    id: "b1",
-    number: "AICA/2026-27/001",
-    date: "2026-05-20",
-    bill_to: "institute",
-    amount: 6550,
-    status: "draft",
+    id: "t4",
+    title: "AICA session, Bhavnagar branch",
+    start_date: "2026-05-17",
+    end_date: "2026-05-19",
+    cities: ["Bhavnagar"],
+    bills_to: "icai_monthly",
+    legs: [
+      { from: "Ahmedabad", to: "Bhavnagar", date: "2026-05-17", mode: "vande_bharat", cost: 1240 },
+      { from: "Bhavnagar", to: "Ahmedabad", date: "2026-05-19", mode: "tejas", cost: 1310 },
+    ],
+  },
+  {
+    id: "t5",
+    title: "AICA session, Dubai chapter",
+    start_date: "2026-05-24",
+    end_date: "2026-05-25",
+    cities: ["Dubai"],
+    bills_to: "chapter_aed",
+    legs: [],
   },
 ];
+
+const monthExpenses: MonthExpense[] = tripExpenses.map((e) => ({
+  ...e,
+  trip_id: "t4",
+}));
 
 const tripLegs = parseLegs([
   { from: "Ahmedabad", to: "Bhavnagar", date: "2026-05-17", mode: "vande_bharat", cost: 1240 },
@@ -428,7 +463,13 @@ export default async function DevPreviewPage() {
       />
       <hr className="my-8" />
       <p className="mb-4 rounded bg-amber-100 p-1 text-center text-xs">dev preview: trips overview</p>
-      <TripsView trips={trips} workStreams={workStreams} todayKey="2026-08-25" />
+      <TripsView
+        trips={trips}
+        workStreams={workStreams}
+        todayKey="2026-08-25"
+        receiptGapCount={2}
+        receiptGapMonths={["2026-08", "2026-07"]}
+      />
 
       <hr className="my-8" />
       <p className="mb-4 rounded bg-amber-100 p-1 text-center text-xs">dev preview: trip detail</p>
@@ -442,40 +483,24 @@ export default async function DevPreviewPage() {
           end_date: "2026-05-19",
           cities: ["Bhavnagar"],
           status: "done",
-          billable_to: "ICAI Bhavnagar Branch",
+          bills_to: "icai_monthly",
           notes: null,
         }}
         streamName="ICAI"
         legs={tripLegs}
         checklist={tripChecklist}
         expenses={tripExpenses}
-        bills={tripBills}
         workStreams={workStreams}
-        suggestedNumber="AICA/2026-27/002"
         todayKey="2026-08-25"
       />
 
       <hr className="my-8" />
-      <p className="mb-4 rounded bg-amber-100 p-1 text-center text-xs">dev preview: bill print view</p>
-      <BillSheet
-        bill={{
-          number: "AICA/2026-27/001",
-          date: "2026-05-20",
-          bill_to: "institute",
-          bill_to_address: "The Chairman\nICAI Bhavnagar Branch\nBhavnagar",
-          amount: 6550,
-          line_items: deriveLineItems(tripExpenses),
-          trip_title: "AICA session, Bhavnagar branch",
-          trip_start: "2026-05-17",
-          trip_end: "2026-05-19",
-        }}
-        letterhead={{
-          name: "Letterhead name",
-          address: "Office address line one\nAhmedabad 380015",
-          email: "name@example.com",
-          phone: "+91 00000 00000",
-          footer: "Bank details go here.",
-        }}
+      <p className="mb-4 rounded bg-amber-100 p-1 text-center text-xs">dev preview: month pack</p>
+      <MonthPack
+        trips={monthTrips}
+        expenses={monthExpenses}
+        defaultMonth="2026-05"
+        maxMonth="2026-08"
       />
 
       </div>

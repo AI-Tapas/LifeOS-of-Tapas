@@ -1,4 +1,4 @@
-// The standard travel checklist: the five steps Tapas runs for every
+// The standard travel checklist: the four steps Tapas runs for every
 // outstation trip, derived from the trip's own dates. Pure and
 // dependency-free (only the shared date helpers), so scripts/m6b.test.ts can
 // prove the dates offline and so ONE implementation serves the add-trip
@@ -18,7 +18,9 @@ export interface ChecklistTrip {
   purpose: string; // trip_purpose: aica | conference | leisure | other
   start_date: string | null;
   end_date: string | null;
-  billable_to: string | null;
+  // trip_bills_to: icai_monthly | chapter_aed | none
+  bills_to: string;
+  cities: string[];
 }
 
 export interface ChecklistStep {
@@ -53,9 +55,6 @@ export function buildChecklist(
   const start = trip.start_date;
   const end = trip.end_date ?? start;
   const isAica = trip.purpose === "aica";
-  // Only a trip somebody reimburses ends in a bill. For AICA that is always
-  // the institute; otherwise it takes an explicit payer.
-  const billable = isAica || !!trip.billable_to;
   const context = `Trip: ${trip.title}.`;
 
   const steps: ChecklistStep[] = [
@@ -87,14 +86,20 @@ export function buildChecklist(
     },
   ];
 
-  if (billable) {
+  // A monthly ICAI trip ends in no step of its own: it feeds the one
+  // recurring "Raise the AICA invoice for last month" task, seeded by
+  // migration 20260901000100. Only an overseas chapter needs a reminder here,
+  // because that invoice is raised separately, in AED, once or twice a year,
+  // and the stated risk is forgetting it altogether.
+  if (trip.bills_to === "chapter_aed") {
+    const city = trip.cities[0] ?? "";
     steps.push({
-      key: "bill",
-      title: "Build the reimbursement bill",
-      note: `${context} Built from the trip's billable expenses${
-        trip.billable_to ? `, addressed to ${trip.billable_to}` : ""
-      }.`,
-      due_date: shift(end, 2, todayKey),
+      key: "aed",
+      title: `Raise the AED invoice to the ${city || "overseas"} chapter`,
+      note:
+        `${context} This trip is NOT on the monthly ICAI claim. ` +
+        "It is invoiced separately to the chapter, in AED.",
+      due_date: shift(end, 3, todayKey),
     });
   }
 
