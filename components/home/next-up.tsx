@@ -14,6 +14,7 @@ import {
   updateTaskAction,
 } from "@/app/(app)/tasks/actions";
 import { addDays, civilToday, civilWeekday, istInstant } from "@/lib/datetime";
+import type { PrioritySource } from "@/lib/tasks/priority";
 
 export interface NextUpRow {
   id: string;
@@ -24,7 +25,7 @@ export interface NextUpRow {
   // Why this task ranks where it ranks, when the assistant is the one who
   // decided. Shown as a quiet footnote under the row: this list is an
   // assertion about his work, so it says what it is asserting and why.
-  priority_source?: "manual" | "assistant";
+  priority_source?: PrioritySource;
   priority_reason?: string | null;
   // Set when the row stands for a whole trip's checklist rather than one
   // task. It ranks by its most urgent open step, and opens the trip: there

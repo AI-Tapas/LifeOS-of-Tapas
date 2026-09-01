@@ -20,6 +20,7 @@ import {
   type TripRollup,
   type TripStep,
 } from "@/lib/tasks/trip-rollup";
+import type { PrioritySource } from "@/lib/tasks/priority";
 
 export const dynamic = "force-dynamic";
 
@@ -115,7 +116,7 @@ export default async function DashboardPage() {
   const streamName = new Map((streams ?? []).map((s) => [s.id, s.name]));
 
   type Ranked = Pick<Row, "id" | "title" | "priority" | "due_ts"> & {
-    priority_source?: "manual" | "assistant";
+    priority_source?: PrioritySource;
     priority_reason?: string | null;
     status: string;
     work_stream_id: string;

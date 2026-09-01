@@ -116,16 +116,26 @@ test("every other arrangement keeps the night-before line", () => {
 
 // --- 3. the default ---------------------------------------------------------
 
-test("a new trip defaults to branch whatever its purpose", () => {
-  // The branch arranges his hotel on almost every trip. Industry batches at
-  // company sites are the exception he sets by hand; they have no purpose of
-  // their own, so no purpose may be used to guess one.
+test("every work trip defaults to branch, whatever its purpose", () => {
+  // The branch arranges his hotel on almost every work trip. Industry batches
+  // at company sites are the exception he sets by hand, and they have no
+  // purpose of their own, so purpose may never be used to guess "industry".
+  for (const p of ["aica", "conference", "other"] as const) {
+    assert.equal(defaultHotelArrangement("2026-09-03", "2026-09-04", p), "branch", p);
+  }
   assert.equal(defaultHotelArrangement("2026-09-03", "2026-09-04"), "branch");
   assert.equal(defaultHotelArrangement(null, "2026-09-04"), "branch");
   assert.equal(defaultHotelArrangement("2026-09-03", null), "branch");
   assert.equal(defaultHotelArrangement(null, null), "branch");
-  // The signature takes no purpose at all, which is the guarantee.
-  assert.equal(defaultHotelArrangement.length, 2);
+});
+
+test("leisure is the one purpose that defaults to booking it himself", () => {
+  // Nobody arranges a hotel for his holiday. This is the single exception to
+  // the branch default, added 1 September 2026 after it read as nonsense on a
+  // leisure trip; it must not spread to any other purpose.
+  assert.equal(defaultHotelArrangement("2026-12-20", "2026-12-27", "leisure"), "self");
+  // A leisure day trip is still a day return: the dates win over the purpose.
+  assert.equal(defaultHotelArrangement("2026-12-20", "2026-12-20", "leisure"), "same_day");
 });
 
 test("a trip that starts and ends on one date defaults to same_day", () => {

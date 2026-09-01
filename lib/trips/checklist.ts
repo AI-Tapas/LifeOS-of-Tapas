@@ -16,6 +16,9 @@ import { TRANSPORT_HELP } from "./bill.ts";
 
 // Mirrors the hotel_arrangement enum (migration 20260901000100).
 export type HotelArrangement = "branch" | "self" | "relative" | "same_day";
+// Mirrors the trip_purpose enum. Declared here rather than imported so this
+// module stays free of generated types and node --test can load it.
+export type TripPurpose = "aica" | "conference" | "leisure" | "other";
 
 export const HOTEL_ARRANGEMENTS: HotelArrangement[] = [
   "branch",
@@ -78,9 +81,14 @@ export interface ChecklistStep {
 // ends on the same date is a day return, so there is nothing to arrange.
 export function defaultHotelArrangement(
   startDate: string | null,
-  endDate: string | null
+  endDate: string | null,
+  purpose?: TripPurpose | null
 ): HotelArrangement {
   if (startDate && endDate && startDate === endDate) return "same_day";
+  // Nobody arranges a hotel for his holiday. Branch-arranged is the norm for
+  // every kind of WORK trip, which is the rule he gave; leisure was the one
+  // case where following it literally read as nonsense on the screen.
+  if (purpose === "leisure") return "self";
   return "branch";
 }
 

@@ -83,10 +83,10 @@ export default function TripForm({
   const [hotelPick, setHotelPick] = useState<HotelArrangement | null>(
     trip?.hotel_arrangement ??
       (isEdit
-        ? defaultHotelArrangement(trip!.start_date, trip!.end_date)
+        ? defaultHotelArrangement(trip!.start_date, trip!.end_date, trip!.purpose)
         : null)
   );
-  const hotel = hotelPick ?? defaultHotelArrangement(start || null, end || null);
+  const hotel = hotelPick ?? defaultHotelArrangement(start || null, end || null, purpose);
   // Checked by default on a new trip: the five steps are what he runs every
   // time, and each one carries its own reminder. Never offered on an edit,
   // where the trip screen's Checklist section adds them instead.

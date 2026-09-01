@@ -1128,7 +1128,7 @@ export type Database = {
         | "quarterly"
         | "half_yearly"
         | "yearly"
-      priority_source: "manual" | "assistant"
+      priority_source: "unset" | "manual" | "assistant"
       project_status: "active" | "on_hold" | "done" | "dropped"
       reminder_channel: "gcal" | "in_app"
       task_priority: "low" | "medium" | "high"
@@ -1326,7 +1326,7 @@ export const Constants = {
         "half_yearly",
         "yearly",
       ],
-      priority_source: ["manual", "assistant"],
+      priority_source: ["unset", "manual", "assistant"],
       project_status: ["active", "on_hold", "done", "dropped"],
       reminder_channel: ["gcal", "in_app"],
       task_priority: ["low", "medium", "high"],

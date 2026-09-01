@@ -21,13 +21,29 @@
 -- No tool schema exposes priority_source. Only the app's own forms set
 -- 'manual' (scripts/b3.test.ts proves both).
 
-create type priority_source as enum ('manual', 'assistant');
+-- Three values, not two. 'unset' is the honest state of a task nobody has
+-- judged yet, and it is what every existing row backfills to below.
+--
+-- Two values would have deadlocked this feature on day one: defaulting the
+-- existing fifty rows to 'manual' counts them as Tapas's own judgment, and
+-- the never-overwrite rule then refuses every one of them, so the "review my
+-- priorities" pass this milestone exists for would have been rejected fifty
+-- times over. Only 'manual' is protected. 'unset' and 'assistant' are both
+-- writable by an assistant path.
+create type priority_source as enum ('unset', 'manual', 'assistant');
 
 alter table tasks
-  add column if not exists priority_source priority_source not null default 'manual',
+  add column if not exists priority_source priority_source not null default 'unset',
   add column if not exists priority_reason text;
 
+-- Backfill: a row still on the default 'medium' has never been rated by
+-- anyone, so it stays 'unset' and the assistant may propose for it. A row he
+-- had already moved to high or low IS his judgment, and is locked as such.
+update tasks
+set priority_source = 'manual'
+where priority <> 'medium';
+
 comment on column tasks.priority_source is
-  'Whose judgment the current priority is. Assistant paths may never overwrite manual.';
+  'Whose judgment the current priority is: unset (nobody yet), manual (Tapas, never overwritten by any assistant path), assistant.';
 comment on column tasks.priority_reason is
   'One short sentence of why the priority is what it is. Plain text, rendered as text, never markup.';

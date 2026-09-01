@@ -19,7 +19,7 @@ import {
 } from "@/components/ui";
 import { formatDateIST, formatTimeIST, istInstant, istDayKey } from "@/lib/datetime";
 import { triage, needsDeadline } from "@/lib/tasks/triage";
-import { unratedPrompt } from "@/lib/tasks/priority";
+import { unratedPrompt, type PrioritySource } from "@/lib/tasks/priority";
 import { rollUpTrips, type TripRollup, type TripStep } from "@/lib/tasks/trip-rollup";
 import {
   createTaskAction,
@@ -42,7 +42,7 @@ export interface TaskRow {
   // Whose judgment the priority is, and the one short sentence behind it.
   // Optional so the dev-preview fixtures stay small; a row without them
   // simply shows no attribution, which is what an unrated task should show.
-  priority_source?: "manual" | "assistant";
+  priority_source?: PrioritySource;
   priority_reason?: string | null;
   due_ts: string | null;
   work_stream_id: string;

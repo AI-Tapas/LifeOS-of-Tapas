@@ -408,3 +408,47 @@ test("the unrated line fires on his real board and goes quiet once rated", () =>
   // A near-empty board says nothing at all.
   assert.equal(unratedPrompt([{ priority: "medium", priority_reason: null }]), null);
 });
+
+// --- the deadlock this nearly shipped with, 1 September 2026 ----------------
+// The first cut of the migration defaulted every existing row to 'manual'.
+// Combined with the never-overwrite rule that locks his whole board against
+// the assistant, so the "review my priorities" pass this milestone exists for
+// would have been refused on all fifty tasks. 'unset' is the honest third
+// state: nobody has judged this yet.
+
+test("an unrated task is open to the assistant; his own rating is not", () => {
+  const unset = { priority: "medium" as const, priority_source: "unset" as const };
+  const d = decidePriorityWrite("assistant", { priority: "high", priority_reason: "statutory deadline" }, unset);
+  assert.equal(d.kind, "write", "an unset task must accept an assistant priority");
+  if (d.kind === "write") {
+    assert.equal(d.fields.priority, "high");
+    assert.equal(d.fields.priority_source, "assistant");
+  }
+
+  const mine = { priority: "high" as const, priority_source: "manual" as const };
+  assert.equal(
+    decidePriorityWrite("assistant", { priority: "low", priority_reason: "looks minor" }, mine).kind,
+    "keep",
+    "his own rating is never overwritten"
+  );
+});
+
+test("a task the assistant already rated can be re-rated by the assistant", () => {
+  const theirs = { priority: "medium" as const, priority_source: "assistant" as const };
+  assert.equal(
+    decidePriorityWrite("assistant", { priority: "high", priority_reason: "the deadline moved" }, theirs).kind,
+    "write"
+  );
+});
+
+test("only manual is protected: unset and assistant are both writable", () => {
+  const sources = ["unset", "assistant"] as const;
+  for (const s of sources) {
+    const d = decidePriorityWrite(
+      "assistant",
+      { priority: "high", priority_reason: "a reason" },
+      { priority: "medium", priority_source: s }
+    );
+    assert.equal(d.kind, "write", `source ${s} should be writable`);
+  }
+});

@@ -14,7 +14,11 @@
 // the module, same as triage.ts and core.ts do.
 
 export type TaskPriority = "low" | "medium" | "high";
-export type PrioritySource = "manual" | "assistant";
+// 'unset' means nobody has judged this task yet: it is the state every task
+// starts in and the state his existing board backfilled to. Only 'manual' is
+// protected from assistant writes. Two values would have locked the whole
+// board against the very review pass this exists for.
+export type PrioritySource = "unset" | "manual" | "assistant";
 
 // Who is asking for the write.
 //   app       the app's own forms. The ONLY origin that may write 'manual'.
@@ -111,13 +115,14 @@ export function decidePriorityWrite(
   }
 
   if (req.priority === undefined) {
-    // A create with no priority at all. The row takes the database default,
-    // 'medium', and stays unrated by anyone: see isUnrated below.
+    // A create with no priority at all. The row takes 'medium' and stays
+    // unjudged: 'unset', not 'assistant', because nothing was decided. That
+    // keeps it open to a later review pass. See isUnrated below.
     return current
       ? { kind: "none" }
       : {
           kind: "write",
-          fields: { priority: "medium", priority_source: "assistant", priority_reason: null },
+          fields: { priority: "medium", priority_source: "unset", priority_reason: null },
         };
   }
 

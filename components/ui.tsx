@@ -8,6 +8,7 @@
 import { useEffect, useState } from "react";
 
 import { formatDateShortIST, istDayKey } from "@/lib/datetime";
+import type { PrioritySource } from "@/lib/tasks/priority";
 
 export const inputCls =
   "w-full rounded-lg border border-border-strong bg-surface px-3 py-2.5 text-base";
@@ -218,7 +219,7 @@ export function PriorityReason({
   className = "",
 }: {
   reason?: string | null;
-  source?: "manual" | "assistant";
+  source?: PrioritySource;
   className?: string;
 }) {
   if (!reason || source === "manual") return null;
