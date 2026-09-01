@@ -20,6 +20,9 @@ import MotionDemo from "./motion-demo";
 import TripsView, { type TripRow } from "@/components/trips/trips-view";
 import TripDetail, { type ExpenseRow } from "@/components/trips/trip-detail";
 import MonthPack from "@/components/trips/month-pack";
+import InvestmentsPanel, { type HoldingRow } from "@/components/money/investments-panel";
+import ObligationsPanel, { type ObligationRow } from "@/components/money/obligations-panel";
+import WorkStreamsPanel, { type WorkStreamView } from "@/components/settings/work-streams-panel";
 import { parseLegs } from "@/lib/trips/bill";
 import type { MonthExpense, MonthTrip } from "@/lib/trips/month";
 import type { TripStep } from "@/lib/tasks/trip-rollup";
@@ -415,6 +418,137 @@ const tripLegs = parseLegs([
   { from: "Bhavnagar", to: "Ahmedabad", date: "2026-05-19", mode: "tejas", cost: 1310 },
 ]);
 
+// Money fixtures: a crore-scale fund so the Indian grouping is visible, an
+// FD maturing (calendar), a stock under review (in-app), and one holding
+// with no date at all.
+const holdings: HoldingRow[] = [
+  {
+    id: "h1",
+    kind: "fd",
+    name: "HDFC FD, 3 years",
+    institution: "HDFC, Navrangpura",
+    value: 1500000,
+    key_date: "2026-09-12",
+    key_date_type: "maturity",
+    remind: true,
+    notes: null,
+  },
+  {
+    id: "h2",
+    kind: "mf",
+    name: "Parag Parikh Flexi Cap",
+    institution: "PPFAS",
+    value: 12000000,
+    key_date: "2026-09-20",
+    key_date_type: "review",
+    remind: true,
+    notes: null,
+  },
+  {
+    id: "h3",
+    kind: "stock",
+    name: "Direct equity",
+    institution: "Zerodha",
+    value: 750000,
+    key_date: "2026-11-02",
+    key_date_type: "review",
+    remind: true,
+    notes: null,
+  },
+  {
+    id: "h4",
+    kind: "ncd",
+    name: "Muthoot NCD",
+    institution: null,
+    value: null,
+    key_date: null,
+    key_date_type: null,
+    remind: false,
+    notes: "Value not updated since 2024",
+  },
+];
+
+const obligations: ObligationRow[] = [
+  {
+    id: "o1",
+    name: "Electricity, Torrent",
+    category: "electricity",
+    amount: null,
+    variable_amount: true,
+    frequency: "monthly",
+    due_day: 12,
+    due_month: null,
+    interval_rule: null,
+    anchor_date: null,
+    autopay: true,
+    account_ref: "Torrent, Bodakdev",
+    active: true,
+    notes: null,
+    remind_offsets: [7, 3, 1, 0],
+  },
+  {
+    id: "o2",
+    name: "Water tanker",
+    category: "other",
+    amount: 1800,
+    variable_amount: false,
+    frequency: "custom",
+    due_day: null,
+    due_month: null,
+    interval_rule: "weekly:2",
+    anchor_date: "2026-08-28",
+    autopay: false,
+    account_ref: null,
+    active: true,
+    notes: null,
+    remind_offsets: [1, 0],
+  },
+  {
+    id: "o3",
+    name: "Term insurance premium",
+    category: "insurance",
+    amount: 48000,
+    variable_amount: false,
+    frequency: "yearly",
+    due_day: 15,
+    due_month: 4,
+    interval_rule: null,
+    anchor_date: null,
+    autopay: false,
+    account_ref: null,
+    active: true,
+    notes: null,
+    remind_offsets: [28, 7, 1, 0],
+  },
+];
+
+const rateStreams: WorkStreamView[] = [
+  {
+    id: "w1",
+    name: "ICAI",
+    kind: "training",
+    billing_entity: "Tapas N Ruparelia",
+    feeds_billing: true,
+    hourly_rate: 3500,
+  },
+  {
+    id: "w2",
+    name: "Tax Strategia",
+    kind: "tax_advisory",
+    billing_entity: "Tax Strategia",
+    feeds_billing: true,
+    hourly_rate: 12000,
+  },
+  {
+    id: "w3",
+    name: "Personal",
+    kind: "personal",
+    billing_entity: null,
+    feeds_billing: false,
+    hourly_rate: null,
+  },
+];
+
 export default async function DevPreviewPage() {
   // Hidden in production unless the local-only harness flag is set (the
   // sandbox's dev server cannot compile CSS reliably, so visual checks run
@@ -570,6 +704,19 @@ export default async function DevPreviewPage() {
         defaultMonth="2026-05"
         maxMonth="2026-08"
       />
+
+      <hr className="my-8" />
+      <p className="mb-4 rounded bg-amber-100 p-1 text-center text-xs">dev preview: money, investments (M7b)</p>
+      <InvestmentsPanel holdings={holdings} todayKey="2026-09-01" />
+
+      <div className="mt-8">
+        <p className="mb-4 rounded bg-amber-100 p-1 text-center text-xs">dev preview: money, obligations with a sub-monthly series (B2)</p>
+        <ObligationsPanel obligations={obligations} todayKey="2026-09-01" />
+      </div>
+
+      <hr className="my-8" />
+      <p className="mb-4 rounded bg-amber-100 p-1 text-center text-xs">dev preview: settings, rate per work stream (B4)</p>
+      <WorkStreamsPanel streams={rateStreams} />
 
       </div>
       <Nav queueCount={2} />

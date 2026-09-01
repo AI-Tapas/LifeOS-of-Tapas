@@ -616,3 +616,56 @@ no migration: B12 reuses the meta jsonb audit_log has always had.
   did before.
 - Both fields are on create_trip and update_trip, so a schedule import fills
   them. prompts/RECIPE-aica-schedule-intake.md carries the mapping.
+
+## Money completed (M7b: investments, B2, B4)
+
+Migration `20260901000600_m7b_money.sql`. Additive, nothing dropped.
+
+- `finance_items` shipped in M1 and gets NO new column here. Which reminder a
+  holding writes is DERIVED from `key_date_type`, not stored a second time:
+  `financeReminderMode` in lib/reminders/core.ts. A maturity is 'calendar'
+  because money is genuinely at stake on the day (an FD that matures
+  unnoticed rolls over at a worse rate, which is exactly what M7a reserved
+  the calendar for). A review date is 'in_app'.
+- `lib/reminders/writer.ts` gained `syncFinanceReminder` and
+  `removeFinanceReminder`, on the same `writeReminder` path as tasks and
+  obligations, through the `finance_item_id` column M3 carried unused "so M7
+  reuses this exact path". There is no second reminder mechanism, and the
+  retry sweep picks up finance rows too.
+- A review date writes no calendar event, so it needs somewhere to land or it
+  quietly passes. Two surfaces carry it, both from `reviewsDue` /
+  `reviewLine` in lib/money/investments.ts: one line on Home linking to
+  /money, and one block in the 7 am brief. Fourteen-day window, overdue
+  reviews included and leading. Do not remove either without replacing the
+  reach.
+- The Money screen leads with Investments (next maturing, next due for
+  review, totals by kind, then the holdings) and Obligations below.
+- CONFIDENTIAL BOUNDARY, and money invites the breach hardest: `institution`
+  is a short human label ("HDFC, Navrangpura"). No account number, no folio
+  number, no customer id, no login, no statement, no upload, and no column or
+  tool parameter that could hold one. The rule is in the migration's column
+  comments, in the `add_finance_item` / `update_finance_item` schemas the
+  model reads, and under the form field. `scripts/m7b.test.ts` fails on any
+  parameter or finance_items column matching the account/folio/file patterns.
+- B2, sub-monthly obligations: `recurring_obligations.interval_rule` and
+  `anchor_date`, plus the enum value 'custom'. interval_rule is the SAME
+  "<freq>:<interval>" rule tasks have used since M1: the port is an import of
+  `parseRecurringRule`, not a copy, which is why lib/tasks/recurring.ts moved
+  to a relative .ts import. There is deliberately no DB check constraint
+  tying the pair together, because a constraint mentioning 'custom' would use
+  an enum value added in the same transaction and Postgres refuses that; the
+  rule is enforced in the money server action and in `customStepDays`.
+- The series is SHOWN, not just ruled: every obligation card carries its next
+  three dates, and the drawer previews them while he types the rule.
+  `nextObligationDates` produces both those dates and the anchor the calendar
+  event is written on, so what he reads and what Google expands cannot drift.
+- B4, rate per stream: `work_streams.hourly_rate`, nullable, edited in
+  Settings > Work streams. `streamRateLine` (lib/money/rates.ts) puts each
+  stream and its rate into the assistant's app context, and the hard rule now
+  points at the stream's own rate instead of carrying one remembered number.
+  A stream with no rate says "no rate recorded" rather than being given the
+  floor silently. This stores one number and tells the assistant. There is no
+  quoting, no invoicing and no time tracking, and m7b.test.ts fails if a tool
+  grows one.
+- Tests: `npm run test:m7b` (32 offline). app/dev-preview renders both money
+  panels and the rate panel with mock data.
