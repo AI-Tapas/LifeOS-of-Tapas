@@ -35,7 +35,7 @@ import {
 } from "@/lib/trips/write";
 import { TRANSPORT_MODES, type TransportMode, type TripLeg } from "@/lib/trips/bill";
 import { HOTEL_ARRANGEMENTS, type HotelArrangement } from "@/lib/trips/checklist";
-import { isReminderMode } from "@/lib/reminders/core";
+import { isFinanceKeyDateType, isReminderMode } from "@/lib/reminders/core";
 import {
   AUTONOMOUS_KINDS,
   STUB_REPLIES,
@@ -55,7 +55,9 @@ import {
   type Provenance,
 } from "./core";
 import {
+  removeFinanceReminder,
   removeObligationReminder,
+  syncFinanceReminder,
   syncObligationReminder,
   syncTaskReminder,
 } from "@/lib/reminders/writer";
@@ -870,35 +872,54 @@ const performers: Record<string, Performer> = {
       .select("id")
       .single();
     if (error || !data) throw new Error(error?.message ?? "Could not save it.");
+    // A maturity writes the calendar reminder, a review date writes none.
+    // The assistant path goes through the same writer his own form uses.
+    await syncFinanceReminder(userId, data.id);
     return { summary: `Holding recorded: ${name}.`, undo: { finance_item_id: data.id } };
   },
 
-  async update_finance_item(supabase, _userId, input) {
+  async update_finance_item(supabase, userId, input) {
     const itemId = s(input.finance_item_id);
     if (!itemId) throw new Error("finance_item_id is required.");
     const { data: prev } = await supabase
       .from("finance_items")
-      .select("name, value, key_date, notes")
+      .select("name, institution, value, key_date, key_date_type, notes")
       .eq("id", itemId)
       .single();
     if (!prev) throw new Error("Holding not found.");
+    // The wire is not trusted: an unknown key-date type is refused rather
+    // than written, since it decides whether this interrupts him.
+    const keyDateType = s(input.key_date_type);
+    if (keyDateType && !isFinanceKeyDateType(keyDateType)) {
+      throw new Error("key_date_type must be 'maturity' or 'review'.");
+    }
     const { error } = await supabase
       .from("finance_items")
       .update({
         ...(s(input.name) ? { name: s(input.name)! } : {}),
+        ...(input.institution !== undefined ? { institution: s(input.institution) } : {}),
         ...(typeof input.value === "number" ? { value: input.value } : {}),
         ...(s(input.key_date) ? { key_date: s(input.key_date) } : {}),
+        ...(keyDateType
+          ? {
+              key_date_type:
+                keyDateType as Database["public"]["Enums"]["finance_key_date_type"],
+            }
+          : {}),
         ...(input.notes !== undefined ? { notes: s(input.notes) } : {}),
       })
       .eq("id", itemId);
     if (error) throw new Error(error.message);
+    // Turning a maturity into a review date removes the event it had, by the
+    // same path that wrote it, so no orphan is left on the calendar.
+    await syncFinanceReminder(userId, itemId);
     return {
       summary: `Holding updated: ${s(input.name) ?? prev.name}.`,
       undo: { finance_item_id: itemId, prev },
     };
   },
 
-  async delete_finance_item(supabase, _userId, input) {
+  async delete_finance_item(supabase, userId, input) {
     const itemId = s(input.finance_item_id);
     if (!itemId) throw new Error("finance_item_id is required.");
     const { data: row } = await supabase
@@ -907,6 +928,7 @@ const performers: Record<string, Performer> = {
       .eq("id", itemId)
       .single();
     if (!row) throw new Error("Holding not found.");
+    await removeFinanceReminder(userId, itemId);
     const { error } = await supabase.from("finance_items").delete().eq("id", itemId);
     if (error) throw new Error(error.message);
     return { summary: `Holding deleted: ${row.name}.`, undo: { row } };
@@ -1630,10 +1652,12 @@ async function performUndo(
       return;
     }
     case "delete_finance_item": {
-      const { error } = await supabase
-        .from("finance_items")
-        .insert(undo.row as never);
+      const row = undo.row as Record<string, unknown>;
+      const { error } = await supabase.from("finance_items").insert(row as never);
       if (error) throw new Error(`Could not restore the holding: ${error.message}`);
+      // Restoring the row restores its reminder too, the same way a restored
+      // obligation gets its own back.
+      await syncFinanceReminder(userId, String(row.id));
       return;
     }
     case "add_project": {
@@ -1641,6 +1665,7 @@ async function performUndo(
       return;
     }
     case "add_finance_item": {
+      await removeFinanceReminder(userId, String(undo.finance_item_id));
       await supabase
         .from("finance_items")
         .delete()
@@ -1649,15 +1674,22 @@ async function performUndo(
     }
     case "update_finance_item": {
       const prev = (undo.prev ?? {}) as Record<string, unknown>;
+      const itemId = String(undo.finance_item_id);
       await supabase
         .from("finance_items")
         .update({
           name: prev.name as string,
+          institution: (prev.institution ?? null) as string | null,
           value: prev.value as number | null,
           key_date: prev.key_date as string | null,
+          key_date_type: (prev.key_date_type ??
+            null) as Database["public"]["Enums"]["finance_key_date_type"] | null,
           notes: prev.notes as string | null,
         })
-        .eq("id", String(undo.finance_item_id));
+        .eq("id", itemId);
+      // The reminder follows the restored row, so undoing a maturity that was
+      // turned into a review date puts the calendar entry back.
+      await syncFinanceReminder(userId, itemId);
       return;
     }
     case "add_person": {

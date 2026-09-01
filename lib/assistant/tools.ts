@@ -113,6 +113,13 @@ const TIME_DESC = "Time of day as HH:MM in 24 hour IST. Omit if not applicable."
 // The four connected account slots the assistant may act through.
 const SLOT_KEYS = ["taxstrategia", "ca_tapasnr", "altechon", "icai"];
 
+// Where a holding is held. Money invites exactly the fields this app must
+// never hold, so the tool that records one says the rule in the schema the
+// model reads, not only in a comment. scripts/m7b.test.ts pins this wording
+// and fails on any parameter that looks like an account or folio number.
+const HOLDING_WHERE_DESC =
+  "Where it is held, as a short human label such as 'HDFC, Navrangpura'. Never an account number, a folio number, a customer id or a login: Life OS holds none of those.";
+
 export const TOOLS: ToolDef[] = [
   {
     name: "create_task",
@@ -449,14 +456,17 @@ export const TOOLS: ToolDef[] = [
     bucket: "autonomous",
     disclosure: "app_data",
     description:
-      "Record an investment or deposit: a fixed deposit, mutual fund, stock, NCD or other holding.",
+      "Record an investment or deposit: a fixed deposit, mutual fund, stock, NCD or other holding. A maturity date puts one reminder on his calendar; a review date does not interrupt him and shows on Home and in the morning brief instead.",
     input_schema: schema({
       kind: enumOf(["fd", "mf", "stock", "ncd", "other"], "What kind of holding."),
       name: str("What it is called."),
-      institution: strOrNull("Bank, fund house or broker."),
+      institution: strOrNull(HOLDING_WHERE_DESC),
       value: numOrNull("Current value in rupees."),
       key_date: { ...strOrNull("Maturity or review date as YYYY-MM-DD.") },
-      key_date_type: enumOrNull(["maturity", "review"], "What that date means."),
+      key_date_type: enumOrNull(
+        ["maturity", "review"],
+        "What that date means. 'maturity' where the holding ends on a date and the money has to be redirected, which is worth interrupting him for. 'review' for anything open-ended, such as a stock or an open-ended fund, which has no maturity and would otherwise drift for years."
+      ),
       notes: strOrNull("Anything worth remembering."),
     }),
   },
@@ -464,12 +474,18 @@ export const TOOLS: ToolDef[] = [
     name: "update_finance_item",
     bucket: "autonomous",
     disclosure: "app_data",
-    description: "Update a recorded holding: its value, key date or notes.",
+    description:
+      "Update a recorded holding: its value, where it is held, its key date or notes. Changing the key date type changes how it reminds him, so a maturity turned into a review date loses its calendar entry.",
     input_schema: schema({
       finance_item_id: str("The holding id."),
       name: strOrNull("New name. Omit to keep."),
+      institution: strOrNull(HOLDING_WHERE_DESC + " Omit to keep."),
       value: numOrNull("New value in rupees. Omit to keep."),
       key_date: { ...strOrNull("New maturity or review date as YYYY-MM-DD.") },
+      key_date_type: enumOrNull(
+        ["maturity", "review"],
+        "What that date means. Omit to keep."
+      ),
       notes: strOrNull("New notes. Omit to keep."),
     }),
   },

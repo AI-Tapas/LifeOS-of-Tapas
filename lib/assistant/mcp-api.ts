@@ -15,6 +15,11 @@ import { serviceActor } from "@/lib/assistant/actor";
 import { executeToolCall } from "@/lib/assistant/execute";
 import { MCP_READ_TOOLS, mcpWriteTools, type ToolDef } from "@/lib/assistant/tools";
 import { buildAppContext } from "@/lib/assistant/context";
+import {
+  remindsOnCalendar,
+  type FinanceKind,
+} from "@/lib/money/investments";
+import type { FinanceKeyDateType } from "@/lib/reminders/core";
 import { civilKey, civilToday, formatDateIST, formatDateTimeIST } from "@/lib/datetime";
 import { parseLegs } from "@/lib/trips/bill";
 import { fenceUntrusted } from "@/lib/assistant/prompt";
@@ -169,7 +174,7 @@ export const READ_TOOL_DESCRIPTIONS: Record<string, string> = {
   lifeos_list_obligations:
     "List recurring obligations such as bills, premiums and subscriptions, with amount, frequency and the day they fall due.",
   lifeos_list_finance_items:
-    "List recorded investments and deposits, with their value and any maturity or review date.",
+    "List recorded investments and deposits, with their value and any maturity or review date. key_date_type says which: a maturity carries a calendar reminder because the money has to be redirected on the day, a review date does not interrupt him and appears on Home and in the morning brief instead. Where a holding is held is a short human label, never an account or folio number.",
   lifeos_list_projects:
     "List projects and the work stream each belongs to, for filing tasks under one.",
   lifeos_list_trips:
@@ -372,9 +377,10 @@ export async function runReadTool(
   if (name === "lifeos_list_finance_items") {
     const { data, count, error } = await supabase
       .from("finance_items")
-      .select("id, kind, name, institution, value, key_date, key_date_type, notes", {
-        count: "exact",
-      })
+      .select(
+        "id, kind, name, institution, value, key_date, key_date_type, remind, notes",
+        { count: "exact" }
+      )
       .order("key_date", { ascending: true, nullsFirst: false })
       .range(offset, offset + limit - 1);
     if (error) throw new Error(error.message);
@@ -387,6 +393,13 @@ export async function runReadTool(
       key_date: f.key_date ? formatDateIST(`${f.key_date}T00:00:00+05:30`) : null,
       key_date_raw: f.key_date,
       key_date_type: f.key_date_type,
+      // Whether this one interrupts him, so a connected model reports the
+      // same thing the Money screen shows rather than guessing.
+      reminds_on_calendar: remindsOnCalendar({
+        ...f,
+        kind: f.kind as FinanceKind,
+        key_date_type: f.key_date_type as FinanceKeyDateType | null,
+      }),
       notes: f.notes,
     }));
     return paginate(items, count ?? items.length, limit, offset);
