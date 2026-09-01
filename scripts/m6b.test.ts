@@ -431,3 +431,62 @@ test("nothing can approve, and nothing bills at all", () => {
   );
   assert.equal(toolByName("create_trip")!.bucket, "autonomous");
 });
+
+// --- the rollup line leads with the session too (M7d follow-up) -------------
+// Fixed 1 September 2026 after Tapas saw it: the trips list had been changed
+// to lead with the session, but the ranked line on Home and in the brief was
+// still building its own label and still read
+// "AICA Level 1 batch 912, KPMG Bangalore, 3 to 5 September 2026".
+
+test("a trip's ranked line leads with the session, not the travel span", () => {
+  const trip = {
+    id: "t9",
+    title: "AICA Level 1 batch 912, KPMG Bangalore",
+    start_date: "2026-09-03",
+    end_date: "2026-09-05",
+    cities: ["Bangalore"],
+    session_label: "L1D2",
+    session_date: "2026-09-04",
+  };
+  const [row] = rollUpTrips(
+    [{ id: "s1", title: "Book onward ticket", status: "todo", priority: "medium", due_ts: null, trip }],
+    Date.parse("2026-08-25T06:00:00Z")
+  );
+  assert.ok(row.label.startsWith("L1D2 · 4 Sept"), `led with: ${row.label}`);
+  assert.ok(row.label.includes("Bangalore"), "the city still says where");
+  assert.ok(!row.label.startsWith("AICA Level 1 batch"), "the long title no longer leads");
+});
+
+test("a trip with no session recorded reads exactly as it did before", () => {
+  const trip = {
+    id: "t10",
+    title: "GST conclave, Mumbai",
+    start_date: "2026-10-15",
+    end_date: "2026-10-16",
+    cities: ["Mumbai"],
+    session_label: null,
+    session_date: null,
+  };
+  const [row] = rollUpTrips(
+    [{ id: "s2", title: "Book onward ticket", status: "todo", priority: "medium", due_ts: null, trip }],
+    Date.parse("2026-08-25T06:00:00Z")
+  );
+  assert.ok(row.label.startsWith("GST conclave, Mumbai"), `read: ${row.label}`);
+});
+
+test("a day return does not print the travel span twice", () => {
+  const trip = {
+    id: "t11",
+    title: "AICA Level 2 batch 88, Ahmedabad",
+    start_date: "2026-09-11",
+    end_date: "2026-09-11",
+    cities: ["Ahmedabad"],
+    session_label: "L2D5",
+    session_date: "2026-09-11",
+  };
+  const [row] = rollUpTrips(
+    [{ id: "s3", title: "Book onward ticket", status: "todo", priority: "medium", due_ts: null, trip }],
+    Date.parse("2026-08-25T06:00:00Z")
+  );
+  assert.equal(row.label, "L2D5 · 11 Sept, Ahmedabad");
+});

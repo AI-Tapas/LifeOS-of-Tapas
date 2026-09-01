@@ -22,7 +22,7 @@ export default async function TasksPage() {
       // ranked line per trip instead of five rows of travel admin.
       supabase
         .from("tasks")
-        .select("id, title, status, priority, due_ts, trip_id, trips(id, title, start_date, end_date, cities)")
+        .select("id, title, status, priority, due_ts, trip_id, trips(id, title, start_date, end_date, cities, session_label, session_date)")
         .not("trip_id", "is", null),
       supabase
         .from("projects")
@@ -47,6 +47,8 @@ export default async function TasksPage() {
         ...(t.trips as NonNullable<typeof t.trips>),
         // cities is jsonb, so it arrives as Json; the rollup wants strings.
         cities: Array.isArray(t.trips!.cities) ? (t.trips!.cities as string[]) : [],
+        session_label: t.trips!.session_label,
+        session_date: t.trips!.session_date,
       },
     }));
 
