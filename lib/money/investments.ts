@@ -80,17 +80,20 @@ export interface KindTotal {
 // Total by kind, in the order FINANCE_KINDS declares, skipping kinds he holds
 // nothing of. A holding with no value counts in the count and adds nothing to
 // the total: an honest "3 holdings, Rs 12,00,000 recorded" beats a total that
-// silently pretends the unpriced one is worth zero.
+// silently pretends the unpriced one is worth zero. Where NOTHING in a kind
+// carries a value the label says "not valued" rather than printing Rs 0,
+// which would be a figure he could believe.
 export function totalsByKind(items: Holding[]): KindTotal[] {
   return FINANCE_KINDS.map((kind) => {
     const of = items.filter((h) => h.kind === kind);
     const total = of.reduce((sum, h) => sum + (h.value ?? 0), 0);
+    const unpriced = of.every((h) => h.value == null);
     return {
       kind,
       label: KIND_LABELS[kind],
       count: of.length,
       total,
-      total_label: formatINR(total),
+      total_label: unpriced ? "not valued" : formatINR(total),
     };
   }).filter((t) => t.count > 0);
 }

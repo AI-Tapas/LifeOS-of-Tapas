@@ -46,6 +46,12 @@ import {
 import { RATE_FLOOR, streamRateLine } from "../lib/money/rates.ts";
 import { civilToday, formatINR } from "../lib/datetime.ts";
 import { TOOLS, toolByName } from "../lib/assistant/tools.ts";
+import {
+  dueLabel,
+  frequencyLabel,
+  seriesDates,
+  type ObligationSeriesFields,
+} from "../lib/money/obligations.ts";
 import { HARD_RULES } from "../lib/assistant/prompt.ts";
 
 const src = (rel: string): string =>
@@ -302,10 +308,12 @@ test("the totals by kind are grouped the same way, and stay honest", () => {
   assert.equal(fd.total_label, "₹ 20,00,000");
   assert.equal(totals.find((t) => t.kind === "mf")!.total_label, "₹ 1,20,00,000");
   // The NCD carries no value. It is counted, and it adds nothing: a total
-  // that silently priced it at zero would be a lie he could not see.
+  // that silently priced it at zero would be a lie he could not see, so the
+  // label says so rather than printing a figure he could believe.
   const ncd = totals.find((t) => t.kind === "ncd")!;
   assert.equal(ncd.count, 1);
   assert.equal(ncd.total, 0);
+  assert.equal(ncd.total_label, "not valued");
   assert.equal(totalValue(book), 14750000);
   assert.equal(formatINR(totalValue(book)), "₹ 1,47,50,000");
   // Every kind is named in plain words, never by its database value.
@@ -422,14 +430,83 @@ test("the rule Google expands is the rule he is shown", () => {
   );
 });
 
+test("a yearly series never reads as the same date three times", () => {
+  // "15 Apr, 15 Apr, 15 Apr" is a series a year apart, and without the year
+  // it reads as a bug. The year rides along only when it is not this one.
+  const yearly: ObligationSeriesFields = {
+    active: true,
+    frequency: "yearly",
+    due_day: 15,
+    due_month: 4,
+    interval_rule: null,
+    anchor_date: null,
+  };
+  assert.deepEqual(seriesDates(yearly, "2026-09-01"), [
+    "15 Apr 2027",
+    "15 Apr 2028",
+    "15 Apr 2029",
+  ]);
+  // This year's dates stay bare.
+  const monthly: ObligationSeriesFields = {
+    active: true,
+    frequency: "monthly",
+    due_day: 12,
+    due_month: null,
+    interval_rule: null,
+    anchor_date: null,
+  };
+  assert.deepEqual(seriesDates(monthly, "2026-09-01"), [
+    "12 Sept",
+    "12 Oct",
+    "12 Nov",
+  ]);
+  // A retired obligation shows no series at all: it is not going to happen.
+  assert.deepEqual(seriesDates({ ...monthly, active: false }, "2026-09-01"), []);
+});
+
+test("a custom series is described in words, not in database values", () => {
+  const fortnightly: ObligationSeriesFields = {
+    active: true,
+    frequency: "custom",
+    due_day: null,
+    due_month: null,
+    interval_rule: "weekly:2",
+    anchor_date: "2026-08-28",
+  };
+  assert.equal(frequencyLabel(fortnightly), "every 2 weeks");
+  assert.equal(frequencyLabel({ ...fortnightly, interval_rule: "weekly:1" }), "every week");
+  assert.equal(frequencyLabel({ ...fortnightly, interval_rule: "daily:10" }), "every 10 days");
+  // The word "custom" never reaches the screen.
+  for (const rule of ["weekly:2", "daily:10", "weekly:1"]) {
+    assert.ok(!frequencyLabel({ ...fortnightly, interval_rule: rule }).includes("custom"));
+  }
+  // A custom series says when it falls with its dates, not with a due day.
+  assert.equal(dueLabel(fortnightly), "");
+  assert.equal(dueLabel({ ...fortnightly, anchor_date: null }), "no start date");
+  assert.equal(
+    dueLabel({
+      active: true,
+      frequency: "yearly",
+      due_day: 15,
+      due_month: 4,
+      interval_rule: null,
+      anchor_date: null,
+    }),
+    "15 Apr"
+  );
+});
+
 test("the writer anchors the calendar event on the first date of that series", () => {
   // What he reads on the card and what Google expands come from one
   // function, so they cannot drift apart.
   const writer = src("lib/reminders/writer.ts");
   assert.match(writer, /obligationSeriesRRule\(series\)/);
   assert.match(writer, /nextObligationDates\(series, today, 1\)\[0\]/);
-  const panel = src("components/money/obligations-panel.tsx");
-  assert.match(panel, /nextObligationDates\(o, parseDateKey\(todayKey\), 3\)/);
+  assert.match(
+    src("lib/money/obligations.ts"),
+    /nextObligationDates\(o, parseDateKey\(todayKey\), count\)/
+  );
+  assert.match(src("components/money/obligations-panel.tsx"), /seriesDates\(o, todayKey\)/);
 });
 
 test("an unreadable series is refused, never quietly written", () => {

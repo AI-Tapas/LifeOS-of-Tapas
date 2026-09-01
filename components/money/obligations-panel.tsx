@@ -10,8 +10,14 @@ import {
   drawerFooterCls,
   inputCls,
 } from "@/components/ui";
-import { formatDateShortIST, formatINR } from "@/lib/datetime";
-import { nextObligationDates, parseDateKey } from "@/lib/reminders/core";
+import { formatINR } from "@/lib/datetime";
+import {
+  dueLabel,
+  frequencyLabel,
+  seriesDates,
+  underscoresToWords,
+} from "@/lib/money/obligations";
+import type { ObligationFrequency } from "@/lib/money/obligations";
 import {
   createObligationAction,
   updateObligationAction,
@@ -29,13 +35,7 @@ type Category =
   | "rent"
   | "subscription"
   | "other";
-type Frequency =
-  | "custom"
-  | "monthly"
-  | "bi_monthly"
-  | "quarterly"
-  | "half_yearly"
-  | "yearly";
+type Frequency = ObligationFrequency;
 
 export interface ObligationRow {
   id: string;
@@ -87,55 +87,6 @@ const MONTHS = [
   "Nov",
   "Dec",
 ];
-
-function label(s: string): string {
-  return s.replace(/_/g, " ");
-}
-
-// "custom" is a word for the database, not for him: the card says what the
-// series actually does.
-function frequencyLabel(o: ObligationRow): string {
-  if (o.frequency !== "custom") return label(o.frequency);
-  const [freq, every] = (o.interval_rule ?? "").split(":");
-  const n = Number(every || 1);
-  const unit = freq === "weekly" ? "week" : "day";
-  return n === 1 ? `every ${unit}` : `every ${n} ${unit}s`;
-}
-
-function dueLabel(o: ObligationRow): string {
-  if (o.frequency === "custom") return o.anchor_date ? "" : "no start date";
-  if (!o.due_day) return "no due day";
-  if (o.frequency === "yearly") {
-    return `${o.due_day} ${o.due_month ? MONTHS[o.due_month - 1] : ""}`.trim();
-  }
-  return `day ${o.due_day}`;
-}
-
-// B2: the series is shown, not just ruled. He can read the next three dates
-// on the obligation itself and catch a wrong one before it reminds him,
-// instead of trusting a rule he cannot see. The same function anchors the
-// calendar event, so the two cannot disagree.
-export interface ObligationSeriesFields {
-  active: boolean;
-  frequency: Frequency;
-  due_day: number | null;
-  due_month: number | null;
-  interval_rule: string | null;
-  anchor_date: string | null;
-}
-
-export function seriesDates(o: ObligationSeriesFields, todayKey: string): string[] {
-  if (!o.active) return [];
-  try {
-    return nextObligationDates(o, parseDateKey(todayKey), 3).map((k) =>
-      formatDateShortIST(`${k}T12:00:00+05:30`)
-    );
-  } catch {
-    // An incomplete row (no due day yet, no start date yet) simply shows no
-    // series. Saving it is what surfaces the error message.
-    return [];
-  }
-}
 
 export default function ObligationsPanel({
   obligations,
@@ -193,7 +144,7 @@ export default function ObligationsPanel({
                 <button onClick={() => setEditing(o)} className="min-w-0 text-left">
                   <p className="font-medium">{o.name}</p>
                   <p className="text-xs capitalize text-secondary">
-                    {[label(o.category), frequencyLabel(o), dueLabel(o)]
+                    {[underscoresToWords(o.category), frequencyLabel(o), dueLabel(o)]
                       .filter(Boolean)
                       .join(" · ")}
                   </p>
@@ -378,7 +329,7 @@ function ObligationForm({
             >
               {CATEGORIES.map((c) => (
                 <option key={c} value={c} className="capitalize">
-                  {label(c)}
+                  {underscoresToWords(c)}
                 </option>
               ))}
             </select>
@@ -391,7 +342,7 @@ function ObligationForm({
             >
               {FREQUENCIES.map((c) => (
                 <option key={c} value={c}>
-                  {label(c)}
+                  {underscoresToWords(c)}
                 </option>
               ))}
             </select>
