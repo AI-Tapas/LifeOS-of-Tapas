@@ -3,9 +3,22 @@
 // rendered inside the untrusted-data framing (attack A2): their titles are
 // data the assistant reads, never instructions it follows.
 
-import { formatDateIST, formatDateTimeIST, formatWeekdayIST } from "@/lib/datetime";
+import {
+  addDays,
+  civilKey,
+  civilToday,
+  formatDateIST,
+  formatDateTimeIST,
+  formatWeekdayIST,
+} from "@/lib/datetime";
 import { fenceUntrusted } from "./prompt";
 import { streamRateLine, type StreamRate } from "@/lib/money/rates";
+import {
+  RECOVERY_ADVICE,
+  recoveryLine,
+  recoveryTrips,
+  type RecoveryTrip,
+} from "@/lib/health/recovery";
 import type { Database } from "@/lib/database.types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -14,8 +27,17 @@ type Db = SupabaseClient<Database>;
 export async function buildAppContext(supabase: Db): Promise<string> {
   const now = new Date();
   const weekAhead = new Date(now.getTime() + 7 * 86400000).toISOString();
+  const today = civilToday(now.getTime());
+  const yesterdayKey = civilKey(addDays(today, -1));
 
-  const [{ data: streams }, { data: tasks }, { data: events }, { data: pending }, { data: accounts }] =
+  const [
+    { data: streams },
+    { data: tasks },
+    { data: events },
+    { data: pending },
+    { data: accounts },
+    { data: recentTrips },
+  ] =
     await Promise.all([
       supabase
         .from("work_streams")
@@ -43,6 +65,13 @@ export async function buildAppContext(supabase: Db): Promise<string> {
         .order("created_at")
         .limit(10),
       supabase.from("accounts").select("slot, email, status"),
+      // B5: whether today follows a full-day session. The model is told the
+      // fact, not asked to work it out from the calendar; the same pure
+      // function drives the card on Home.
+      supabase
+        .from("trips")
+        .select("id, title, status, session_label, session_date, end_date, cities")
+        .or(`session_date.eq.${yesterdayKey},end_date.eq.${yesterdayKey}`),
     ]);
 
   const lines: string[] = [];
@@ -53,6 +82,18 @@ export async function buildAppContext(supabase: Db): Promise<string> {
     // to remember. streamRateLine is pure and tested in scripts/m7b.test.ts.
     streamRateLine((streams ?? []) as StreamRate[])
   );
+
+  const recovery = recoveryLine(
+    recoveryTrips(
+      ((recentTrips ?? []) as (Omit<RecoveryTrip, "cities"> & { cities: unknown })[]).map(
+        (t) => ({ ...t, cities: Array.isArray(t.cities) ? (t.cities as string[]) : [] })
+      ),
+      today
+    )
+  );
+  if (recovery) {
+    lines.push("", `${recovery} ${RECOVERY_ADVICE}`);
+  }
 
   lines.push(
     "",

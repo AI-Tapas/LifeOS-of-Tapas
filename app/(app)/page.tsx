@@ -27,6 +27,12 @@ import {
   reviewsDue,
   type Holding,
 } from "@/lib/money/investments";
+import {
+  RECOVERY_ADVICE,
+  recoveryLine,
+  recoveryTrips,
+  type RecoveryTrip,
+} from "@/lib/health/recovery";
 
 export const dynamic = "force-dynamic";
 
@@ -71,8 +77,9 @@ export default async function DashboardPage() {
   const today = civilToday(nowMs);
   const dayStart = istInstant(today, 0, 0).toISOString();
   const dayEnd = istInstant(today, 23, 59).toISOString();
+  const yesterdayKey = civilKey(addDays(today, -1));
 
-  // Six independent reads in parallel. The stream name is fetched as its own
+  // Seven independent reads in parallel. The stream name is fetched as its own
   // small table and joined in memory rather than through an embedded
   // work_streams(name) select: measured against the live database, the
   // embedded join cost about 870ms where two plain queries cost about 390ms
@@ -84,6 +91,7 @@ export default async function DashboardPage() {
     { data: streams },
     { count: pendingCount },
     { data: holdings },
+    { data: recentTrips },
   ] =
     await Promise.all([
       supabase
@@ -118,6 +126,13 @@ export default async function DashboardPage() {
         .select("id, kind, name, institution, value, key_date, key_date_type, remind, notes")
         .eq("key_date_type", "review")
         .not("key_date", "is", null),
+      // B5: a trip whose session day was yesterday makes today a recovery day.
+      // Both columns are asked for because a trip without a session date falls
+      // back to the day its travel ended; recoveryTrips decides which counts.
+      supabase
+        .from("trips")
+        .select("id, title, status, session_label, session_date, end_date, cities")
+        .or(`session_date.eq.${yesterdayKey},end_date.eq.${yesterdayKey}`),
     ]);
 
   type Row = NonNullable<typeof tasks>[number];
@@ -203,6 +218,21 @@ export default async function DashboardPage() {
   );
   const moneyLine = reviewLine(dueReviews);
 
+  // The day after a full day on stage (B5). An observation, in the weekend
+  // guard's voice: nothing is declined, moved or held on the calendar.
+  const recovery = recoveryLine(
+    recoveryTrips(
+      ((recentTrips ?? []) as (Omit<RecoveryTrip, "cities"> & { cities: unknown })[]).map(
+        (t) => ({
+          ...t,
+          // cities is jsonb, so it arrives as Json.
+          cities: Array.isArray(t.cities) ? (t.cities as string[]) : [],
+        })
+      ),
+      today
+    )
+  );
+
   const timelineEvents = (events ?? []).map((e) => ({
     id: e.id,
     title: e.title,
@@ -231,6 +261,16 @@ export default async function DashboardPage() {
             </>
           )}
         </p>
+      )}
+
+      {recovery && (
+        <div className="mt-5 rounded-2xl border border-brand/30 bg-brand-soft p-3.5">
+          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-brand-deep">
+            Recovery day
+          </p>
+          <p className="mt-1.5 text-sm font-medium text-foreground">{recovery}</p>
+          <p className="mt-1.5 text-xs text-secondary">{RECOVERY_ADVICE}</p>
+        </div>
       )}
 
       {weekendRisk.length > 0 && (

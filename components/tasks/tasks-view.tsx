@@ -99,6 +99,10 @@ interface TasksViewProps {
   tripSteps: TripStep[];
   projects: ProjectRow[];
   workStreams: WorkStreamRow[];
+  // A task to open on arrival, from /tasks?task=<id>. There is no page for a
+  // single task, so a note referencing one links here and the drawer opens.
+  // An id that matches nothing simply opens nothing.
+  openTaskId?: string;
 }
 
 export default function TasksView({
@@ -112,9 +116,17 @@ export default function TasksView({
   );
 }
 
-function TasksBody({ tasks, tripSteps, projects, workStreams }: TasksViewProps) {
+function TasksBody({
+  tasks,
+  tripSteps,
+  projects,
+  workStreams,
+  openTaskId,
+}: TasksViewProps) {
   const [tab, setTab] = useState<Tab>("overview");
-  const [editing, setEditing] = useState<TaskRow | "new" | null>(null);
+  const [editing, setEditing] = useState<TaskRow | "new" | null>(
+    () => tasks.find((t) => t.id === openTaskId) ?? null
+  );
   const [notice, setNotice] = useState<string | null>(null);
 
   const wsById = useMemo(

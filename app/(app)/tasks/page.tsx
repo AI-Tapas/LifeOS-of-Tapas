@@ -8,7 +8,17 @@ import type { TripStep } from "@/lib/tasks/trip-rollup";
 
 export const dynamic = "force-dynamic";
 
-export default async function TasksPage() {
+type Search = Record<string, string | string[] | undefined>;
+
+export default async function TasksPage({
+  searchParams,
+}: {
+  searchParams: Promise<Search>;
+}) {
+  const sp = await searchParams;
+  // ?task=<id> opens that task's drawer, so a note referencing a task has
+  // somewhere to link to. There is no page for a single task.
+  const rawTask = Array.isArray(sp.task) ? sp.task[0] : sp.task;
   const supabase = await createClient();
   const [{ data: tasks }, { data: tripStepRows }, { data: projects }, { data: streams }] =
     await Promise.all([
@@ -59,6 +69,7 @@ export default async function TasksPage() {
         tripSteps={tripSteps}
         projects={(projects ?? []) as ProjectRow[]}
         workStreams={(streams ?? []) as WorkStreamRow[]}
+        openTaskId={rawTask}
         nowIso={new Date().toISOString()}
       />
     </main>
