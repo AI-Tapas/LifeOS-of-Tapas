@@ -535,3 +535,14 @@ test("a reference that is shown can be followed", () => {
   assert.ok(tasksPage.includes("openTaskId"));
   assert.ok(src("components/tasks/tasks-view.tsx").includes("openTaskId"));
 });
+
+test("the note tools can link a note to a task and a trip", () => {
+  for (const name of ["add_note", "update_note"]) {
+    const tool = TOOLS.find((t) => t.name === name)!;
+    const props = (tool.input_schema as { properties: Record<string, unknown> }).properties;
+    assert.ok(props.task_id, `${name} lost its task_id parameter`);
+    assert.ok(props.trip_id, `${name} lost its trip_id parameter`);
+    const req = ((tool.input_schema as { required?: string[] }).required ?? []);
+    assert.ok(!req.includes("task_id") && !req.includes("trip_id"), "the links must stay optional");
+  }
+});

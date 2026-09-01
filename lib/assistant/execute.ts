@@ -617,6 +617,10 @@ const performers: Record<string, Performer> = {
         type: type as Database["public"]["Enums"]["note_type"],
         title,
         body_md: s(input.body),
+        // Loose links (M7c). A bad id is refused by the foreign key before
+        // anything is written, the same stance as create_task's trip_id.
+        task_id: s(input.task_id),
+        trip_id: s(input.trip_id),
       })
       .select("id")
       .single();
@@ -722,13 +726,17 @@ const performers: Record<string, Performer> = {
     if (!noteId) throw new Error("note_id is required.");
     const { data: prev } = await supabase
       .from("notes")
-      .select("title, body_md")
+      .select("title, body_md, task_id, trip_id")
       .eq("id", noteId)
       .single();
     if (!prev) throw new Error("Note not found.");
     const patchRow = {
       ...(s(input.title) ? { title: s(input.title)! } : {}),
       ...(input.body !== undefined ? { body_md: s(input.body) } : {}),
+      // Omitting keeps the current link; only a provided id changes it, so
+      // the assistant cannot silently unlink a note.
+      ...(s(input.task_id) ? { task_id: s(input.task_id) } : {}),
+      ...(s(input.trip_id) ? { trip_id: s(input.trip_id) } : {}),
     };
     const { error } = await supabase.from("notes").update(patchRow).eq("id", noteId);
     if (error) throw new Error(error.message);
@@ -1587,7 +1595,12 @@ async function performUndo(
       const prev = (undo.prev ?? {}) as Record<string, unknown>;
       await supabase
         .from("notes")
-        .update({ title: prev.title as string, body_md: prev.body_md as string | null })
+        .update({
+          title: prev.title as string,
+          body_md: prev.body_md as string | null,
+          task_id: (prev.task_id as string | null) ?? null,
+          trip_id: (prev.trip_id as string | null) ?? null,
+        })
         .eq("id", String(undo.note_id));
       return;
     }

@@ -201,6 +201,12 @@ export const TOOLS: ToolDef[] = [
       type: enumOf(["meeting", "decision", "idea", "reference"], "Note type."),
       title: str("Note title."),
       body: strOrNull("Note body in Markdown. Omit if not applicable."),
+      task_id: strOrNull(
+        "Id of the task this note is about, from context. Omit if it is not about one task."
+      ),
+      trip_id: strOrNull(
+        "Id of the trip this note came out of, from lifeos_list_trips. Omit if it is not about a trip."
+      ),
     }),
   },
   {
@@ -385,6 +391,12 @@ export const TOOLS: ToolDef[] = [
       note_id: str("The note id."),
       title: strOrNull("New title. Omit to keep the current one."),
       body: strOrNull("New body in Markdown. Omit to keep the current one."),
+      task_id: strOrNull(
+        "Link the note to a task, from context. Omit to keep the current link."
+      ),
+      trip_id: strOrNull(
+        "Link the note to a trip, from lifeos_list_trips. Omit to keep the current link."
+      ),
     }),
   },
   {
