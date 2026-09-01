@@ -18,6 +18,9 @@
 //   6. Disclosure classes (B8): every tool declares what it may SEE, the union
 //      cannot express document content, and a mail-body tool cannot run as a
 //      hidden step inside another tool.
+//   6b. The house rules over the connector (B15): the persona travels under a
+//      class of its own, exactly one read tool carries it, that tool takes no
+//      arguments, and no read of the persona goes unrecorded.
 //   7. Fail closed on an unresolved target (B10): an autonomous tool pointed at
 //      something that does not exist is queued for Tapas, never run and never
 //      silently dropped.
@@ -31,6 +34,9 @@ import assert from "node:assert/strict";
 import {
   TOOLS,
   TOOL_DISCLOSURES,
+  HOUSE_RULES_TOOL,
+  MCP_READ_TOOLS,
+  READ_TOOL_DISCLOSURES,
   AUTONOMOUS_KINDS,
   CONFIRM_KINDS,
   SEND_CLASS,
@@ -58,9 +64,11 @@ import {
 import {
   HARD_RULES,
   PERSONA_HEADER,
+  HOUSE_RULES_PRECEDENCE,
   buildSystemBlocks,
   fenceUntrusted,
   buildScanUserMessage,
+  houseRulesText,
   DATA_PREAMBLE,
 } from "../lib/assistant/prompt.ts";
 
@@ -923,14 +931,15 @@ test("every tool declares a disclosure class, the scan tool included", () => {
   assert.equal(disclosureOf("read_drive_file"), "none");
 });
 
-test("the disclosure union has exactly four members and none for document content", () => {
+test("the disclosure union has exactly five members and none for document content", () => {
   // Widening this union is a firm-constraint-1 decision for Tapas, never a
   // line in somebody's diff. ToolDisclosure is derived from TOOL_DISCLOSURES,
-  // so this assertion IS an assertion about the type: a fifth member cannot
-  // exist in the type without appearing here first.
+  // so this assertion IS an assertion about the type: a sixth member cannot
+  // exist in the type without appearing here first. The fifth, persona, is
+  // there because Tapas widened the union by name on 1 September 2026 (B15).
   assert.deepEqual(
     [...TOOL_DISCLOSURES],
-    ["none", "app_data", "mail_metadata", "mail_body"],
+    ["none", "app_data", "mail_metadata", "mail_body", "persona"],
     "adding a disclosure class is a constraint-1 decision, not a refactor"
   );
   // No member can express reading a document's contents, so no tool that did
@@ -957,6 +966,98 @@ test("a mail-body tool cannot run as a hidden step inside another tool", () => {
     if (d === "mail_body") continue;
     assert.equal(checkDisclosure(d, true).ok, true, `${d} must not be nesting-gated`);
   }
+});
+
+
+// --- 6b. the house rules over the connector (B15) ------------------------------
+//
+// Tapas's Claude and ChatGPT projects read his rules from the app instead of
+// carrying a pasted copy. That means the persona leaves the owner session, so
+// it travels under a class of its own that he approved by name, exactly one
+// tool holds that class, and no read of it is anonymous.
+
+test("only the house rules tool may see the persona, and it only reads", () => {
+  assert.equal(disclosureOf(HOUSE_RULES_TOOL), "persona");
+  // Nothing in the write registry, the scan tool included, may see it. A
+  // second persona reader would be another decision for Tapas, not a diff.
+  const seers = [...TOOLS, SCAN_TOOL].filter((t) => t.disclosure === "persona");
+  assert.deepEqual(seers.map((t) => t.name), []);
+  const readers = Object.entries(READ_TOOL_DISCLOSURES).filter(
+    ([, d]) => d === "persona"
+  );
+  assert.deepEqual(readers.map(([n]) => n), [HOUSE_RULES_TOOL]);
+  // It is a read tool on the connector surface, and not a write tool anywhere.
+  assert.ok((MCP_READ_TOOLS as readonly string[]).includes(HOUSE_RULES_TOOL));
+  assert.equal(toolByName(HOUSE_RULES_TOOL), undefined);
+  assert.equal(routeTool(HOUSE_RULES_TOOL), "unknown", "there is nothing to execute");
+  // Every read tool declares what it sees, so a new one cannot arrive silently.
+  for (const name of MCP_READ_TOOLS) {
+    assert.ok(
+      (TOOL_DISCLOSURES as readonly string[]).includes(
+        READ_TOOL_DISCLOSURES[name]
+      ),
+      `${name} has no valid disclosure class`
+    );
+  }
+});
+
+test("the house rules tool takes no arguments, so no old version can be asked for", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync("lib/assistant/mcp-api.ts", "utf8");
+  // Named on both maps the connector routes read: schema and description.
+  assert.equal(
+    src.split(`${HOUSE_RULES_TOOL}:`).length - 1,
+    2,
+    "the tool needs a schema and a description, or a connector serves it undefined"
+  );
+  const schema = src.slice(
+    src.indexOf(`${HOUSE_RULES_TOOL}: {`),
+    src.indexOf("lifeos_get_context: {")
+  );
+  assert.match(schema, /properties: \{\}/, "no parameter: the active version only");
+  assert.match(schema, /required: \[\]/);
+  // Nothing on this surface writes a persona or reads its history.
+  for (const forbidden of ["version_id", "persona_version_id", "all_versions", "history"]) {
+    assert.equal(schema.includes(forbidden), false, `${forbidden} has no business here`);
+  }
+});
+
+test("the house rules put the hard rules above the persona and name the version", () => {
+  const text = houseRulesText("Speak plainly. He dislikes hedging.", 4);
+  assert.ok(text.includes(HOUSE_RULES_PRECEDENCE), "the precedence framing leads");
+  assert.ok(text.includes(HARD_RULES), "the hard rules are handed over in full");
+  assert.ok(text.includes(PERSONA_HEADER), "and the persona under its own header");
+  assert.ok(
+    text.indexOf(HARD_RULES) < text.indexOf(PERSONA_HEADER),
+    "the same order the in-app system prompt uses: rules first"
+  );
+  assert.match(text, /PERSONA, version 4/, "the version number travels with the text");
+  assert.ok(text.includes("Speak plainly."));
+  // No persona active is not an excuse to drop the rules.
+  const bare = houseRulesText(null, null);
+  assert.ok(bare.includes(HARD_RULES));
+  assert.equal(bare.includes(PERSONA_HEADER), false);
+  assert.match(bare, /No persona version is active/);
+});
+
+test("a persona read that cannot be recorded does not happen", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync("lib/assistant/mcp-api.ts", "utf8");
+  const branch = src.slice(
+    src.indexOf("if (name === HOUSE_RULES_TOOL)"),
+    src.indexOf('if (name === "lifeos_get_context")')
+  );
+  assert.match(branch, /from\("audit_log"\)\.insert/, "every read leaves a row");
+  assert.match(branch, /entity: "assistant_persona"/);
+  assert.match(branch, /disclosure: disclosureOf\(HOUSE_RULES_TOOL\)/, "named in the row");
+  assert.match(branch, /persona_version/);
+  // The insert is checked. An unrecorded read of the persona is the thing the
+  // class exists to prevent, so a failed record refuses the read outright.
+  assert.match(branch, /if \(error\) \{[\s\S]*throw new Error/);
+  assert.ok(
+    branch.indexOf("throw new Error") < branch.indexOf("return {"),
+    "the record is written before anything is handed over"
+  );
 });
 
 

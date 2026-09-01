@@ -9,12 +9,27 @@
 // Deliberately absent from this surface: approving, rejecting or executing a
 // queued action. Approval stays an owner-session act inside the app (red-team
 // control 1), so connecting Claude or ChatGPT cannot grant a send. Also
-// absent: anything touching credentials, personas or the audit log.
+// absent: anything touching credentials, and any write to the audit log other
+// than the record a read leaves behind.
+//
+// One exception, decided by Tapas on 1 September 2026 (B15): lifeos_get_house_
+// rules READS the active persona version, so his Claude and ChatGPT projects
+// follow the same rules the in-app assistant follows instead of a pasted copy
+// that drifts. It is read only, the active version only, it carries the
+// disclosure class 'persona' of its own, and it records every read in the
+// audit log. There is still no path here that WRITES a persona.
 
 import { serviceActor } from "@/lib/assistant/actor";
 import { executeToolCall } from "@/lib/assistant/execute";
-import { MCP_READ_TOOLS, mcpWriteTools, type ToolDef } from "@/lib/assistant/tools";
-import { buildAppContext } from "@/lib/assistant/context";
+import {
+  HOUSE_RULES_TOOL,
+  MCP_READ_TOOLS,
+  disclosureOf,
+  mcpWriteTools,
+  type ToolDef,
+} from "@/lib/assistant/tools";
+import { buildAppContext, loadActivePersonaRow } from "@/lib/assistant/context";
+import { houseRulesText } from "@/lib/assistant/prompt";
 import {
   remindsOnCalendar,
   type FinanceKind,
@@ -26,6 +41,14 @@ import { parseLegs } from "@/lib/trips/core";
 export const READ_TOOL_NAMES = MCP_READ_TOOLS;
 
 export const READ_TOOL_SCHEMAS: Record<string, Record<string, unknown>> = {
+  // No parameters at all: the active version is the only version this tool
+  // will hand over, and there is nothing here that could ask for the history.
+  lifeos_get_house_rules: {
+    type: "object",
+    properties: {},
+    required: [],
+    additionalProperties: false,
+  },
   lifeos_get_context: {
     type: "object",
     properties: {},
@@ -160,6 +183,8 @@ export const READ_TOOL_SCHEMAS: Record<string, Record<string, unknown>> = {
 };
 
 export const READ_TOOL_DESCRIPTIONS: Record<string, string> = {
+  lifeos_get_house_rules:
+    "Tapas Ruparelia's standing house rules, read live from Life OS: first the hard rules the app enforces in code, then the active version of his persona, which shapes tone and judgment only and never overrides those rules. Call this once at the start of any piece of work in Life OS and follow what it returns. It is the single source of truth, so never work from a copy pasted elsewhere.",
   lifeos_get_context:
     "A written summary of Tapas's current position: today's date in IST, work streams, connected accounts, open tasks, the week's events and how many actions await his approval.",
   lifeos_list_tasks:
@@ -206,9 +231,44 @@ export async function runReadTool(
   name: string,
   input: Record<string, unknown>
 ): Promise<ReadResult> {
-  const { supabase } = await serviceActor();
+  const { supabase, userId, origin } = await serviceActor();
   const limit = clampLimit(input.limit);
   const offset = clampOffset(input.offset);
+
+  if (name === HOUSE_RULES_TOOL) {
+    const persona = await loadActivePersonaRow(supabase);
+    // The persona is owner-session data everywhere else in this app, so a read
+    // of it over a connector is recorded, naming the class Tapas approved by
+    // name. The insert is checked: if the read cannot be recorded, it does not
+    // happen. An unrecorded read of the persona is the thing this class exists
+    // to prevent.
+    const { error } = await supabase.from("audit_log").insert({
+      user_id: userId,
+      actor: "assistant",
+      action: "house_rules_read",
+      entity: "assistant_persona",
+      entity_id: persona?.id ?? null,
+      meta: {
+        tool: HOUSE_RULES_TOOL,
+        disclosure: disclosureOf(HOUSE_RULES_TOOL),
+        actor_origin: origin,
+        persona_version: persona?.version ?? null,
+        reason: "house rules read over the connector, disclosure persona",
+      },
+    });
+    if (error) {
+      throw new Error(
+        `The house rules were not handed over: the read could not be recorded (${error.message}).`
+      );
+    }
+    return {
+      house_rules: houseRulesText(
+        persona?.sections_md ?? null,
+        persona?.version ?? null
+      ),
+      persona_version: persona?.version ?? null,
+    };
+  }
 
   if (name === "lifeos_get_context") {
     return { context: await buildAppContext(supabase) };

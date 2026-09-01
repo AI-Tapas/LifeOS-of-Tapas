@@ -259,8 +259,9 @@ and email-verification rules live in lib/accounts.ts.
   create, update and log for trips; solo calendar events including edit and delete
   (delete_event refuses anything with source other than 'app', so a synced
   event is never removed); draft_email; scan_mail; undo_action;
-  reject_queued_action. Eleven read tools mirror them, so nothing writable is
-  invisible. send_email and propose_event_with_invites stay confirm-bucket,
+  reject_queued_action. Twelve read tools mirror them, so nothing writable is
+  invisible; the twelfth is the B15 house-rules tool, which mirrors nothing
+  writable because nothing here writes a persona. send_email and propose_event_with_invites stay confirm-bucket,
   and NO tool approves: approval is owner-session only, in the app.
 - Remote MCP connector (ChatGPT, Claude web and mobile): POST /api/mcp/http
   speaks Streamable HTTP with stateless JSON replies, handling initialize,
@@ -276,9 +277,9 @@ and email-verification rules live in lib/accounts.ts.
   a live owner session and a two-tap consent screen at /connect, so a token
   exists only because Tapas approved it. Settings lists connections and can
   revoke them. Rules are pure in lib/mcp/oauth-core.ts and tested offline.
-- Tests: npm run test:m4 (63 offline, the R6 red-team controls and the four
-  G1 governance controls). rls.test.mjs adds audit_log append-only and
-  payload-immutability trigger proofs.
+- Tests: npm run test:m4 (67 offline, the R6 red-team controls, the four
+  G1 governance controls and the B15 persona class). rls.test.mjs adds
+  audit_log append-only and payload-immutability trigger proofs.
 
 ## Travel Desk (Milestones 6 and 6d)
 
@@ -562,11 +563,13 @@ no migration: B12 reuses the meta jsonb audit_log has always had.
 - B8, disclosure class. A bucket says what a tool may CHANGE. Firm constraint
   1 is a disclosure rule, and no permission setting can enforce a disclosure
   rule: only the absence of the capability can. Every ToolDef therefore also
-  carries a ToolDisclosure: none, app_data, mail_metadata or mail_body. There
+  carries a ToolDisclosure: none, app_data, mail_metadata or mail_body, and
+  since B15 also persona (see that section: Tapas approved the fifth member by
+  name on 1 September 2026). There
   is deliberately NO member for document content, so a tool reading a Drive
   file or an O365 attachment could not be given a valid class. The type is
   DERIVED from TOOL_DISCLOSURES, so widening the union means editing that
-  list, and the test that reads the list fails when a fifth member appears.
+  list, and the test that reads the list fails when a sixth member appears.
   Do not add one without asking Tapas. A boot-time check in tools.ts throws
   on a registry that drifted past the compiler.
   Enforcement: scan_mail is the only mail_body tool (Gmail snippets and Graph
@@ -828,3 +831,58 @@ column.
   sweep found, live in `checkpoints/M8-v1-acceptance.md` in the project folder
   (not in this repo).
 - Tests: `npm run test:m8` (15 offline).
+
+## House rules and persona over MCP (B15)
+
+No migration. Nothing in the database changed.
+
+- The problem: Tapas runs conversational work in Claude and ChatGPT projects
+  that drive Life OS through the remote connector. Those projects each carried
+  their own pasted copy of his rules, and a copy drifts the moment he edits the
+  persona in Settings. Until now `HARD_RULES` (lib/assistant/prompt.ts) and the
+  active `assistant_persona` version reached the in-app assistant only.
+- One read tool, `lifeos_get_house_rules`, on BOTH connector surfaces
+  (/api/mcp and /api/mcp/http, which both derive their read list from
+  `MCP_READ_TOOLS`). It returns `house_rules`, one labelled text carrying the
+  precedence framing, then the hard rules in full, then the active persona
+  under `PERSONA_HEADER`, plus `persona_version` as a number. Same order as the
+  in-app system prompt, because rules outranking persona is a security property
+  and a connected model must see it the same way.
+- THE PROJECT INSTRUCTION, the one line Tapas pastes into a Claude or ChatGPT
+  project so it never holds a copy:
+  "At the start of any Life OS work, call lifeos_get_house_rules and follow
+  what it returns: the hard rules outrank the persona, and the persona is tone
+  and judgment only."
+- Read only, active version only. `houseRulesText` is pure and the tool's
+  schema has no parameters at all, so nothing can ask for an older version or
+  for the history, and there is still no path anywhere that WRITES a persona
+  outside the Settings server actions.
+- DISCLOSURE CLASS, and this is the part that was a decision rather than a
+  diff: `TOOL_DISCLOSURES` has a fifth member, `persona`. Tapas widened the
+  union by name on 1 September 2026. The persona is owner-session data
+  everywhere else in this app, so `app_data` would have hidden the change; the
+  new class is what makes a read of it visible. Still NO member for document
+  content, and `scripts/m4.test.ts` fails if a sixth member appears.
+- `READ_TOOL_DISCLOSURES` in tools.ts declares what each connector read tool
+  may see, keyed by the read-tool union so a new read tool does not compile
+  until somebody has said what it reads. Exactly one entry may say `persona`,
+  and a test pins that across both registries.
+- Every read of the house rules writes an `audit_log` row: actor assistant,
+  action `house_rules_read`, entity `assistant_persona`, and meta naming the
+  tool, the disclosure class, the actor origin and the version handed over. The
+  insert is CHECKED: if the row cannot be written the tool refuses and hands
+  nothing over. An unrecorded read of the persona is exactly what the class
+  exists to prevent, so do not soften that into a silent catch.
+- HOW THE CONNECTOR REACHES THE TABLE, and the trap for the next session:
+  `assistant_persona` is protected by RLS for the browser role only. The
+  connectors authenticate as `service_role`, which bypasses RLS and was never
+  revoked on that table, so no grant or policy change was needed and no
+  migration was written. Do NOT add a
+  `revoke all on table public.assistant_persona from service_role` on the
+  m7c pattern: that revoke is right for `assistant_chat_turns`, whose sensitivity
+  m7c compared to the persona's, and it would silently break this tool. If that
+  boundary is ever closed again, remove the tool in the same change.
+- `loadActivePersonaRow` in lib/assistant/context.ts is the one query for
+  "which version is live", so the in-app prompt and the connector cannot
+  disagree about it. `loadActivePersona` is now a thin wrapper on it.
+- Tests: four in `npm run test:m4` (63 to 67).
