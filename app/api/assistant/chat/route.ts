@@ -59,8 +59,16 @@ export async function POST(req: Request): Promise<Response> {
   const encoder = new TextEncoder();
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
-      const emit = (obj: Record<string, unknown>) =>
+      // Whether anything the user can read was sent. A provider that returns
+      // an empty response otherwise paints a blank bubble, which looks like
+      // the app failed rather than the model, and gives him nothing to act on.
+      let saidAnything = false;
+      const emit = (obj: Record<string, unknown>) => {
+        if (obj.t === "text" || obj.t === "tool" || obj.t === "notice" || obj.t === "error") {
+          saidAnything = true;
+        }
         controller.enqueue(encoder.encode(JSON.stringify(obj) + "\n"));
+      };
 
       try {
         const conv: ConvMessage[] = history.map((m) => ({
@@ -106,6 +114,12 @@ export async function POST(req: Request): Promise<Response> {
             results.push({ id: call.id, content: reply, isError });
           }
           conv.push({ kind: "tool_results", results });
+        }
+        if (!saidAnything) {
+          emit({
+            t: "notice",
+            d: "The model returned an empty reply. Try again; if it repeats, run the Test button under Settings, Assistant models.",
+          });
         }
         emit({ t: "done" });
       } catch (e) {

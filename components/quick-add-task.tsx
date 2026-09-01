@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { quickAddTaskAction } from "@/app/(app)/tasks/actions";
 
 // Quick-add a task to the inbox from anywhere in the app shell. A floating
@@ -17,8 +17,13 @@ export default function QuickAddTask({
   const [wsId, setWsId] = useState(workStreams[0]?.id ?? "");
   const [pending, startTransition] = useTransition();
   const [note, setNote] = useState<string | null>(null);
+  const pathname = usePathname();
 
   if (workStreams.length === 0) return null;
+  // The Assistant tab has its own send button in the same corner, and on a
+  // phone the two overlapped. The chat can already create tasks, so the
+  // quick-add button earns nothing there.
+  if (pathname.startsWith("/assistant")) return null;
 
   function add() {
     if (!title.trim() || !wsId) return;
