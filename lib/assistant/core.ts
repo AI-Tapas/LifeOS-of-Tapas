@@ -133,6 +133,8 @@ export interface ScanProposal {
   note: string | null;
   external_ref: string;
   due_date: string | null;
+  // One of the user's real stream names, or null to take the account default.
+  work_stream: string | null;
 }
 
 export interface RawToolCall {
@@ -143,8 +145,14 @@ export interface RawToolCall {
 export function validateScanProposals(
   calls: RawToolCall[],
   knownRefs: Set<string>,
-  remainingBudget: number
+  remainingBudget: number,
+  // The user's real work stream names. A proposal may name one, but only one
+  // of these: the model is reading untrusted mail, so the value is matched
+  // against the list rather than trusted. Anything else falls back to the
+  // account's default stream, chosen by the caller.
+  allowedStreams: string[] = []
 ): { accepted: ScanProposal[]; rejected: string[] } {
+  const streamByKey = new Map(allowedStreams.map((s) => [s.trim().toLowerCase(), s]));
   const accepted: ScanProposal[] = [];
   const rejected: string[] = [];
   const seenRefs = new Set<string>();
@@ -176,12 +184,15 @@ export function validateScanProposals(
     const noteRaw = typeof call.input.note === "string" ? call.input.note.trim() : "";
     const dueRaw =
       typeof call.input.due_date === "string" ? call.input.due_date : "";
+    const streamRaw =
+      typeof call.input.work_stream === "string" ? call.input.work_stream.trim() : "";
     seenRefs.add(ref);
     accepted.push({
       title: title.slice(0, 140),
       note: noteRaw ? noteRaw.slice(0, 500) : null,
       external_ref: ref,
       due_date: /^\d{4}-\d{2}-\d{2}$/.test(dueRaw) ? dueRaw : null,
+      work_stream: streamByKey.get(streamRaw.toLowerCase()) ?? null,
     });
   }
   return { accepted, rejected };

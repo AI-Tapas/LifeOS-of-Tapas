@@ -30,6 +30,16 @@ export function offsetsDaysToMinutes(days: number[]): number[] {
   return unique.slice(0, MAX_OVERRIDES).map((d) => d * 1440);
 }
 
+// Calendar title for a task's reminder. M6b renamed checklist steps to bare
+// titles ("Book onward ticket") because the trip screen already says which
+// trip you are looking at. Google Calendar does not, so a phone with three
+// trips in flight showed three identical reminders. The trip name rides in
+// the title when the task belongs to one.
+export function reminderTitle(taskTitle: string, tripTitle?: string | null): string {
+  const trip = tripTitle?.trim();
+  return trip ? `Reminder: ${taskTitle} (${trip})` : `Reminder: ${taskTitle}`;
+}
+
 export function buildReminderOverrides(
   days: number[],
   method: ReminderMethod = "popup"

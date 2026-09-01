@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist_Mono, Hanken_Grotesk, Spectral } from "next/font/google";
 import "./globals.css";
 import SwRegister from "@/components/sw-register";
+import { THEME_BOOT_SCRIPT } from "@/lib/theme";
 
 // Body and UI text. Variable font: the weights it's used at (400/500/600/700)
 // come from the classes applied in markup, not a fixed weight list here.
@@ -57,6 +58,11 @@ export default function RootLayout({
       lang="en"
       className={`${hankenGrotesk.variable} ${spectral.variable} ${geistMono.variable} h-full antialiased`}
     >
+      <head>
+        {/* Resolves the theme setting before first paint, so the app never
+            flashes light before turning dark. Must run ahead of React. */}
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
+      </head>
       <body className="min-h-full">
         {children}
         <SwRegister />

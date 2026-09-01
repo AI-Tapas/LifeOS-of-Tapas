@@ -304,6 +304,23 @@ and email-verification rules live in lib/accounts.ts.
 - Tests: npm run test:m6 (offline). app/dev-preview renders the three trips
   screens with mock data for visual checks without a database.
 
+## Theme (Settings > Appearance)
+
+- Three-way choice: System, Light, Dark. Stored in localStorage on the device
+  (`life_os_theme`), NOT in the database: it describes the screen in front of
+  you, so phone and laptop may reasonably differ.
+- The dark palette is keyed on `:root[data-theme="dark"]`, never on the media
+  query. `THEME_BOOT_SCRIPT` in lib/theme.ts runs in the document head before
+  first paint, resolves System against `prefers-color-scheme`, writes the
+  attribute, and keeps listening so a device flip still follows while the app
+  is open. No script means light, which is the primary theme by design.
+- `@custom-variant dark` in globals.css repoints Tailwind's `dark:` utilities
+  at the same attribute. Without it an explicit choice half-applies: the
+  tokens flip and the ~37 `dark:` classes do not. Do not remove it.
+- The Settings control reads the value through `useSyncExternalStore`, not an
+  effect: localStorage is external state, and reading it in an effect both
+  trips react-hooks/set-state-in-effect and paints the wrong option briefly.
+
 ## Trip checklists (Milestone 6b)
 
 - tasks.trip_id (migration 20260831000100) makes a task a trip's checklist

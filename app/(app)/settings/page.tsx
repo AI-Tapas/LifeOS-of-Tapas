@@ -10,6 +10,7 @@ import PersonaPanel, {
   type PersonaVersionView,
 } from "@/components/settings/persona-panel";
 import ModelsPanel from "@/components/settings/models-panel";
+import ThemePanel from "@/components/settings/theme-panel";
 import LetterheadPanel from "@/components/settings/letterhead-panel";
 import ConnectionsPanel, {
   type ConnectionView,
@@ -184,7 +185,16 @@ export default async function SettingsPage({
         </p>
       )}
 
-      <h2 className="mt-6 text-base font-semibold tracking-tight">Accounts</h2>
+      <h2 className="mt-6 text-base font-semibold tracking-tight">Appearance</h2>
+      <p className="mt-1 text-sm text-secondary">
+        The app followed your device until now, which is why it turned dark on
+        the iPad.
+      </p>
+      <div className="mt-3">
+        <ThemePanel />
+      </div>
+
+      <h2 className="mt-8 text-base font-semibold tracking-tight">Accounts</h2>
       <p className="mt-1 text-sm text-secondary">
         External calendar and mail accounts. These are separate from your sign-in.
       </p>

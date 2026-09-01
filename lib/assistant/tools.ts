@@ -702,5 +702,8 @@ export const SCAN_TOOL: ToolDef = {
     note: strOrNull("One or two lines of context, at most 500 characters. Omit if not applicable."),
     external_ref: str("The exact message ref given in the email's data block."),
     due_date: { ...strOrNull(DATE_DESC) },
+    work_stream: strOrNull(
+      "The work stream this task belongs to, exactly as named in the list given in the request. Judge by what the task is about, not by which mailbox it arrived in. Omit if unsure."
+    ),
   }),
 };

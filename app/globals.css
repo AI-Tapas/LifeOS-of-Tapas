@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/* Tailwind's dark: variant follows prefers-color-scheme by default. The theme
+   setting in Settings writes an explicit data-theme, so the ~37 dark: classes
+   in the app have to follow the same signal as the tokens below. Without this
+   line an explicit choice half-applies: tokens flip, utilities do not. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 /* ---------------------------------------------------------------------------
    Design tokens: "Slate and Clay Desk". Light is the main theme, dark is the
    night theme (both first class). One small set with real semantic meaning.
@@ -104,8 +110,13 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
+/* Night theme. Keyed on an explicit data-theme, never on the media query:
+   the inline script in app/layout.tsx resolves the setting (system, light,
+   dark) to a concrete data-theme before first paint, and re-resolves when
+   the device flips while the app is open. One block, so the two themes
+   cannot drift apart. With no script, light is the default, which is the
+   primary theme by design. */
+:root[data-theme="dark"] {
     --background: #0f1e30;
     --surface: #14283f;
     --surface-2: #1a3554;
@@ -150,7 +161,6 @@
     --acct-altechon-soft: rgba(151, 128, 194, 0.16);
     --acct-fallback: var(--text-muted);
     --acct-fallback-soft: rgba(123, 147, 174, 0.16);
-  }
 }
 
 body {
@@ -161,15 +171,13 @@ body {
 }
 
 /* Subtle dusty-blue glow at the top of the night theme, per the mockup. */
-@media (prefers-color-scheme: dark) {
-  body {
-    background-image: radial-gradient(
-      ellipse 90% 40% at 50% -5%,
-      rgba(90, 138, 181, 0.1),
-      transparent
-    );
-    background-repeat: no-repeat;
-  }
+:root[data-theme="dark"] body {
+  background-image: radial-gradient(
+    ellipse 90% 40% at 50% -5%,
+    rgba(90, 138, 181, 0.1),
+    transparent
+  );
+  background-repeat: no-repeat;
 }
 
 /* Hard clamp: the page itself can never scroll or lay out sideways (iOS

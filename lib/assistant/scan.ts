@@ -150,10 +150,21 @@ export async function runMailScan(actor?: Actor): Promise<ScanSummary> {
       continue;
     }
 
+    // The real stream names, so a proposal can file itself correctly and the
+    // answer can be checked against this exact list rather than trusted.
+    const { data: streamRows } = await supabase
+      .from("work_streams")
+      .select("name")
+      .eq("user_id", userId)
+      .eq("active", true);
+    const streamNames = (streamRows ?? []).map((s) => s.name);
+
     // Isolated scanner context: one tool, no persona, mail fenced as data.
     const turn = await runLlmTurn({
       blocks: [{ text: SCAN_SYSTEM, stable: true }],
-      conv: [{ kind: "text", role: "user", text: buildScanUserMessage(scanMails) }],
+      conv: [
+        { kind: "text", role: "user", text: buildScanUserMessage(scanMails, streamNames) },
+      ],
       tools: [SCAN_TOOL],
       maxTokens: 2048,
       override,
@@ -167,11 +178,30 @@ export async function runMailScan(actor?: Actor): Promise<ScanSummary> {
       name: c.name,
       input: c.input,
     }));
-    const { accepted, rejected } = validateScanProposals(calls, knownRefs, budget);
+    const { accepted, rejected } = validateScanProposals(
+      calls,
+      knownRefs,
+      budget,
+      streamNames
+    );
     summary.skipped += rejected.length;
 
-    const streamName = SLOT_STREAM[account.slot] ?? "Personal";
-    const workStreamId = await resolveStreamId(supabase, streamName);
+    // The mailbox a message arrives in is only the fallback. A proposal that
+    // named one of his real streams wins, because a household bill landing in
+    // a work account is still personal.
+    const defaultStreamName = SLOT_STREAM[account.slot] ?? "Personal";
+    const defaultStreamId = await resolveStreamId(supabase, defaultStreamName);
+    const streamIdCache = new Map<string, string>([
+      [defaultStreamName, defaultStreamId],
+    ]);
+    const streamIdFor = async (name: string | null): Promise<string> => {
+      if (!name) return defaultStreamId;
+      const hit = streamIdCache.get(name);
+      if (hit !== undefined) return hit;
+      const id = await resolveStreamId(supabase, name);
+      streamIdCache.set(name, id);
+      return id;
+    };
 
     // Second belt, on meaning rather than message id: two AWS budget alerts,
     // or two chasers on one thread, are different messages saying the same
@@ -195,7 +225,7 @@ export async function runMailScan(actor?: Actor): Promise<ScanSummary> {
         notes: p.note,
         status: "inbox",
         due_ts: p.due_date ? dueAt930(p.due_date) : null,
-        work_stream_id: workStreamId,
+        work_stream_id: await streamIdFor(p.work_stream),
         source: "email",
         external_ref: p.external_ref,
       });

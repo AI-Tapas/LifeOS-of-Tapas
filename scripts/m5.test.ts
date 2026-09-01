@@ -17,6 +17,9 @@ import {
   isAlreadyOpen,
   normaliseTitle,
 } from "../lib/assistant/scan-filters.ts";
+import { reminderTitle } from "../lib/reminders/core.ts";
+import { validateScanProposals } from "../lib/assistant/core.ts";
+import { buildScanUserMessage } from "../lib/assistant/prompt.ts";
 
 const APP_BASE_URL = "https://life-os-of-tapas.vercel.app";
 
@@ -416,4 +419,83 @@ test("normaliseTitle ignores case, padding and a trailing full stop only", () =>
   assert.equal(normaliseTitle("  File  reply to SCN issued to R N PEB. "), "file reply to scn issued to r n peb");
   // Not so aggressive that two genuinely different tasks collapse into one.
   assert.notEqual(normaliseTitle("Book onward ticket, Rajkot"), normaliseTitle("Book return ticket, Rajkot"));
+});
+
+// --- the three small fixes, 1 September 2026 -------------------------------
+
+test("a checklist step's reminder names its trip; an ordinary task is unchanged", () => {
+  // M6b renamed steps to bare titles, so three trips in flight produced three
+  // identical calendar reminders reading "Reminder: Book onward ticket".
+  assert.equal(
+    reminderTitle("Book onward ticket", "AICA Level 2 batch 87, Rajkot"),
+    "Reminder: Book onward ticket (AICA Level 2 batch 87, Rajkot)"
+  );
+  assert.equal(
+    reminderTitle("File reply to SCN issued to R N PEB"),
+    "Reminder: File reply to SCN issued to R N PEB"
+  );
+  // A trip with a blank title must not produce empty brackets.
+  assert.equal(reminderTitle("Book onward ticket", "   "), "Reminder: Book onward ticket");
+  assert.equal(reminderTitle("Book onward ticket", null), "Reminder: Book onward ticket");
+});
+
+const STREAMS = ["ICAI", "Tax Strategia", "Altechon", "Cygnet", "Personal"];
+
+function proposal(over: Record<string, unknown>) {
+  return {
+    name: "propose_task",
+    input: { title: "A task", external_ref: "gmail:icai:m1", ...over },
+  };
+}
+
+test("a scanned proposal may pick a work stream, but only a real one", () => {
+  // The live miss: a household electricity bill arriving in a work mailbox
+  // was filed under ICAI, because the stream came from the mailbox alone.
+  const refs = new Set(["gmail:icai:m1"]);
+  const ok = validateScanProposals([proposal({ work_stream: "Personal" })], refs, 5, STREAMS);
+  assert.equal(ok.accepted[0].work_stream, "Personal");
+
+  // Case and padding are forgiven; the stored value is his exact name.
+  const loose = validateScanProposals(
+    [proposal({ work_stream: "  tax strategia " })],
+    new Set(["gmail:icai:m1"]),
+    5,
+    STREAMS
+  );
+  assert.equal(loose.accepted[0].work_stream, "Tax Strategia");
+});
+
+test("a stream the scanner invented is discarded, not stored", () => {
+  // The scanner reads untrusted mail, so the answer is matched against his
+  // real streams rather than believed. null means the caller's default.
+  for (const bogus of ["Client Secrets", "'; drop table tasks; --", "", 42]) {
+    const r = validateScanProposals(
+      [proposal({ work_stream: bogus })],
+      new Set(["gmail:icai:m1"]),
+      5,
+      STREAMS
+    );
+    assert.equal(r.accepted[0].work_stream, null, `bogus stream accepted: ${String(bogus)}`);
+  }
+  // No list supplied at all: nothing is trusted.
+  const none = validateScanProposals(
+    [proposal({ work_stream: "Personal" })],
+    new Set(["gmail:icai:m1"]),
+    5
+  );
+  assert.equal(none.accepted[0].work_stream, null);
+});
+
+test("the scan request lists the real streams, and says the mailbox is not the answer", () => {
+  const msg = buildScanUserMessage(
+    [{ ref: "gmail:icai:m1", account: "icai", from: "a@b.c", subject: "S", date: "d", snippet: "x" }],
+    STREAMS
+  );
+  for (const s of STREAMS) assert.ok(msg.includes(s), `stream missing from the request: ${s}`);
+  assert.ok(msg.toLowerCase().includes("not by which mailbox"));
+  // With no streams known, the instruction is left out entirely.
+  const bare = buildScanUserMessage(
+    [{ ref: "gmail:icai:m1", account: "icai", from: "a@b.c", subject: "S", date: "d", snippet: "x" }]
+  );
+  assert.ok(!bare.toLowerCase().includes("available streams"));
 });

@@ -22,6 +22,7 @@ import {
   assertReminderHome,
   runReminderCleanup,
   nextObligationDate,
+  reminderTitle,
   type ObligationFrequency,
 } from "@/lib/reminders/core";
 import type { Database } from "@/lib/database.types";
@@ -343,7 +344,7 @@ export async function syncTaskReminder(
   const svc = createServiceClient();
   const { data: task } = await svc
     .from("tasks")
-    .select("id, title, due_ts, remind_offsets, status")
+    .select("id, title, due_ts, remind_offsets, status, trips(title)")
     .eq("id", taskId)
     .single();
   if (!task) return { created: false, reason: "Task not found." };
@@ -358,7 +359,10 @@ export async function syncTaskReminder(
     userId,
     { task_id: taskId },
     {
-      title: `Reminder: ${task.title}`,
+      // A checklist step's own title is bare ("Book onward ticket"), which is
+      // useless on a phone with three trips in flight, so the trip rides
+      // along. Ordinary tasks are unchanged.
+      title: reminderTitle(task.title, (task.trips as { title: string } | null)?.title),
       anchorIso: task.due_ts,
       offsetsDays: task.remind_offsets ?? [7, 3, 1, 0],
     }
