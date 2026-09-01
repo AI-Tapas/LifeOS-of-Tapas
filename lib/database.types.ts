@@ -164,6 +164,34 @@ export type Database = {
           },
         ]
       }
+      assistant_chat_turns: {
+        Row: {
+          content: string
+          created_at: string
+          id: string
+          role: string
+          seq: number
+          tools: Json
+          user_id: string
+        }
+        Insert: {
+          content?: string
+          created_at?: string
+          id?: string
+          role: string
+          tools?: Json
+          user_id?: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          id?: string
+          role?: string
+          tools?: Json
+          user_id?: string
+        }
+        Relationships: []
+      }
       assistant_settings: {
         Row: {
           chat_model: string | null
@@ -601,7 +629,9 @@ export type Database = {
           people_ids: string[]
           project_id: string | null
           tags: string[]
+          task_id: string | null
           title: string
+          trip_id: string | null
           type: Database["public"]["Enums"]["note_type"]
           user_id: string
           work_stream_id: string | null
@@ -614,7 +644,9 @@ export type Database = {
           people_ids?: string[]
           project_id?: string | null
           tags?: string[]
+          task_id?: string | null
           title: string
+          trip_id?: string | null
           type: Database["public"]["Enums"]["note_type"]
           user_id?: string
           work_stream_id?: string | null
@@ -627,7 +659,9 @@ export type Database = {
           people_ids?: string[]
           project_id?: string | null
           tags?: string[]
+          task_id?: string | null
           title?: string
+          trip_id?: string | null
           type?: Database["public"]["Enums"]["note_type"]
           user_id?: string
           work_stream_id?: string | null
@@ -638,6 +672,20 @@ export type Database = {
             columns: ["project_id"]
             isOneToOne: false
             referencedRelation: "projects"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notes_task_id_fkey"
+            columns: ["task_id"]
+            isOneToOne: false
+            referencedRelation: "tasks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "notes_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: false
+            referencedRelation: "trips"
             referencedColumns: ["id"]
           },
           {
