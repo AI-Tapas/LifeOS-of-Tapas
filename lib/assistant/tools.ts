@@ -269,7 +269,11 @@ export const TOOLS: ToolDef[] = [
   },
   {
     name: "draft_email",
-    bucket: "autonomous",
+    // Confirm, not autonomous. Drafting IS proposing a send: the executor has
+    // always turned this into a proposed send_email row, and the bucket it
+    // declares now says the same thing, so an audit of what ran under which
+    // grant cannot disagree with what actually happened.
+    bucket: "confirm",
     disclosure: "app_data",
     description:
       "Draft an email in Tapas's voice. The draft is stored in the app only (never in Gmail or Outlook) and CANNOT be sent until Tapas approves it in the queue.",
@@ -733,6 +737,24 @@ export const TOOL_TARGETS: Record<string, ToolTarget> = {
   // Not a row id: the account slot must name a connected account.
   add_event_solo: { arg: "account", label: "account" },
 };
+
+// ---------------------------------------------------------------------------
+// B11: which path a tool call takes.
+//
+// A function of the tool NAME and nothing else. Not the actor, not the
+// session, not the persona. The invariant is that unattended execution can
+// never raise autonomy, and the cheapest way to keep an invariant true is a
+// resolver that structurally cannot see who is asking: the browser and the
+// connector reach the same answer because there is no other answer to reach.
+// ---------------------------------------------------------------------------
+export type ToolRoute = "stub" | "propose" | "autonomous" | "unknown";
+
+export function routeTool(name: string): ToolRoute {
+  if (STUB_KINDS.has(name)) return "stub";
+  if (CONFIRM_KINDS.has(name)) return "propose";
+  if (AUTONOMOUS_KINDS.has(name)) return "autonomous";
+  return "unknown";
+}
 
 export function toolByName(name: string): ToolDef | undefined {
   return TOOLS.find((t) => t.name === name);

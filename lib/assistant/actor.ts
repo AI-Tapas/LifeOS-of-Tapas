@@ -13,6 +13,14 @@
 // bypasses RLS, so every query it makes must scope itself; this app has
 // exactly one user, and the owner id below is resolved from the allow-listed
 // sign-in address rather than trusted from the caller.
+//
+// B11. Each actor names its origin. The origin is for the record and for
+// routing: which audit row this was, where a proposed action gets surfaced,
+// whether the morning brief mentions it. It is NOT an input to permission.
+// Unattended execution must never raise autonomy, so bucket resolution is
+// deliberately a function of the tool name alone (see routeTool in tools.ts,
+// which cannot see an actor), and scripts/m4.test.ts fails if the executor's
+// dispatch ever starts reading this field.
 
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -20,9 +28,13 @@ import { FORBIDDEN_EMAIL as OWNER_SIGN_IN_EMAIL } from "@/lib/accounts";
 import type { Database } from "@/lib/database.types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+export type ActorOrigin = "owner_session" | "service";
+
 export interface Actor {
   supabase: SupabaseClient<Database>;
   userId: string;
+  // Audit and routing only. Never permission.
+  origin: ActorOrigin;
 }
 
 export async function cookieActor(): Promise<Actor> {
@@ -31,7 +43,7 @@ export async function cookieActor(): Promise<Actor> {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) throw new Error("not signed in");
-  return { supabase, userId: user.id };
+  return { supabase, userId: user.id, origin: "owner_session" };
 }
 
 let cachedOwnerId: string | null = null;
@@ -47,5 +59,5 @@ export async function serviceActor(): Promise<Actor> {
     if (!owner) throw new Error("The owner account does not exist yet.");
     cachedOwnerId = owner.id;
   }
-  return { supabase, userId: cachedOwnerId };
+  return { supabase, userId: cachedOwnerId, origin: "service" };
 }

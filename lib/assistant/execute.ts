@@ -9,7 +9,7 @@
 // withResourceAuth.
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { cookieActor, type Actor } from "@/lib/assistant/actor";
+import { cookieActor, type Actor, type ActorOrigin } from "@/lib/assistant/actor";
 import { withResourceAuth } from "@/lib/oauth/tokens";
 import { createEvent, updateEvent, deleteAppEvent } from "@/lib/events/write";
 import {
@@ -38,12 +38,11 @@ import { HOTEL_ARRANGEMENTS, type HotelArrangement } from "@/lib/trips/checklist
 import { isReminderMode } from "@/lib/reminders/core";
 import {
   AUTONOMOUS_KINDS,
-  CONFIRM_KINDS,
-  STUB_KINDS,
   STUB_REPLIES,
   SEND_CLASS,
   assertNoAttendees,
   disclosureOf,
+  routeTool,
   TOOL_TARGETS,
   type ToolTarget,
 } from "./tools";
@@ -224,23 +223,25 @@ export async function executeToolCall(
   return insideTool.run(true, () => dispatchToolCall(name, input, actor));
 }
 
+// B11: the route comes from routeTool, which takes a name and nothing else.
+// Nothing in this function may read actor.origin: an unattended caller has to
+// land in exactly the same branch as the browser, and the way to keep that
+// true is to give the decision nothing else to read.
 async function dispatchToolCall(
   name: string,
   input: Record<string, unknown>,
   actor?: Actor
 ): Promise<ToolOutcome> {
-  if (STUB_KINDS.has(name)) {
+  const route = routeTool(name);
+  if (route === "stub") {
     return { reply: STUB_REPLIES[name] ?? "Not available yet." };
   }
-  const { supabase, userId } = await ownerClient(actor);
+  if (route === "unknown") return { reply: `Unknown tool: ${name}.` };
 
-  if (CONFIRM_KINDS.has(name) || name === "draft_email") {
-    return proposeAction(supabase, userId, name, input);
-  }
-  if (AUTONOMOUS_KINDS.has(name)) {
-    return performAutonomous(supabase, userId, name, input);
-  }
-  return { reply: `Unknown tool: ${name}.` };
+  const { supabase, userId, origin } = await ownerClient(actor);
+  return route === "propose"
+    ? proposeAction(supabase, userId, name, input)
+    : performAutonomous(supabase, userId, name, input, origin);
 }
 
 // Anything that would notify a third party lands as a proposed action. The
@@ -399,7 +400,8 @@ async function performAutonomous(
   supabase: Db,
   userId: string,
   name: string,
-  input: Record<string, unknown>
+  input: Record<string, unknown>,
+  origin: ActorOrigin
 ): Promise<ToolOutcome> {
   if (!AUTONOMOUS_KINDS.has(name)) {
     throw new Error(`${name} is not an autonomous tool.`);
@@ -407,7 +409,7 @@ async function performAutonomous(
   const spec = TOOL_TARGETS[name];
   const outcome = await runAutonomousAction<Performed>(input, spec, {
     resolveTarget: (value) => targetResolves(supabase, userId, spec, value),
-    perform: () => performers[name](supabase, userId, input),
+    perform: () => performers[name](supabase, userId, input, origin),
     recordExecuted: async (done) => {
       const { data } = await supabase
         .from("assistant_actions")
@@ -450,10 +452,15 @@ async function performAutonomous(
   return { reply: outcome.done.summary, actionId: outcome.actionId ?? undefined };
 }
 
+// The origin is passed to every performer and read by the three that re-enter
+// the assistant (the scan, undo, reject), so an unattended call stays labelled
+// unattended all the way down. It is carried for the record, never consulted
+// for permission: routeTool decided the bucket before any of this ran.
 type Performer = (
   supabase: Db,
   userId: string,
-  input: Record<string, unknown>
+  input: Record<string, unknown>,
+  origin: ActorOrigin
 ) => Promise<Performed>;
 
 const performers: Record<string, Performer> = {
@@ -932,9 +939,9 @@ const performers: Record<string, Performer> = {
     return { summary: `Event deleted: ${ev.title}.`, undo: null };
   },
 
-  async scan_mail(supabase, userId) {
+  async scan_mail(supabase, userId, _input, origin) {
     const { runMailScan } = await import("@/lib/assistant/scan");
-    const summary = await runMailScan({ supabase, userId });
+    const summary = await runMailScan({ supabase, userId, origin });
     return {
       summary:
         `Mail scan: ${summary.scanned} emails read, ${summary.created} task` +
@@ -944,18 +951,18 @@ const performers: Record<string, Performer> = {
     };
   },
 
-  async undo_action(supabase, userId, input) {
+  async undo_action(supabase, userId, input, origin) {
     const actionId = s(input.action_id);
     if (!actionId) throw new Error("action_id is required.");
-    const r = await undoExecutedAction(actionId, { supabase, userId });
+    const r = await undoExecutedAction(actionId, { supabase, userId, origin });
     if (!r.ok) throw new Error(r.message ?? "That action could not be undone.");
     return { summary: "The earlier action was undone.", undo: null };
   },
 
-  async reject_queued_action(supabase, userId, input) {
+  async reject_queued_action(supabase, userId, input, origin) {
     const actionId = s(input.action_id);
     if (!actionId) throw new Error("action_id is required.");
-    const r = await rejectProposedAction(actionId, { supabase, userId });
+    const r = await rejectProposedAction(actionId, { supabase, userId, origin });
     if (!r.ok) throw new Error(r.message ?? "That action could not be rejected.");
     return { summary: "The queued action was discarded; it can never be sent.", undo: null };
   },
@@ -1132,7 +1139,8 @@ export async function approveAndExecute(
   ok: boolean;
   message?: string;
 }> {
-  const { supabase, userId } = await ownerClient(actor);
+  const owner = await ownerClient(actor);
+  const { supabase, userId } = owner;
   const { data: action } = await supabase
     .from("assistant_actions")
     .select("id, kind, status, payload")
@@ -1169,7 +1177,7 @@ export async function approveAndExecute(
     .select("id");
   if (!approved?.length) return { ok: false, message: "The action changed state." };
   await audit(supabase, userId, "approve", actionId, { kind: action.kind });
-  return executeApprovedAction(actionId, { supabase, userId });
+  return executeApprovedAction(actionId, owner);
 }
 
 export async function executeApprovedAction(
@@ -1179,7 +1187,8 @@ export async function executeApprovedAction(
   ok: boolean;
   message?: string;
 }> {
-  const { supabase, userId } = await ownerClient(actor);
+  const owner = await ownerClient(actor);
+  const { supabase, userId } = owner;
   return runApprovedExecution({
     loadAction: async () => {
       const { data } = await supabase
@@ -1201,7 +1210,7 @@ export async function executeApprovedAction(
       return (data?.length ?? 0) > 0;
     },
     perform: (kind, payload) =>
-      performSendClass({ supabase, userId }, kind, payload as Record<string, unknown>),
+      performSendClass(owner, kind, payload as Record<string, unknown>),
     markExecuted: async (result) => {
       await supabase
         .from("assistant_actions")

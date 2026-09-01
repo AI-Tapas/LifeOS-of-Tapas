@@ -21,6 +21,9 @@
 //   7. Fail closed on an unresolved target (B10): an autonomous tool pointed at
 //      something that does not exist is queued for Tapas, never run and never
 //      silently dropped.
+//   8. Unattended execution never raises autonomy (B11): the bucket resolver
+//      cannot see who is asking, and the send path stays unreachable from the
+//      service actor without an owner-session approval first.
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -33,6 +36,7 @@ import {
   TOOL_TARGETS,
   toolByName,
   disclosureOf,
+  routeTool,
   assertNoAttendees,
   anthropicTools,
   schemaStats,
@@ -1058,6 +1062,121 @@ test("every autonomous tool that acts on an existing row declares its target", (
       .properties;
     assert.ok(target.arg in props, `${name} has no ${target.arg} argument`);
   }
+});
+
+
+// --- 8. unattended execution never raises autonomy (B11) ----------------------
+//
+// The service actor (the MCP connector, the nightly cron) and the cookie actor
+// return the same shape, and the executor has always been identical for
+// either. That is the right design, but "identical" was an observation, not a
+// control. These tests make it one: the actor may change where something is
+// surfaced and what the audit row says, never which bucket a tool runs under.
+
+test("bucket resolution cannot see who is asking", () => {
+  // The control is structural. routeTool takes a tool name, full stop: there
+  // is no actor, no session and no persona in its signature, so the browser
+  // and the connector cannot reach different answers because there is no other
+  // answer to reach.
+  assert.equal(routeTool.length, 1, "routeTool must take the tool name and nothing else");
+
+  // And the answers themselves, so a reclassification is a visible diff.
+  for (const t of TOOLS) {
+    const expected =
+      t.bucket === "stub" ? "stub" : t.bucket === "confirm" ? "propose" : "autonomous";
+    assert.equal(routeTool(t.name), expected, `${t.name} routes by its bucket`);
+  }
+  assert.equal(routeTool("read_drive_file"), "unknown", "an unknown name runs nothing");
+});
+
+test("the bucket is decided before the executor knows who is asking", async () => {
+  // The resolver itself has nothing to consult: no actor, no session, no
+  // persona anywhere in it.
+  const source = routeTool.toString();
+  assert.doesNotMatch(source, /actor|origin|session|persona/i);
+
+  // execute.ts is a server module, so it is read rather than imported. What
+  // matters is the ORDER: the route is fixed from the tool name as the first
+  // thing the dispatcher does, before the actor is even loaded, and it is
+  // never reassigned afterwards. The origin travels onward from here for the
+  // audit trail, but by then the bucket is already settled and nothing can
+  // reopen it.
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync("lib/assistant/execute.ts", "utf8");
+  const start = src.indexOf("async function dispatchToolCall(");
+  assert.ok(start > 0, "dispatchToolCall must exist");
+  const body = src.slice(start, src.indexOf("\n}", start));
+
+  const decided = body.indexOf("const route = routeTool(name);");
+  const actorLoaded = body.indexOf("ownerClient(");
+  assert.ok(decided > 0, "the route must come from routeTool");
+  assert.ok(
+    actorLoaded > decided,
+    "the actor must not be loaded until the bucket is already settled"
+  );
+  assert.equal(
+    body.split(/\broute\s*=(?!=)/).length - 1,
+    1,
+    "the route is assigned once and never revised"
+  );
+});
+
+test("a confirm tool from the service actor proposes and performs nothing", async () => {
+  // draft_email and send_email are the same act: the connector's draft IS a
+  // proposed send. Both route to propose whoever asks, and a proposed row
+  // cannot execute.
+  for (const name of ["send_email", "draft_email", "propose_event_with_invites"]) {
+    assert.equal(routeTool(name), "propose", `${name} must only ever queue`);
+    assert.equal(AUTONOMOUS_KINDS.has(name), false, `${name} must not be autonomous`);
+  }
+  const h = gateHarness({ status: "proposed" });
+  const r = await runApprovedExecution(h.deps);
+  assert.equal(r.ok, false);
+  assert.deepEqual(h.calls, [], "an unapproved action performs nothing at all");
+});
+
+test("the send path is unreachable from the service actor without an owner approval", async () => {
+  const { readFileSync, readdirSync } = await import("node:fs");
+
+  // 1. The connector surface, which is the service actor's only entry point,
+  //    holds no approval or execution path at all.
+  const connector = readFileSync("lib/assistant/mcp-api.ts", "utf8");
+  for (const forbidden of ["approveAndExecute", "executeApprovedAction", "performSendClass"]) {
+    assert.equal(
+      connector.includes(forbidden),
+      false,
+      `the MCP surface must not reach ${forbidden}`
+    );
+  }
+
+  // 2. Nothing else in the app reaches approval either, apart from the one
+  //    owner-session server action file. A future route that imported it would
+  //    fail here rather than quietly hand approval to a token-authenticated
+  //    caller.
+  const files = readdirSync(".", { recursive: true, encoding: "utf8" })
+    .map((f) => String(f).replace(/\\/g, "/"))
+    .filter((f) => /\.tsx?$/.test(f))
+    .filter(
+      (f) =>
+        !f.startsWith("node_modules/") &&
+        !f.startsWith(".next/") &&
+        !f.startsWith(".claude/")
+    );
+  const importers = files.filter((f) => {
+    if (f === "lib/assistant/execute.ts") return false; // where it is defined
+    return /\bapproveAndExecute\b/.test(readFileSync(f, "utf8"));
+  });
+  assert.deepEqual(
+    importers.sort(),
+    ["app/(app)/assistant/actions.ts", "scripts/m4.test.ts"],
+    "approval belongs to the owner-session server action, and to this test"
+  );
+
+  // 3. And the gate itself still refuses everything but an approved send.
+  const notApproved = gateHarness({ status: "proposed" });
+  assert.equal((await runApprovedExecution(notApproved.deps)).ok, false);
+  const notSend = gateHarness({ kind: "create_task", status: "approved" });
+  assert.equal((await runApprovedExecution(notSend.deps)).ok, false);
 });
 
 // --- destructive tools stay reversible ---------------------------------------
