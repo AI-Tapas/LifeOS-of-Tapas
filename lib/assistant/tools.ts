@@ -559,6 +559,14 @@ export const TOOLS: ToolDef[] = [
         items: { type: "string" },
         description: "Cities the trip covers, in order.",
       }),
+      session_label: strOrNull(
+        "Short session identity read at a glance, e.g. L1D2 for AICA Level 1 Day 2, or L2D5 for Level 2 Day 5."
+      ),
+      session_date: {
+        ...strOrNull(
+          "The day the session actually runs, which is usually NOT the trip's start date: he travels the night before. YYYY-MM-DD."
+        ),
+      },
       bills_to: enumOrNull(
         ["icai_monthly", "chapter_aed", "none"],
         "How it is billed. icai_monthly (the default) goes into the monthly claim to the ICAI AI committee. chapter_aed is an overseas chapter, invoiced separately to the chapter in AED and never on the ICAI claim. none is not billable to anyone."
@@ -597,6 +605,10 @@ export const TOOLS: ToolDef[] = [
         ["branch", "self", "relative", "same_day"],
         "How the accommodation is handled: branch, self, relative or same_day. Changing it does not rewrite checklist steps already there; the trip screen offers that separately. Omit to keep."
       ),
+      session_label: strOrNull(
+        "Short session identity, e.g. L1D2 for AICA Level 1 Day 2. Omit to keep."
+      ),
+      session_date: { ...strOrNull(DATE_DESC + " The day the session runs, not the travel start. Omit to keep.") },
     }),
   },
   {

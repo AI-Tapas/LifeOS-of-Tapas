@@ -136,3 +136,50 @@ export function tripDatesLabel(start: string | null, end: string | null): string
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
+
+// ---------------------------------------------------------------------------
+// Which session a trip is for (M7d)
+// ---------------------------------------------------------------------------
+// A trip card used to lead with "3 to 5 September 2026", which is the travel
+// span. Tapas had to stop and work out which of those days he was actually
+// teaching. These build the line that answers that without him thinking:
+//
+//   "L1D2 · 4 Sept"
+//
+// Falls back silently: a trip with no session recorded reads exactly as it
+// did before, so nothing entered earlier looks broken.
+
+// "4 Sept". Short on purpose: it sits beside the label, not alone, and the
+// year is already obvious from the month grouping above it.
+export function shortDayLabel(dateOnly: string | null): string {
+  if (!dateOnly) return "";
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateOnly);
+  if (!m) return "";
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sept", "Oct", "Nov", "Dec"];
+  return `${Number(m[3])} ${MONTHS[Number(m[2]) - 1]}`;
+}
+
+// The one line he reads first. Either half may be missing: a trip with a
+// label but no date still says which session it is, and a date with no label
+// still says when he teaches.
+export function sessionLine(
+  sessionLabel: string | null,
+  sessionDate: string | null
+): string {
+  const label = (sessionLabel ?? "").trim();
+  const day = shortDayLabel(sessionDate);
+  if (label && day) return `${label} · ${day}`;
+  return label || day;
+}
+
+// True when the travel span says something the session date does not, which
+// is when showing both earns its space. A day return repeats itself, so it
+// does not.
+export function travelDiffersFromSession(
+  start: string | null,
+  end: string | null,
+  sessionDate: string | null
+): boolean {
+  if (!sessionDate || !start) return true;
+  return !(start === sessionDate && (end ?? start) === sessionDate);
+}

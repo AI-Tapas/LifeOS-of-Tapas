@@ -36,6 +36,8 @@ export interface WorkStreamRow {
 }
 
 export interface TripFormValues {
+  session_label?: string | null;
+  session_date?: string | null;
   id?: string;
   purpose: TripPurpose;
   title: string;
@@ -78,6 +80,8 @@ export default function TripForm({
   const [start, setStart] = useState(trip?.start_date ?? "");
   const [end, setEnd] = useState(trip?.end_date ?? "");
   const [cities, setCities] = useState((trip?.cities ?? []).join(", "));
+  const [sessionLabel, setSessionLabel] = useState(trip?.session_label ?? "");
+  const [sessionDate, setSessionDate] = useState(trip?.session_date ?? "");
   const [status, setStatus] = useState<TripStatus>(trip?.status ?? "planned");
   const [billsTo, setBillsTo] = useState<BillsTo>(trip?.bills_to ?? "icai_monthly");
   const [notes, setNotes] = useState(trip?.notes ?? "");
@@ -110,6 +114,8 @@ export default function TripForm({
       work_stream_id: streamId,
       start_date: start || null,
       end_date: end || null,
+      session_label: sessionLabel.trim() || null,
+      session_date: sessionDate || null,
       cities: cities
         .split(",")
         .map((c) => c.trim())
@@ -236,6 +242,33 @@ export default function TripForm({
             placeholder="Ahmedabad, Rajkot"
           />
         </Field>
+
+        {/* The session, which is not the same as the travel dates above: he
+            arrives the night before, so a trip running 3 to 5 September can
+            easily be a session on the 4th. This is the line the trips list
+            leads with, so he never has to work it out again. */}
+        <div className="flex gap-2">
+          <Field label="Session">
+            <input
+              value={sessionLabel}
+              onChange={(e) => setSessionLabel(e.target.value)}
+              className={inputCls}
+              placeholder="L1D2"
+            />
+          </Field>
+          <Field label="Session date">
+            <input
+              type="date"
+              value={sessionDate}
+              onChange={(e) => setSessionDate(e.target.value)}
+              className={inputCls}
+            />
+          </Field>
+        </div>
+        <p className="-mt-1 text-[11px] text-secondary">
+          L1D2 means AICA Level 1, day 2 of that batch. The date is the day you
+          actually teach, not the day you travel.
+        </p>
 
         <Field label="Hotel">
           <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Hotel">

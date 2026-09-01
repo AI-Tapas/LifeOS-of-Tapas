@@ -967,6 +967,8 @@ export type Database = {
       trips: {
         Row: {
           bills_to: Database["public"]["Enums"]["trip_bills_to"]
+          session_label: string | null
+          session_date: string | null
           cities: Json | null
           end_date: string | null
           ext_event_id: string | null
@@ -985,6 +987,8 @@ export type Database = {
         }
         Insert: {
           bills_to?: Database["public"]["Enums"]["trip_bills_to"]
+          session_label?: string | null
+          session_date?: string | null
           cities?: Json | null
           end_date?: string | null
           ext_event_id?: string | null
@@ -1003,6 +1007,8 @@ export type Database = {
         }
         Update: {
           bills_to?: Database["public"]["Enums"]["trip_bills_to"]
+          session_label?: string | null
+          session_date?: string | null
           cities?: Json | null
           end_date?: string | null
           ext_event_id?: string | null

@@ -32,6 +32,8 @@ export interface TripInput {
   start_date?: string | null;
   end_date?: string | null;
   cities?: string[];
+  session_label?: string | null;
+  session_date?: string | null;
   legs?: TripLeg[];
   status?: TripStatus;
   // Who the trip is billed to, if anyone. Defaults to the monthly ICAI claim.
@@ -79,6 +81,8 @@ export async function createTrip(
       start_date: input.start_date ?? null,
       end_date: input.end_date ?? null,
       cities: (input.cities ?? []) as Json,
+      session_label: input.session_label ?? null,
+      session_date: input.session_date ?? null,
       legs: (input.legs ?? []) as unknown as Json,
       status: input.status ?? "planned",
       bills_to: input.bills_to ?? "icai_monthly",
@@ -203,6 +207,8 @@ export async function updateTrip(
       ...(patch.start_date !== undefined ? { start_date: patch.start_date } : {}),
       ...(patch.end_date !== undefined ? { end_date: patch.end_date } : {}),
       ...(patch.cities !== undefined ? { cities: patch.cities as Json } : {}),
+      ...(patch.session_label !== undefined ? { session_label: patch.session_label } : {}),
+      ...(patch.session_date !== undefined ? { session_date: patch.session_date } : {}),
       ...(patch.legs !== undefined ? { legs: patch.legs as unknown as Json } : {}),
       ...(patch.status !== undefined ? { status: patch.status } : {}),
       ...(patch.bills_to !== undefined ? { bills_to: patch.bills_to } : {}),

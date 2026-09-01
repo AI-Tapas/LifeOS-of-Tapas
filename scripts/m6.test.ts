@@ -27,6 +27,9 @@ import {
   billableTotal,
   parseLegs,
   type BillableExpense,
+  sessionLine,
+  shortDayLabel,
+  travelDiffersFromSession,
 } from "../lib/trips/bill.ts";
 import {
   briefGapLine,
@@ -413,4 +416,43 @@ test("nothing in the travel desk invites a document", () => {
     /Never the document itself/,
     "the receipt field must say plainly that it is a reference, not a file"
   );
+});
+
+// --- which session a trip is for (M7d, 1 September 2026) -------------------
+// A trip card led with "3 to 5 September 2026", which is the TRAVEL span, and
+// Tapas had to stop and work out which of those days he was teaching.
+
+test("the session line reads level, day and the teaching date", () => {
+  assert.equal(sessionLine("L1D2", "2026-09-04"), "L1D2 · 4 Sept");
+  assert.equal(sessionLine("L2D5", "2026-09-25"), "L2D5 · 25 Sept");
+  assert.equal(sessionLine("L1D1", "2026-12-01"), "L1D1 · 1 Dec");
+});
+
+test("half an answer is still shown; no answer shows nothing", () => {
+  // A trip with a label but no date still says which session it is.
+  assert.equal(sessionLine("L2D3", null), "L2D3");
+  // A date with no label still says when he teaches.
+  assert.equal(sessionLine(null, "2026-09-04"), "4 Sept");
+  assert.equal(sessionLine("", "  "), "");
+  assert.equal(sessionLine(null, null), "");
+  // Never renders a dangling separator.
+  for (const out of [sessionLine("L2D3", null), sessionLine(null, "2026-09-04")]) {
+    assert.ok(!out.includes("·"), `dangling separator in "${out}"`);
+  }
+});
+
+test("the travel line is dropped only when it would repeat the session date", () => {
+  // Bangalore: travels the 3rd, teaches the 4th, home the 5th. Both lines earn
+  // their place.
+  assert.equal(travelDiffersFromSession("2026-09-03", "2026-09-05", "2026-09-04"), true);
+  // A day return says the same thing twice.
+  assert.equal(travelDiffersFromSession("2026-09-04", "2026-09-04", "2026-09-04"), false);
+  // Nothing recorded: keep the travel line rather than hiding both.
+  assert.equal(travelDiffersFromSession("2026-09-03", "2026-09-05", null), true);
+});
+
+test("a bad or missing date never renders as junk", () => {
+  for (const bad of [null, "", "not-a-date", "2026-9-4"]) {
+    assert.equal(shortDayLabel(bad), "", `junk from ${String(bad)}`);
+  }
 });

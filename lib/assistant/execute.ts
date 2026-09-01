@@ -1033,6 +1033,8 @@ const performers: Record<string, Performer> = {
         (s(input.bills_to) as Database["public"]["Enums"]["trip_bills_to"] | null) ??
         undefined,
       notes: s(input.notes),
+      session_label: s(input.session_label),
+      session_date: s(input.session_date),
       hotel_arrangement: hotelArrangement(input.hotel_arrangement),
       // Same seeding path as the add-trip drawer: one implementation, so the
       // steps and their dates cannot differ between the app and a connector.
@@ -1050,7 +1052,7 @@ const performers: Record<string, Performer> = {
     if (!tripId) throw new Error("trip_id is required.");
     const { data: prev } = await supabase
       .from("trips")
-      .select("title, status, start_date, end_date, bills_to, notes, hotel_arrangement")
+      .select("title, status, start_date, end_date, bills_to, notes, hotel_arrangement, session_label, session_date")
       .eq("id", tripId)
       .single();
     if (!prev) throw new Error("Trip not found.");
@@ -1061,6 +1063,8 @@ const performers: Record<string, Performer> = {
         : {}),
       ...(s(input.start_date) ? { start_date: s(input.start_date) } : {}),
       ...(s(input.end_date) ? { end_date: s(input.end_date) } : {}),
+      ...(s(input.session_label) ? { session_label: s(input.session_label) } : {}),
+      ...(s(input.session_date) ? { session_date: s(input.session_date) } : {}),
       ...(s(input.bills_to)
         ? {
             bills_to: s(
