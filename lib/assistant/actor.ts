@@ -22,19 +22,23 @@
 // which cannot see an actor), and scripts/m4.test.ts fails if the executor's
 // dispatch ever starts reading this field.
 
+import type { ActorOrigin, OriginatingJob } from "@/lib/assistant/core";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { FORBIDDEN_EMAIL as OWNER_SIGN_IN_EMAIL } from "@/lib/accounts";
 import type { Database } from "@/lib/database.types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-export type ActorOrigin = "owner_session" | "service";
+export type { ActorOrigin, OriginatingJob };
 
 export interface Actor {
   supabase: SupabaseClient<Database>;
   userId: string;
   // Audit and routing only. Never permission.
   origin: ActorOrigin;
+  // The scheduled job this call belongs to, when it belongs to one. Audit
+  // only: a cron tick has exactly the autonomy an owner session has, no more.
+  job: OriginatingJob | null;
 }
 
 export async function cookieActor(): Promise<Actor> {
@@ -43,12 +47,12 @@ export async function cookieActor(): Promise<Actor> {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) throw new Error("not signed in");
-  return { supabase, userId: user.id, origin: "owner_session" };
+  return { supabase, userId: user.id, origin: "owner_session", job: null };
 }
 
 let cachedOwnerId: string | null = null;
 
-export async function serviceActor(): Promise<Actor> {
+export async function serviceActor(job: OriginatingJob | null = null): Promise<Actor> {
   const supabase = createServiceClient();
   if (!cachedOwnerId) {
     const { data, error } = await supabase.auth.admin.listUsers({ perPage: 50 });
@@ -59,5 +63,5 @@ export async function serviceActor(): Promise<Actor> {
     if (!owner) throw new Error("The owner account does not exist yet.");
     cachedOwnerId = owner.id;
   }
-  return { supabase, userId: cachedOwnerId, origin: "service" };
+  return { supabase, userId: cachedOwnerId, origin: "service", job };
 }

@@ -24,6 +24,8 @@
 //   8. Unattended execution never raises autonomy (B11): the bucket resolver
 //      cannot see who is asking, and the send path stays unreachable from the
 //      service actor without an owner-session approval first.
+//   9. Approval provenance (B12): every assistant audit row says why the action
+//      was permitted, in one shape written by one helper.
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -45,6 +47,7 @@ import {
   canonicalJson,
   checkDisclosure,
   hashPayload,
+  provenance,
   runApprovedExecution,
   runAutonomousAction,
   validateScanProposals,
@@ -1177,6 +1180,108 @@ test("the send path is unreachable from the service actor without an owner appro
   assert.equal((await runApprovedExecution(notApproved.deps)).ok, false);
   const notSend = gateHarness({ kind: "create_task", status: "approved" });
   assert.equal((await runApprovedExecution(notSend.deps)).ok, false);
+});
+
+
+// --- 9. approval provenance (B12) ---------------------------------------------
+//
+// "The assistant created this event" and "the assistant created this event
+// because you approved queue item X, and the hash still matched when it ran"
+// are different levels of accountability. These prove the second one is what
+// gets written, in one shape, whichever path the action took.
+
+test("an approved send records the approval it rests on", () => {
+  const hash = hashPayload({ to: ["client@example.com"], subject: "s" });
+  const p = provenance({
+    basis: "owner_approval",
+    tool: "send_email",
+    disclosure: disclosureOf("send_email"),
+    actorOrigin: "owner_session",
+    actionId: "act-1",
+    payloadHash: hash,
+  });
+  assert.equal(p.basis, "owner_approval");
+  assert.equal(p.action_id, "act-1", "an approved action names the queue item");
+  assert.equal(p.payload_hash, hash, "and the hash that was verified at execution");
+  assert.equal(p.actor_origin, "owner_session");
+  assert.equal(p.originating_job, null);
+});
+
+test("an autonomous task creation records the bucket it acted under", () => {
+  const p = provenance({
+    basis: "autonomous_bucket",
+    tool: "create_task",
+    disclosure: disclosureOf("create_task"),
+    actorOrigin: "service",
+    actionId: "act-2",
+  });
+  assert.equal(p.basis, "autonomous_bucket");
+  assert.equal(p.disclosure, "app_data");
+  // No approval was involved, so there is no hash to claim was verified.
+  assert.equal(p.payload_hash, null);
+  assert.equal(p.actor_origin, "service", "unattended is recorded, not hidden");
+});
+
+test("a downgrade and a scheduled scan record what they were", () => {
+  const down = provenance({
+    basis: "downgraded_to_queue",
+    tool: "update_task",
+    disclosure: disclosureOf("update_task"),
+    actorOrigin: "owner_session",
+    actionId: "queued-1",
+  });
+  assert.equal(down.basis, "downgraded_to_queue");
+  assert.equal(down.action_id, "queued-1", "the queue row Tapas will see");
+
+  const scan = provenance({
+    basis: "autonomous_bucket",
+    tool: "scan_mail",
+    disclosure: disclosureOf("scan_mail"),
+    actorOrigin: "service",
+    originatingJob: "cron_scan",
+  });
+  assert.equal(scan.originating_job, "cron_scan");
+  assert.equal(scan.disclosure, "mail_body", "the one row that says a body was read");
+});
+
+test("every provenance carries every field, and one helper writes them all", async () => {
+  // A reader never has to work out whether a missing field means "not
+  // applicable" or "nobody filled it in": absent values are null, present.
+  const minimal = provenance({
+    basis: "confirm_bucket",
+    tool: "draft_email",
+    disclosure: disclosureOf("draft_email"),
+    actorOrigin: "owner_session",
+  });
+  assert.deepEqual(Object.keys(minimal).sort(), [
+    "action_id",
+    "actor_origin",
+    "basis",
+    "disclosure",
+    "originating_job",
+    "payload_hash",
+    "tool",
+  ]);
+  for (const [key, value] of Object.entries(minimal)) {
+    assert.notEqual(value, undefined, `${key} must be present, null where it does not apply`);
+  }
+
+  // And the executor writes it through that helper on every audit row rather
+  // than assembling the shape at each call site: audit() takes provenance as a
+  // required argument, so a row without one does not compile.
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync("lib/assistant/execute.ts", "utf8");
+  const start = src.indexOf("async function audit(");
+  const body = src.slice(start, src.indexOf("\n}", start));
+  assert.match(body, /prov: Provenance/, "provenance must be required, not optional");
+  assert.match(body, /provenance: prov/, "and it must reach the row");
+  // Every audit call passes one, and every one of those comes from the wrapper.
+  const auditCalls = src.split(/\bawait audit\(/).length - 1;
+  const provArgs = src.split(/\bprov\(owner,/).length - 1;
+  // Every direct call, plus the one the approval gate makes through its audit
+  // dependency, is given a provenance built by the wrapper.
+  assert.equal(provArgs, auditCalls + 1, 'every audit row, the gate dep included, gets one');
+  assert.ok(auditCalls >= 7, 'the whole lifecycle is audited, not just execution');
 });
 
 // --- destructive tools stay reversible ---------------------------------------

@@ -8,13 +8,14 @@
 
 import { cookieActor, type Actor } from "@/lib/assistant/actor";
 import { runLlmTurn } from "@/lib/assistant/llm";
-import { SCAN_TOOL } from "@/lib/assistant/tools";
+import { SCAN_TOOL, disclosureOf } from "@/lib/assistant/tools";
 import {
   SCAN_SYSTEM,
   buildScanUserMessage,
   type ScanMail,
 } from "@/lib/assistant/prompt";
 import {
+  provenance,
   validateScanProposals,
   isCalendarInvite,
   type RawToolCall,
@@ -50,7 +51,8 @@ const SLOT_STREAM: Record<string, string> = {
 // service actor instead. Writing tasks through lib/tasks/write rather than the
 // "use server" action keeps this off the server-action path entirely.
 export async function runMailScan(actor?: Actor): Promise<ScanSummary> {
-  const { supabase, userId } = actor ?? (await cookieActor());
+  const owner = actor ?? (await cookieActor());
+  const { supabase, userId } = owner;
 
   const { data: accounts } = await supabase
     .from("accounts")
@@ -263,7 +265,16 @@ export async function runMailScan(actor?: Actor): Promise<ScanSummary> {
         scanned: mails.length,
         proposed: accepted.length,
         rejected,
-      } as Json,
+        // The scan is the one tool allowed to see message bodies, so its rows
+        // say so, and say whether it was Tapas or the 03:00 cron that asked.
+        provenance: provenance({
+          basis: "autonomous_bucket",
+          tool: "scan_mail",
+          disclosure: disclosureOf("scan_mail"),
+          actorOrigin: owner.origin,
+          originatingJob: owner.job,
+        }),
+      } as unknown as Json,
     });
   }
   return summary;

@@ -22,7 +22,7 @@ export async function GET(req: Request): Promise<Response> {
     return Response.json({ error: "Unauthorized." }, { status: 401 });
   }
 
-  const actor = await serviceActor();
+  const actor = await serviceActor("cron_scan");
   const istDate = civilKey(civilToday());
 
   const { data: recent } = await actor.supabase

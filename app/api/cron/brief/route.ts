@@ -21,7 +21,7 @@ export async function GET(req: Request): Promise<Response> {
     return Response.json({ error: "Unauthorized." }, { status: 401 });
   }
 
-  const actor = await serviceActor();
+  const actor = await serviceActor("cron_brief");
   const { supabase, userId } = actor;
   const istDate = civilKey(civilToday());
   const appBaseUrl = process.env.APP_BASE_URL ?? "http://localhost:3000";

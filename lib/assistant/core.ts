@@ -42,6 +42,72 @@ export function hashPayload(payload: unknown): string {
 }
 
 // ---------------------------------------------------------------------------
+// Approval provenance (B12).
+//
+// audit_log records that an action ran. It did not record WHY it was allowed
+// to. Reviewing a month of assistant activity, "the assistant created this
+// event" and "the assistant created this event because you approved queue item
+// X, and the payload hash still matched when it ran" are different levels of
+// accountability, and only the second is worth having.
+//
+// One helper builds the object, so every call site writes the same shape and a
+// reader never has to work out whether a missing field means "not applicable"
+// or "nobody filled it in": every field is always present, null where it does
+// not apply. The shape is required by the executor's audit helper, so the
+// compiler, not a convention, is what keeps the rows complete.
+// ---------------------------------------------------------------------------
+
+// Where an actor came from. Defined here rather than in actor.ts so this pure
+// module can name it without dragging in the server client.
+export type ActorOrigin = "owner_session" | "service";
+
+// The scheduled job a call belongs to, when it belongs to one.
+export type OriginatingJob = "cron_scan" | "cron_brief";
+
+// Why the action was permitted to do what it did:
+//   autonomous_bucket    its bucket lets it act alone, and its target resolved
+//   confirm_bucket       its bucket only ever queues, so it queued
+//   owner_approval       Tapas approved queue item action_id, hash verified
+//   downgraded_to_queue  autonomous, but its target did not resolve (B10)
+export type ProvenanceBasis =
+  | "autonomous_bucket"
+  | "confirm_bucket"
+  | "owner_approval"
+  | "downgraded_to_queue";
+
+export interface Provenance {
+  basis: ProvenanceBasis;
+  tool: string;
+  disclosure: ToolDisclosure;
+  actor_origin: ActorOrigin;
+  // The assistant_actions row, when the action went through the queue.
+  action_id: string | null;
+  // The hash that was verified at execution, for an approved action.
+  payload_hash: string | null;
+  originating_job: OriginatingJob | null;
+}
+
+export function provenance(p: {
+  basis: ProvenanceBasis;
+  tool: string;
+  disclosure: ToolDisclosure;
+  actorOrigin: ActorOrigin;
+  actionId?: string | null;
+  payloadHash?: string | null;
+  originatingJob?: OriginatingJob | null;
+}): Provenance {
+  return {
+    basis: p.basis,
+    tool: p.tool,
+    disclosure: p.disclosure,
+    actor_origin: p.actorOrigin,
+    action_id: p.actionId ?? null,
+    payload_hash: p.payloadHash ?? null,
+    originating_job: p.originatingJob ?? null,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Disclosure gate (B8). The bucket says what a tool may change; the disclosure
 // class says what it may see. Exactly one class reads message bodies, and a
 // body read is only ever legitimate as its own top-level act: Tapas asked for

@@ -540,3 +540,55 @@ What the app does instead:
   them through removeReminder and reports the count. Safe to run twice, on no
   tool surface, and never run automatically on deploy.
 - Tests: npm run test:m7a (27 offline).
+
+## Governance hardening (G1: B8, B10, B11, B12)
+
+Four controls borrowed from the R7 research verdict. All four are in
+lib/assistant/, all four are proven offline by npm run test:m4, and there is
+no migration: B12 reuses the meta jsonb audit_log has always had.
+
+- B8, disclosure class. A bucket says what a tool may CHANGE. Firm constraint
+  1 is a disclosure rule, and no permission setting can enforce a disclosure
+  rule: only the absence of the capability can. Every ToolDef therefore also
+  carries a ToolDisclosure: none, app_data, mail_metadata or mail_body. There
+  is deliberately NO member for document content, so a tool reading a Drive
+  file or an O365 attachment could not be given a valid class. The type is
+  DERIVED from TOOL_DISCLOSURES, so widening the union means editing that
+  list, and the test that reads the list fails when a fifth member appears.
+  Do not add one without asking Tapas. A boot-time check in tools.ts throws
+  on a registry that drifted past the compiler.
+  Enforcement: scan_mail is the only mail_body tool (Gmail snippets and Graph
+  bodyPreview are body text, whatever the tool description says), and
+  checkDisclosure refuses it when it is reached inside another tool's
+  execution. Nesting is tracked with AsyncLocalStorage in execute.ts, not a
+  counter: the 3 AM scan and a chat turn can be in flight together.
+- B10, fail closed on an unresolved target. The autonomous grant belongs to
+  the pair, the verb AND the object, not the verb alone. TOOL_TARGETS in
+  tools.ts declares, for every autonomous tool acting on something that
+  already exists, which argument names its target and which table it must be
+  found in (add_event_solo is the exception: its target is an account slot
+  that must be connected). runAutonomousAction in core.ts checks it before
+  the performer runs. A lookup that comes back empty is neither swallowed nor
+  a reason to proceed: the action drops out of the autonomous bucket and
+  lands as a proposed assistant_actions row carrying the reason as its title.
+  There is nothing there to approve, so the queue renders it as an attention
+  card with a Dismiss control only, and approveAndExecute refuses any kind
+  outside SEND_CLASS rather than stranding the row in 'approved'. A MISSING
+  argument is not a downgrade: that is a malformed call, and the performer
+  refuses it with a message the model can act on.
+- B11, unattended execution never raises autonomy. Actor carries origin
+  (owner_session | service) and job (cron_scan | cron_brief | null), for the
+  audit trail and routing ONLY. routeTool(name) in tools.ts resolves the
+  bucket from the tool name and nothing else, and dispatchToolCall settles
+  the route before it loads the actor; a test asserts that order and that the
+  route is assigned once. draft_email is confirm-bucket now, not autonomous:
+  the executor always turned it into a proposed send_email, and the declared
+  bucket has to agree with what happens.
+- B12, approval provenance. Every assistant audit row carries meta.provenance
+  = { basis, tool, disclosure, actor_origin, action_id, payload_hash,
+  originating_job }, built by provenance() in core.ts. basis is
+  autonomous_bucket, confirm_bucket, owner_approval or downgraded_to_queue.
+  execute.ts audit() takes it as a REQUIRED argument, so the compiler, not a
+  convention, keeps the rows complete; the Assistant audit tab renders the
+  basis in plain words. The cron wrapper rows (cron_scan, cron_brief) are job
+  bookkeeping rather than actions and deliberately carry none.

@@ -9,7 +9,7 @@
 // withResourceAuth.
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { cookieActor, type Actor, type ActorOrigin } from "@/lib/assistant/actor";
+import { cookieActor, type Actor } from "@/lib/assistant/actor";
 import { withResourceAuth } from "@/lib/oauth/tokens";
 import { createEvent, updateEvent, deleteAppEvent } from "@/lib/events/write";
 import {
@@ -49,8 +49,10 @@ import {
 import {
   checkDisclosure,
   hashPayload,
+  provenance,
   runApprovedExecution,
   runAutonomousAction,
+  type Provenance,
 } from "./core";
 import {
   removeObligationReminder,
@@ -69,12 +71,17 @@ async function ownerClient(actor?: Actor): Promise<Actor> {
   return actor ?? cookieActor();
 }
 
+// B12. Provenance is a required argument, not an optional extra: an assistant
+// audit row that does not say why the action was permitted is the gap this
+// closes, so the compiler refuses to write one rather than a convention asking
+// people not to.
 async function audit(
   supabase: Db,
   userId: string,
   action: string,
   entityId: string | null,
-  meta: Record<string, unknown>
+  meta: Record<string, unknown>,
+  prov: Provenance
 ): Promise<void> {
   await supabase.from("audit_log").insert({
     user_id: userId,
@@ -82,7 +89,28 @@ async function audit(
     action,
     entity: "assistant_actions",
     entity_id: entityId,
-    meta: meta as Json,
+    meta: { ...meta, provenance: prov } as unknown as Json,
+  });
+}
+
+// The provenance every assistant audit row carries. One wrapper over the
+// core builder, so an actor and a tool name are all a call site needs and no
+// two of them can disagree about the shape.
+function prov(
+  owner: Actor,
+  basis: Parameters<typeof provenance>[0]["basis"],
+  tool: string,
+  actionId: string | null,
+  payloadHash: string | null = null
+): Provenance {
+  return provenance({
+    basis,
+    tool,
+    disclosure: disclosureOf(tool),
+    actorOrigin: owner.origin,
+    actionId,
+    payloadHash,
+    originatingJob: owner.job,
   });
 }
 
@@ -238,21 +266,21 @@ async function dispatchToolCall(
   }
   if (route === "unknown") return { reply: `Unknown tool: ${name}.` };
 
-  const { supabase, userId, origin } = await ownerClient(actor);
+  const owner = await ownerClient(actor);
   return route === "propose"
-    ? proposeAction(supabase, userId, name, input)
-    : performAutonomous(supabase, userId, name, input, origin);
+    ? proposeAction(owner, name, input)
+    : performAutonomous(owner, name, input);
 }
 
 // Anything that would notify a third party lands as a proposed action. The
 // model's draft_email also lands here: the draft IS the proposed send_email
 // row, stored only in the app database (attack A8: no Gmail/Outlook drafts).
 async function proposeAction(
-  supabase: Db,
-  userId: string,
+  owner: Actor,
   name: string,
   input: Record<string, unknown>
 ): Promise<ToolOutcome> {
+  const { supabase, userId } = owner;
   const kind = name === "draft_email" ? "send_email" : name;
   if (!SEND_CLASS.has(kind)) throw new Error(`${name} cannot be proposed.`);
 
@@ -314,11 +342,16 @@ async function proposeAction(
     .select("id")
     .single();
   if (error || !data) throw new Error(error?.message ?? "Could not queue the action.");
-  await audit(supabase, userId, "propose", data.id, {
-    kind,
-    account_slot: slot,
-    via: name,
-  });
+  await audit(
+    supabase,
+    userId,
+    "propose",
+    data.id,
+    { kind, account_slot: slot, via: name },
+    // Nothing was performed and nothing was approved: the confirm bucket is
+    // the whole reason this exists as a row rather than as an act.
+    prov(owner, "confirm_bucket", name, data.id)
+  );
   return {
     reply:
       kind === "send_email"
@@ -397,19 +430,18 @@ async function downgradeToQueue(
 }
 
 async function performAutonomous(
-  supabase: Db,
-  userId: string,
+  owner: Actor,
   name: string,
-  input: Record<string, unknown>,
-  origin: ActorOrigin
+  input: Record<string, unknown>
 ): Promise<ToolOutcome> {
+  const { supabase, userId } = owner;
   if (!AUTONOMOUS_KINDS.has(name)) {
     throw new Error(`${name} is not an autonomous tool.`);
   }
   const spec = TOOL_TARGETS[name];
   const outcome = await runAutonomousAction<Performed>(input, spec, {
     resolveTarget: (value) => targetResolves(supabase, userId, spec, value),
-    perform: () => performers[name](supabase, userId, input, origin),
+    perform: () => performers[name](supabase, userId, input, owner),
     recordExecuted: async (done) => {
       const { data } = await supabase
         .from("assistant_actions")
@@ -433,10 +465,14 @@ async function performAutonomous(
   });
 
   if (outcome.basis === "downgraded_to_queue") {
-    await audit(supabase, userId, "downgrade_to_queue", outcome.actionId, {
-      kind: name,
-      reason: outcome.reason,
-    });
+    await audit(
+      supabase,
+      userId,
+      "downgrade_to_queue",
+      outcome.actionId,
+      { kind: name, reason: outcome.reason },
+      prov(owner, "downgraded_to_queue", name, outcome.actionId)
+    );
     return {
       reply:
         outcome.reason +
@@ -446,21 +482,26 @@ async function performAutonomous(
       queued: true,
     };
   }
-  await audit(supabase, userId, "execute_autonomous", outcome.actionId, {
-    kind: name,
-  });
+  await audit(
+    supabase,
+    userId,
+    "execute_autonomous",
+    outcome.actionId,
+    { kind: name },
+    prov(owner, "autonomous_bucket", name, outcome.actionId)
+  );
   return { reply: outcome.done.summary, actionId: outcome.actionId ?? undefined };
 }
 
-// The origin is passed to every performer and read by the three that re-enter
+// The actor is passed to every performer and used by the three that re-enter
 // the assistant (the scan, undo, reject), so an unattended call stays labelled
 // unattended all the way down. It is carried for the record, never consulted
-// for permission: routeTool decided the bucket before any of this ran.
+// for permission: routeTool settled the bucket before any of this ran.
 type Performer = (
   supabase: Db,
   userId: string,
   input: Record<string, unknown>,
-  origin: ActorOrigin
+  owner: Actor
 ) => Promise<Performed>;
 
 const performers: Record<string, Performer> = {
@@ -939,9 +980,9 @@ const performers: Record<string, Performer> = {
     return { summary: `Event deleted: ${ev.title}.`, undo: null };
   },
 
-  async scan_mail(supabase, userId, _input, origin) {
+  async scan_mail(_supabase, _userId, _input, owner) {
     const { runMailScan } = await import("@/lib/assistant/scan");
-    const summary = await runMailScan({ supabase, userId, origin });
+    const summary = await runMailScan(owner);
     return {
       summary:
         `Mail scan: ${summary.scanned} emails read, ${summary.created} task` +
@@ -951,18 +992,18 @@ const performers: Record<string, Performer> = {
     };
   },
 
-  async undo_action(supabase, userId, input, origin) {
+  async undo_action(_supabase, _userId, input, owner) {
     const actionId = s(input.action_id);
     if (!actionId) throw new Error("action_id is required.");
-    const r = await undoExecutedAction(actionId, { supabase, userId, origin });
+    const r = await undoExecutedAction(actionId, owner);
     if (!r.ok) throw new Error(r.message ?? "That action could not be undone.");
     return { summary: "The earlier action was undone.", undo: null };
   },
 
-  async reject_queued_action(supabase, userId, input, origin) {
+  async reject_queued_action(_supabase, _userId, input, owner) {
     const actionId = s(input.action_id);
     if (!actionId) throw new Error("action_id is required.");
-    const r = await rejectProposedAction(actionId, { supabase, userId, origin });
+    const r = await rejectProposedAction(actionId, owner);
     if (!r.ok) throw new Error(r.message ?? "That action could not be rejected.");
     return { summary: "The queued action was discarded; it can never be sent.", undo: null };
   },
@@ -1176,7 +1217,14 @@ export async function approveAndExecute(
     .eq("status", "proposed")
     .select("id");
   if (!approved?.length) return { ok: false, message: "The action changed state." };
-  await audit(supabase, userId, "approve", actionId, { kind: action.kind });
+  await audit(
+    supabase,
+    userId,
+    "approve",
+    actionId,
+    { kind: action.kind },
+    prov(owner, "owner_approval", action.kind, actionId, hashPayload(action.payload))
+  );
   return executeApprovedAction(actionId, owner);
 }
 
@@ -1189,6 +1237,10 @@ export async function executeApprovedAction(
 }> {
   const owner = await ownerClient(actor);
   const { supabase, userId } = owner;
+  // Captured as the gate loads the row, so the audit rows below can name the
+  // kind and the hash that was verified without a second read.
+  let kind = "unknown";
+  let verifiedHash: string | null = null;
   return runApprovedExecution({
     loadAction: async () => {
       const { data } = await supabase
@@ -1196,6 +1248,10 @@ export async function executeApprovedAction(
         .select("id, kind, status, payload, payload_hash")
         .eq("id", actionId)
         .single();
+      if (data) {
+        kind = data.kind;
+        verifiedHash = data.payload_hash;
+      }
       return data ?? null;
     },
     claimExecution: async () => {
@@ -1223,7 +1279,15 @@ export async function executeApprovedAction(
         .update({ status: "failed", error: message })
         .eq("id", actionId);
     },
-    audit: (action, meta) => audit(supabase, userId, action, actionId, meta),
+    audit: (action, meta) =>
+      audit(
+        supabase,
+        userId,
+        action,
+        actionId,
+        meta,
+        prov(owner, "owner_approval", kind, actionId, verifiedHash)
+      ),
   });
 }
 
@@ -1344,7 +1408,8 @@ export async function rejectProposedAction(
   ok: boolean;
   message?: string;
 }> {
-  const { supabase, userId } = await ownerClient(actor);
+  const owner = await ownerClient(actor);
+  const { supabase, userId } = owner;
   const { data } = await supabase
     .from("assistant_actions")
     .update({ status: "rejected", rejected_at: new Date().toISOString() })
@@ -1352,7 +1417,17 @@ export async function rejectProposedAction(
     .eq("status", "proposed")
     .select("id, kind");
   if (!data?.length) return { ok: false, message: "Only proposed actions can be rejected." };
-  await audit(supabase, userId, "reject", actionId, { kind: data[0].kind });
+  await audit(
+    supabase,
+    userId,
+    "reject",
+    actionId,
+    { kind: data[0].kind },
+    // Discarding a draft is one of the reversible acts the assistant may do
+    // alone, and it is the same act when Tapas taps Reject himself; the
+    // actor_origin on the row is what tells the two apart.
+    prov(owner, "autonomous_bucket", "reject_queued_action", actionId)
+  );
   return { ok: true };
 }
 
@@ -1390,7 +1465,8 @@ export async function undoExecutedAction(
   ok: boolean;
   message?: string;
 }> {
-  const { supabase, userId } = await ownerClient(actor);
+  const owner = await ownerClient(actor);
+  const { supabase, userId } = owner;
   const { data: action } = await supabase
     .from("assistant_actions")
     .select("id, kind, status, result")
@@ -1420,11 +1496,25 @@ export async function undoExecutedAction(
 
   try {
     await performUndo(supabase, userId, action.kind, undo);
-    await audit(supabase, userId, "undo", actionId, { kind: action.kind });
+    await audit(
+      supabase,
+      userId,
+      "undo",
+      actionId,
+      { kind: action.kind },
+      prov(owner, "autonomous_bucket", "undo_action", actionId)
+    );
     return { ok: true };
   } catch (e) {
     const message = e instanceof Error ? e.message : "Undo failed.";
-    await audit(supabase, userId, "undo_failed", actionId, { reason: message });
+    await audit(
+      supabase,
+      userId,
+      "undo_failed",
+      actionId,
+      { reason: message },
+      prov(owner, "autonomous_bucket", "undo_action", actionId)
+    );
     return { ok: false, message };
   }
 }

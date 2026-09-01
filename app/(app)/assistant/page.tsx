@@ -166,7 +166,25 @@ export default async function AssistantPage({
 
   const audit: AuditView[] = (auditRows ?? []).map((row) => {
     const meta = (row.meta ?? {}) as Record<string, unknown>;
-    const detail = [meta.kind, meta.slot, meta.reason]
+    // B12: why the action was permitted, in the words the row itself records.
+    const p = (meta.provenance ?? {}) as Record<string, unknown>;
+    const basis =
+      typeof p.basis === "string"
+        ? {
+            autonomous_bucket: "acted alone",
+            confirm_bucket: "queued for you",
+            owner_approval: "you approved it",
+            downgraded_to_queue: "target not found, queued",
+          }[p.basis] ?? p.basis
+        : null;
+    const job = p.originating_job === "cron_scan" || p.originating_job === "cron_brief";
+    const detail = [
+      meta.kind,
+      meta.slot,
+      meta.reason,
+      basis,
+      job ? "scheduled job" : null,
+    ]
       .filter((v) => typeof v === "string")
       .join(", ");
     return {
