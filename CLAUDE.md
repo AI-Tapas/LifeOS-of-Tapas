@@ -244,7 +244,12 @@ and email-verification rules live in lib/accounts.ts.
   outside model. Approve, reject, execute and undo are deliberately NOT on
   that surface. lib/assistant/actor.ts supplies the identity: cookieActor for
   the browser, serviceActor for token-authenticated callers. Task writes moved
-  to lib/tasks/write.ts so all three callers share one implementation. The
+  to lib/tasks/write.ts so all three callers share one implementation, with ONE
+  deliberate exception: undoing a delete_task re-inserts the kept snapshot
+  directly (lib/assistant/execute.ts), original id and all, because routing it
+  through createTask would mint a new id and make the undo a copy rather than a
+  reversal. It restores priority_source and priority_reason verbatim, so the
+  B3 rule is honoured by restoring his hand rather than by re-deciding it. The
   server itself lives in mcp-server/ (its own package, excluded from the Next
   tsconfig and eslint; stdio transport, and it fetches its tool list from the
   app so it cannot drift).

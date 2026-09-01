@@ -410,36 +410,3 @@ export async function syncAllEvents(userId: string): Promise<AccountSyncResult[]
   }
   return results;
 }
-
-// Staleness snapshot for the calendar page: the oldest last_synced_at across a
-// user's sync-enabled calendars on connected accounts.
-export async function newestStaleness(userId: string): Promise<{ stale: boolean; lastSyncedAt: string | null }> {
-  const svc = createServiceClient();
-  const { data: accounts } = await svc
-    .from("accounts")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("status", "connected");
-  const accountIds = (accounts ?? []).map((a) => a.id);
-  if (accountIds.length === 0) return { stale: false, lastSyncedAt: null };
-
-  const { data: cals } = await svc
-    .from("calendars")
-    .select("last_synced_at")
-    .in("account_id", accountIds)
-    .eq("sync_enabled", true);
-
-  if (!cals || cals.length === 0) return { stale: false, lastSyncedAt: null };
-  // Stale if any calendar has never synced or the oldest sync is past the window.
-  let oldest: string | null = null;
-  let anyNull = false;
-  for (const c of cals) {
-    if (!c.last_synced_at) {
-      anyNull = true;
-      break;
-    }
-    if (!oldest || c.last_synced_at < oldest) oldest = c.last_synced_at;
-  }
-  if (anyNull) return { stale: true, lastSyncedAt: null };
-  return { stale: isStale(oldest), lastSyncedAt: oldest };
-}
