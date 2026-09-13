@@ -15,10 +15,10 @@ import {
   startOfWeek,
 } from "@/lib/datetime";
 import { triage, needsDeadline, weekendGuard } from "@/lib/tasks/triage";
+import { loadTripSteps } from "@/lib/tasks/trip-steps";
 import {
   rollUpTrips,
   type TripRollup,
-  type TripStep,
 } from "@/lib/tasks/trip-rollup";
 import type { PrioritySource } from "@/lib/tasks/priority";
 import {
@@ -87,7 +87,7 @@ export default async function DashboardPage() {
   const [
     { data: events },
     { data: tasks },
-    { data: tripStepRows },
+    tripSteps,
     { data: streams },
     { count: pendingCount },
     { data: holdings },
@@ -106,13 +106,10 @@ export default async function DashboardPage() {
           "id, title, status, priority, priority_source, priority_reason, due_ts, work_stream_id, trip_id"
         )
         .in("status", ["inbox", "todo", "doing"]),
-      // Trip checklist steps, every status, with their trip. Travel admin
-      // does not stand in this list as five rows per trip; one rolled-up
-      // trip line stands for it, ranked by its most urgent open step.
-      supabase
-        .from("tasks")
-        .select("id, title, status, priority, due_ts, trip_id, trips(id, title, start_date, end_date, cities, session_label, session_date)")
-        .not("trip_id", "is", null),
+      // Trip checklist steps with their trip. Travel admin does not stand in
+      // this list as five rows per trip; one rolled-up trip line stands for
+      // it, ranked by its most urgent open step. One loader for every surface.
+      loadTripSteps(supabase),
       supabase.from("work_streams").select("id, name"),
       supabase
         .from("assistant_actions")
@@ -139,22 +136,6 @@ export default async function DashboardPage() {
   // Checklist steps come out of the flat list and go back in as one row per
   // trip, ranked by the step that ranks highest (lib/tasks/trip-rollup.ts).
   const open = ((tasks ?? []) as Row[]).filter((t) => !t.trip_id);
-  const tripSteps: TripStep[] = (tripStepRows ?? [])
-    .filter((t) => t.trips)
-    .map((t) => ({
-      id: t.id,
-      title: t.title,
-      priority: t.priority,
-      due_ts: t.due_ts,
-      status: t.status,
-      trip: {
-        ...(t.trips as NonNullable<typeof t.trips>),
-        // cities is jsonb, so it arrives as Json; the rollup wants strings.
-        cities: Array.isArray(t.trips!.cities) ? (t.trips!.cities as string[]) : [],
-        session_label: t.trips!.session_label,
-        session_date: t.trips!.session_date,
-      },
-    }));
   const streamName = new Map((streams ?? []).map((s) => [s.id, s.name]));
 
   type Ranked = Pick<Row, "id" | "title" | "priority" | "due_ts"> & {

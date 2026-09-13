@@ -140,6 +140,35 @@ export function rollUpTrips(steps: TripStep[], nowMs: number): TripRollup[] {
   return out;
 }
 
+// Steps still open after their trip is over. "Book return ticket" for a trip
+// that ended last week is not work he owes; it is a row that ranks as urgent
+// for ever because it is overdue. The brief cron drops these each morning.
+// Grace of a few days because the receipts step falls due on the end date
+// itself and he files them once he is home.
+export const STALE_STEP_GRACE_DAYS = 3;
+
+export function staleTripStepIds(
+  steps: TripStep[],
+  todayKey: string,
+  graceDays = STALE_STEP_GRACE_DAYS
+): string[] {
+  const out: string[] = [];
+  for (const s of steps) {
+    if (!isOpen(s)) continue;
+    const end = s.trip.end_date ?? s.trip.start_date;
+    if (!end) continue;
+    // Both sides are YYYY-MM-DD, so string order is date order.
+    if (shiftKey(end, graceDays) < todayKey) out.push(s.id);
+  }
+  return out;
+}
+
+function shiftKey(dateOnly: string, days: number): string {
+  const [y, m, d] = dateOnly.split("-").map(Number);
+  const t = new Date(Date.UTC(y, m - 1, d + days));
+  return t.toISOString().slice(0, 10);
+}
+
 // The split every ranked surface needs: the tasks that stand on their own,
 // and one row per trip. `tasks` may contain checklist steps; they are taken
 // out here and represented by their trip instead.

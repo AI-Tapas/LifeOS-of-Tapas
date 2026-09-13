@@ -21,8 +21,11 @@ type Svc = SupabaseClient<Database>;
 // Rolling window: 60 days back, 12 months forward. Documented in the README.
 const WINDOW_BACK_DAYS = 60;
 const WINDOW_FORWARD_DAYS = 365;
-// The calendar page treats data older than this as stale and triggers a sync.
-export const SYNC_STALE_MINUTES = 15;
+// The calendar page treats data older than this as stale and triggers a sync
+// on open. Six hours, not fifteen minutes: the sync hits Google and Microsoft
+// live and then re-renders the whole page, which made every visit slow. The
+// Refresh button on the page still syncs on demand.
+export const SYNC_STALE_MINUTES = 360;
 
 function windowRange(now = Date.now()): { timeMin: string; timeMax: string } {
   return {

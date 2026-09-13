@@ -4,7 +4,7 @@ import TasksView, {
   type ProjectRow,
   type WorkStreamRow,
 } from "@/components/tasks/tasks-view";
-import type { TripStep } from "@/lib/tasks/trip-rollup";
+import { loadTripSteps } from "@/lib/tasks/trip-steps";
 
 export const dynamic = "force-dynamic";
 
@@ -20,20 +20,23 @@ export default async function TasksPage({
   // somewhere to link to. There is no page for a single task.
   const rawTask = Array.isArray(sp.task) ? sp.task[0] : sp.task;
   const supabase = await createClient();
-  const [{ data: tasks }, { data: tripStepRows }, { data: projects }, { data: streams }] =
+  const now = new Date();
+  const keepFrom = new Date(now.getTime() - 90 * 86400000).toISOString();
+  const [{ data: tasks }, tripSteps, { data: projects }, { data: streams }] =
     await Promise.all([
       supabase
         .from("tasks")
         .select(
           "id, title, notes, status, priority, priority_source, priority_reason, due_ts, work_stream_id, project_id, trip_id, recurring_rule, is_billable, remind_offsets, reminder_mode"
         )
+        // Open work, plus what he finished in the last 90 days for the Done
+        // column. The page used to load every task ever created and filter
+        // in the browser, which grew slower with each week of use.
+        .or(`status.in.(inbox,todo,doing),created_at.gte.${keepFrom}`)
         .order("created_at", { ascending: false }),
       // The trip behind each checklist step, so the overview can show one
       // ranked line per trip instead of five rows of travel admin.
-      supabase
-        .from("tasks")
-        .select("id, title, status, priority, due_ts, trip_id, trips(id, title, start_date, end_date, cities, session_label, session_date)")
-        .not("trip_id", "is", null),
+      loadTripSteps(supabase),
       supabase
         .from("projects")
         .select("id, name, work_stream_id, status, notes")
@@ -45,23 +48,6 @@ export default async function TasksPage({
         .order("name"),
     ]);
 
-  const tripSteps: TripStep[] = (tripStepRows ?? [])
-    .filter((t) => t.trips)
-    .map((t) => ({
-      id: t.id,
-      title: t.title,
-      priority: t.priority,
-      due_ts: t.due_ts,
-      status: t.status,
-      trip: {
-        ...(t.trips as NonNullable<typeof t.trips>),
-        // cities is jsonb, so it arrives as Json; the rollup wants strings.
-        cities: Array.isArray(t.trips!.cities) ? (t.trips!.cities as string[]) : [],
-        session_label: t.trips!.session_label,
-        session_date: t.trips!.session_date,
-      },
-    }));
-
   return (
     <main>
       <TasksView
@@ -70,7 +56,7 @@ export default async function TasksPage({
         projects={(projects ?? []) as ProjectRow[]}
         workStreams={(streams ?? []) as WorkStreamRow[]}
         openTaskId={rawTask}
-        nowIso={new Date().toISOString()}
+        nowIso={now.toISOString()}
       />
     </main>
   );

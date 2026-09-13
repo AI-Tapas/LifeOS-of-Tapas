@@ -20,6 +20,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   rollUpTrips,
+  staleTripStepIds,
   splitTripTasks,
   tripCityLabel,
   type TripStep,
@@ -489,4 +490,32 @@ test("a day return does not print the travel span twice", () => {
     Date.parse("2026-08-25T06:00:00Z")
   );
   assert.equal(row.label, "L2D5 · 11 Sept, Ahmedabad");
+});
+
+// The morning sweep: an open step whose trip ended more than three days ago
+// is stale; a step on a trip still ahead, or just ended, is not; done and
+// dropped steps are never touched.
+test("staleTripStepIds names only open steps of trips over by more than the grace", () => {
+  const over = { id: "t-over", title: "Bangalore", start_date: "2026-09-03", end_date: "2026-09-05", cities: ["Bangalore"] };
+  const justEnded = { id: "t-just", title: "Mumbai", start_date: "2026-09-11", end_date: "2026-09-12", cities: ["Mumbai"] };
+  const ahead = { id: "t-ahead", title: "Surat", start_date: "2026-09-21", end_date: "2026-09-22", cities: ["Surat"] };
+  const noEnd = { id: "t-noend", title: "Rajkot", start_date: "2026-09-01", end_date: null, cities: ["Rajkot"] };
+  const step = (id: string, trip: TripStep["trip"], status = "todo"): TripStep => ({
+    id, title: "Book return ticket", status, priority: "medium", due_ts: null, trip,
+  });
+  const ids = staleTripStepIds(
+    [
+      step("a", over),
+      step("b", over, "done"),
+      step("c", justEnded),
+      step("d", ahead),
+      step("e", noEnd),
+      step("f", over, "dropped"),
+    ],
+    "2026-09-13"
+  );
+  assert.deepEqual(ids, ["a", "e"]);
+  // The grace itself: three days after the end is still owed, four is not.
+  assert.deepEqual(staleTripStepIds([step("g", over)], "2026-09-08"), []);
+  assert.deepEqual(staleTripStepIds([step("g", over)], "2026-09-09"), ["g"]);
 });

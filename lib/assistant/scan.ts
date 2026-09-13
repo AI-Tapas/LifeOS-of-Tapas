@@ -22,14 +22,15 @@ import {
 } from "@/lib/assistant/core";
 import { loadLlmOverride } from "@/lib/assistant/settings";
 import { listRecentGmail, listRecentGraph } from "@/lib/assistant/mail";
-import { isAppGeneratedMail, isAlreadyOpen } from "@/lib/assistant/scan-filters";
+import { isAppGeneratedMail, isAlreadyOpen, isNoiseMail } from "@/lib/assistant/scan-filters";
 import { createTask } from "@/lib/tasks/write";
 import { istInstant } from "@/lib/datetime";
 import type { Json } from "@/lib/database.types";
 
 // A6: proposals are capped per account per day so a mailbox flood cannot
-// bury the task list.
-const DAILY_CAP = 20;
+// bury the task list. Five, not twenty: at twenty the list filled with
+// bills and notices faster than he could read it.
+const DAILY_CAP = 5;
 
 export interface ScanSummary {
   scanned: number;
@@ -107,6 +108,16 @@ export async function runMailScan(actor?: Actor): Promise<ScanSummary> {
           ownMail === 1 ? "message" : "messages"
         }`
       );
+    }
+    if (!mails.length) continue;
+
+    // Bills, statements, alerts, bounces and codes: mail a machine sent that
+    // needs no reply. The model was asked to skip these and did not, so the
+    // rule is code now.
+    const noise = mails.filter(isNoiseMail).length;
+    if (noise) {
+      mails = mails.filter((m) => !isNoiseMail(m));
+      summary.notes.push(`${account.slot}: skipped ${noise} automated ${noise === 1 ? "notice" : "notices"}`);
     }
     if (!mails.length) continue;
 
@@ -208,12 +219,14 @@ export async function runMailScan(actor?: Actor): Promise<ScanSummary> {
     // Second belt, on meaning rather than message id: two AWS budget alerts,
     // or two chasers on one thread, are different messages saying the same
     // thing, so external_ref alone lets both through. Compare against what is
-    // already open (done and dropped tasks do not block a genuine repeat).
+    // already open, and against anything he finished or dropped in the last
+    // 45 days: a task he dropped must not come back because a chaser arrived.
+    const memoryFrom = new Date(Date.now() - 45 * 86400000).toISOString();
     const { data: openRows } = await supabase
       .from("tasks")
       .select("title")
       .eq("user_id", userId)
-      .in("status", ["inbox", "todo", "doing"]);
+      .or(`status.in.(inbox,todo,doing),created_at.gte.${memoryFrom}`);
     const openTitles = (openRows ?? []).map((r) => r.title);
 
     for (const p of accepted) {

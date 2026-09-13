@@ -74,7 +74,9 @@ export async function addChecklistAction(tripId: string): Promise<WriteResult> {
   if (!ids.length) {
     return {
       ok: false,
-      message: "Set a start date on the trip first: the checklist counts back from it.",
+      message: trip.start_date
+        ? "The checklist is already on this trip. Nothing was added."
+        : "Set a start date on the trip first: the checklist counts back from it.",
     };
   }
   return { ok: true, id: tripId, note: `${ids.length} steps added.` };

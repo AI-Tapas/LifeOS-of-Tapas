@@ -15,6 +15,7 @@ import {
   addressOf,
   isAppGeneratedMail,
   isAlreadyOpen,
+  isNoiseMail,
   normaliseTitle,
 } from "../lib/assistant/scan-filters.ts";
 import { reminderTitle } from "../lib/reminders/core.ts";
@@ -557,4 +558,28 @@ test("no session yesterday means no recovery note, and old fixtures need no fiel
   });
   assert.ok(!withoutField.text.includes("recovery day"));
   assert.ok(!wrongDay.text.includes("recovery day"));
+});
+
+// Machine mail that needs no reply never reaches the model: the live list
+// had filled with exactly these. Real correspondence, including a person
+// writing about an invoice, still goes through.
+test("bills, alerts, bounces and codes are noise; a person's mail is not", () => {
+  const noise = [
+    { from: "Jio <no-reply@jio.com>", subject: "Your Jio bill for Sep 2026" },
+    { from: "AWS <aws-receivables@amazon.com>", subject: "Amazon Web Services Invoice Available" },
+    { from: "AWS Budgets <no-reply@budgets.amazonaws.com>", subject: "AWS Budget Alert: threshold exceeded" },
+    { from: "Microsoft Azure <azure-noreply@microsoft.com>", subject: "Your subscription bill is overdue" },
+    { from: "NSDL <evoting@nsdl.co.in>", subject: "Amber Enterprises AGM: e-Voting notice" },
+    { from: "Mail Delivery Subsystem <mailer-daemon@googlemail.com>", subject: "Delivery Status Notification (Failure)" },
+    { from: "Google <no-reply@accounts.google.com>", subject: "Security alert" },
+    { from: "HDFC Bank <alerts@hdfcbank.net>", subject: "Your OTP is 493201" },
+  ];
+  for (const m of noise) assert.ok(isNoiseMail(m), m.subject);
+  const real = [
+    { from: "Nirmit Shah <nirmit@client.example>", subject: "VAT refund order for review" },
+    { from: "Dhaval Patel <dhaval@rnaluform.example>", subject: "Documents you asked for" },
+    { from: "ICAI AI Committee <ai.committee@icai.in>", subject: "Faculty coordination for Batch 99" },
+    { from: "Tapas Ruparelia <ca.tapasnr@gmail.com>", subject: "Remember to call the bank about the FD" },
+  ];
+  for (const m of real) assert.ok(!isNoiseMail(m), m.subject);
 });

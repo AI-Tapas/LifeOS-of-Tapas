@@ -511,6 +511,18 @@ const performers: Record<string, Performer> = {
     // _userId is the acting owner; see lib/assistant/actor.ts.
     const title = s(input.title);
     if (!title) throw new Error("A task title is required.");
+    // A connected chat that "prepares his week" twice must not add the same
+    // task twice. One open task per title; the model is told which one.
+    const { data: dup } = await supabase
+      .from("tasks")
+      .select("id, title")
+      .in("status", ["inbox", "todo", "doing"])
+      .ilike("title", title.trim())
+      .limit(1)
+      .maybeSingle();
+    if (dup) {
+      throw new Error(`Already on the list as an open task (id ${dup.id}): "${dup.title}". Update that one instead of adding another.`);
+    }
     const workStreamId = await resolveWorkStream(supabase, s(input.work_stream));
     const due = s(input.due_date);
     const priority = s(input.priority) as TaskInput["priority"] | null;

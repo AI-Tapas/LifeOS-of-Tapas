@@ -181,8 +181,8 @@ and email-verification rules live in lib/accounts.ts.
   Graph bodyPreview; bodies and attachments never fetched or stored. Mail
   text enters context inside fenceUntrusted (fixed data-not-instructions
   preamble + provenance). Output schema-constrained; external_ref must match
-  a scanned message id; capped 20 proposals/account/day; deduped on
-  external_ref. Tasks land source=email, and context rendering wraps
+  a scanned message id; capped 5 proposals/account/day (was 20 until
+  13 September 2026: the list filled with notices); deduped on external_ref. Tasks land source=email, and context rendering wraps
   source=email rows in the same untrusted framing.
 - Scan feedback loop (found live 31 Aug 2026, fixed; do not regress): the
   7 AM brief is sent from ca_tapasnr to itself, so it lands in the inbox the
@@ -193,9 +193,15 @@ and email-verification rules live in lib/accounts.ts.
   isAppGeneratedMail drops anything carrying the X-Life-OS header the brief
   now sets, or a self-addressed message whose subject starts with the brief
   prefix (for briefs predating the header); isAlreadyOpen refuses a proposal
-  whose normalised title already matches an open task. Never widen the first
+  whose normalised title already matches an open task, or any task created in
+  the last 45 days whatever its status, so a task he dropped does not return
+  when a chaser arrives. Never widen the first
   to "ignore all mail from myself": mailing yourself a reminder must still
-  become a task, and a test pins that.
+  become a task, and a test pins that. Third belt since 13 September 2026:
+  isNoiseMail (same file) drops machine mail by sender and subject (bills,
+  statements, alerts, bounces, codes, AGM notices) before the model sees it;
+  the prompt says the same, and the live list had shown the prompt alone was
+  not enough.
 - Persona: assistant_persona versions, seeded v1 by migration. System prompt
   order is fixed: hard rules (with the precedence line), app context, then
   the persona inside a labelled tone-only block. Persona writes happen only
@@ -253,6 +259,9 @@ and email-verification rules live in lib/accounts.ts.
   server itself lives in mcp-server/ (its own package, excluded from the Next
   tsconfig and eslint; stdio transport, and it fetches its tool list from the
   app so it cannot drift).
+- create_task (chat and both connectors) refuses a title that is already an
+  open task, naming the existing id, since 13 September 2026: a project chat
+  that plans his week twice was adding the same rows twice.
 - Tool surface (31 registry tools, shared by the in-app assistant and both
   connectors): create/update/delete for tasks, notes, people, obligations and
   finance items; add_project only, with no update or delete for a project;
@@ -398,7 +407,13 @@ What the app does instead:
   undo path and Google Calendar reminder; only where it is SHOWN changes.
 - lib/tasks/trip-rollup.ts is the one ranking implementation, beside
   triage.ts. Home, the Tasks overview and the morning brief all call
-  rollUpTrips, so they cannot drift. A rollup row inherits the priority and
+  rollUpTrips, so they cannot drift. Since 13 September 2026 all three load
+  the steps through lib/tasks/trip-steps.ts loadTripSteps (trips ended within
+  30 days or not yet ended, then their steps, two plain queries) instead of
+  each running its own unbounded PostgREST embed. The brief cron also runs
+  staleTripStepIds first and drops (never deletes) any open step whose trip
+  ended more than three days ago, audit action trip_steps_swept; before that
+  a finished trip's "Book return ticket" ranked as urgent for ever. A rollup row inherits the priority and
   due date of the trip's most urgent incomplete step, so it lands in exactly
   the band that step would have earned alone; it names that step, counts
   honestly ("2 of 4 done", dropped steps out of the denominator), and a trip
@@ -414,7 +429,9 @@ What the app does instead:
   No start date means no checklist rather than guessed dates. Non-AICA trips
   lose the branch wording. M6d removed the per-trip "build the bill" step.
 - Seeding runs through lib/trips/write.ts seedTripChecklist, called by
-  createTrip when with_checklist is set. The add-trip drawer defaults it on,
+  createTrip when with_checklist is set. Since 13 September 2026 it never
+  writes a step whose title the trip already carries, so the trip screen's
+  "Add checklist" cannot add a second set. The add-trip drawer defaults it on,
   the connector tool defaults it off, and both go through that one function.
   A chapter_aed trip additionally seeds the AED step alone (scope
   'aed_only') even when the checklist was declined.

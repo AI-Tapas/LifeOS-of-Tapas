@@ -157,7 +157,18 @@ export async function seedTripChecklist(
   scope: "all" | "aed_only" = "all"
 ): Promise<string[]> {
   const all = buildChecklist(trip, civilKey(civilToday()));
-  const steps = scope === "all" ? all : all.filter((s) => s.key === "aed");
+  const wanted = scope === "all" ? all : all.filter((s) => s.key === "aed");
+  // Never a second copy. The trip screen's "Add checklist" used to seed a
+  // fresh full set on every tap, so one trip carried "Book onward ticket"
+  // three times. A step already on this trip, whatever its status, is kept
+  // and not written again. Steps are known by title: there is no step_key
+  // column, and the trip screen already tells them apart the same way.
+  const { data: existing } = await supabase
+    .from("tasks")
+    .select("title")
+    .eq("trip_id", tripId);
+  const have = new Set((existing ?? []).map((t) => t.title.trim().toLowerCase()));
+  const steps = wanted.filter((s) => !have.has(s.title.trim().toLowerCase()));
   const ids: string[] = [];
   for (const step of steps) {
     const r = await createTask(supabase, userId, {

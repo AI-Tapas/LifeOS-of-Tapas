@@ -41,6 +41,23 @@ export function isAppGeneratedMail(
   return mail.subject.trim().toLowerCase().startsWith(BRIEF_SUBJECT_PREFIX);
 }
 
+// Mail a machine sent that needs no reply: bills, statements, alerts, codes,
+// bounces, AGM notices. The scan prompt asks the model to skip these and the
+// live list showed it did not (Jio bill, AWS invoice, Azure bill, an AGM
+// e-vote, a bounce, a Google security alert, an AWS budget alert), so the
+// rule is code. Subject and sender only: no body is read here.
+// ponytail: a word list, not a classifier. Add a word when a class of noise
+// gets through; never add a sender he actually corresponds with.
+const NOISE_SUBJECT =
+  /\b(invoice|bill|statement|receipt|payment (received|successful|confirmation|due|reminder)|e-?voting|agm|annual general meeting|budget alert|usage alert|security alert|sign-?in|new device|verification code|one[- ]time password|otp|delivery status|undeliverable|mail delivery|delivery failed|newsletter|unsubscribe)\b/i;
+const NOISE_SENDER =
+  /^(mailer-daemon|postmaster|no-?reply|do-?not-?reply|donotreply|noreply|alerts?|billing|notifications?|bounce)@/i;
+
+export function isNoiseMail(mail: ScanFilterMail): boolean {
+  const from = addressOf(mail.from);
+  return NOISE_SENDER.test(from) || NOISE_SUBJECT.test(mail.subject);
+}
+
 // Same task, different email. The external_ref dedup only recognises the same
 // MESSAGE twice; two AWS budget alerts, or two chasers on one thread, are
 // different messages saying the same thing. Compare on a normalised title so
