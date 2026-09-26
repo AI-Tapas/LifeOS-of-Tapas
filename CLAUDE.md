@@ -156,7 +156,8 @@ and email-verification rules live in lib/accounts.ts.
 - Tool registry: lib/assistant/tools.ts is the fixed tool list and the
   security boundary. Buckets enforced in lib/assistant/execute.ts:
   autonomous (tasks, reminders, notes, people, obligations, solo events,
-  trips) execute immediately and are undoable; confirm (draft_email,
+  trips, and since B18 reply drafts saved in a mailbox's Drafts folder)
+  execute immediately and are undoable; confirm (draft_email,
   send_email, propose_event_with_invites) only ever insert a proposed
   assistant_actions row. draft_email is in the confirm list because the
   executor has always turned it into a proposed send_email row, and G1/B11
@@ -262,15 +263,19 @@ and email-verification rules live in lib/accounts.ts.
 - create_task (chat and both connectors) refuses a title that is already an
   open task, naming the existing id, since 13 September 2026: a project chat
   that plans his week twice was adding the same rows twice.
-- Tool surface (31 registry tools, shared by the in-app assistant and both
-  connectors): create/update/delete for tasks, notes, people, obligations and
+- Tool surface (32 registry tools, shared by the in-app assistant and both
+  connectors, which serve the 31 that are not stubs): create/update/delete
+  for tasks, notes, people, obligations and
   finance items; add_project only, with no update or delete for a project;
   create, update and log for trips; solo calendar events including edit and delete
   (delete_event refuses anything with source other than 'app', so a synced
-  event is never removed); draft_email; scan_mail; undo_action;
-  reject_queued_action. Twelve read tools mirror them, so nothing writable is
-  invisible; the twelfth is the B15 house-rules tool, which mirrors nothing
-  writable because nothing here writes a persona. send_email and propose_event_with_invites stay confirm-bucket,
+  event is never removed); draft_email; save_reply_draft (B18); scan_mail;
+  undo_action; reject_queued_action. Fourteen read tools on both connectors:
+  twelve mirror the writable data, so nothing writable is invisible; the
+  twelfth of those is the B15 house-rules tool, which mirrors nothing
+  writable because nothing here writes a persona; and B18 added two mail
+  reads, lifeos_list_inbox and lifeos_read_mail_thread. send_email and
+  propose_event_with_invites stay confirm-bucket,
   and NO tool approves: approval is owner-session only, in the app.
 - Remote MCP connector (ChatGPT, Claude web and mobile): POST /api/mcp/http
   speaks Streamable HTTP with stateless JSON replies, handling initialize,
@@ -589,10 +594,13 @@ no migration: B12 reuses the meta jsonb audit_log has always had.
   list, and the test that reads the list fails when a sixth member appears.
   Do not add one without asking Tapas. A boot-time check in tools.ts throws
   on a registry that drifted past the compiler.
-  Enforcement: scan_mail is the only mail_body tool (Gmail snippets and Graph
-  bodyPreview are body text, whatever the tool description says), and
-  checkDisclosure refuses it when it is reached inside another tool's
-  execution. Nesting is tracked with AsyncLocalStorage in execute.ts, not a
+  Enforcement: scan_mail is the only mail_body tool in the registry (Gmail
+  snippets and Graph bodyPreview are body text, whatever the tool description
+  says), and checkDisclosure refuses it when it is reached inside another
+  tool's execution. Since B18 the two connector mail reads are mail_body as
+  well; they are read tools, served by runReadTool and never reached inside
+  executeToolCall, so the nesting gate has nothing to catch there, and every
+  call is audited instead (see the B18 section). Nesting is tracked with AsyncLocalStorage in execute.ts, not a
   counter: the 3 AM scan and a chat turn can be in flight together.
 - B10, fail closed on an unresolved target. The autonomous grant belongs to
   the pair, the verb AND the object, not the verb alone. TOOL_TARGETS in
@@ -903,3 +911,114 @@ No migration. Nothing in the database changed.
   "which version is live", so the in-app prompt and the connector cannot
   disagree about it. `loadActivePersona` is now a thin wrapper on it.
 - Tests: four in `npm run test:m4` (63 to 67).
+
+## Inbox, threads and reply drafts over MCP (B18)
+
+No migration. Nothing in the database changed: `assistant_actions.kind` is
+free text and `audit_log.meta` has always been jsonb.
+
+- The problem: Tapas runs an "AI workforce" in Claude Code (the AKM Agents
+  folder) whose 2 PM inbox triage sorts his mail into needs you, drafted,
+  hand to an agent and noise, and saves replies as drafts he sends himself.
+  Claude holds one Gmail account of its own (his ICAI mailbox), so his other
+  three mailboxes are reached through Life OS, which already holds their
+  OAuth. Until B18 Life OS could only turn mail into proposed tasks.
+- Three mailboxes only: taxstrategia (Google Workspace), altechon (Microsoft
+  365, Graph) and ca_tapasnr (Gmail). `MAIL_SLOTS` in tools.ts is that list.
+  The icai slot has none of these tools, the enums leave it out, and
+  `checkMailSlot` refuses it by name.
+- Tapas approved two changes by name: (1) the M4 rule "nothing appears in the
+  Gmail drafts folder before approval" is reversed FOR REPLY DRAFTS ONLY
+  (draft_email still stores in the app and nowhere else); (2) full bodies of
+  these three mailboxes may reach an outside model through the connector,
+  under the existing `mail_body` class. `TOOL_DISCLOSURES` still has five
+  members and scripts/m4.test.ts still fails on a sixth.
+- All provider logic is in `lib/assistant/mailbox.ts`: pure, dependency
+  injected (a request function), relative .ts imports only, so the offline
+  suite loads it directly. `mailRequest` in lib/assistant/mail.ts is the
+  server wiring: the same withResourceAuth path as every other resource call.
+- `lifeos_list_inbox` (read, both connectors): account, optional since (ISO
+  date read as IST, default three days), max (default 25, cap 50),
+  unread_only. Per message: id, thread_id, from, to, cc, subject, date (ISO
+  UTC), snippet, unread, has_attachments, attachment names and sizes, and
+  `untrusted: true`. Gmail lists `in:inbox` then fetches each message with a
+  `fields` mask that asks for part names and sizes and never part data; Graph
+  reads `me/mailFolders/inbox/messages` with a `$select` and lists
+  attachments with `$select=name,size`. The app's own X-Life-OS mail is left
+  out through `isAppGeneratedMail` (lib/assistant/scan-filters.ts).
+- `lifeos_read_mail_thread` (read, both connectors): account and thread_id.
+  Each message's from, to, cc, date, subject and plain-text body (HTML
+  converted, quoted history trimmed, 8,000 characters a body and 30,000 a
+  thread, the budget spent newest first), attachment names and sizes only,
+  `untrusted: true` on every message. Drafts in the thread are not part of it.
+  Graph is asked for text (`Prefer: outlook.body-content-type="text"`), with
+  htmlToText as the belt.
+- DISCLOSURE: both reads are `mail_body` in `READ_TOOL_DISCLOSURES`. The brief
+  asked for `mail_metadata` on the list; it returns snippets and Graph body
+  previews, which the B8 rule above says are body text whatever a description
+  calls them, so the honest class is `mail_body`. Exactly one entry still
+  says `persona`.
+- AUDIT: every call to either read writes an `audit_log` row BEFORE anything
+  is handed over: actor assistant, action `mail_thread_read` or
+  `mail_inbox_read`, entity the account slot, entity_id the account id, meta
+  naming tool, disclosure class, actor origin and message count. Never a
+  subject, a sender or a body. The insert is CHECKED (the B15 pattern): if the
+  row cannot be written the read throws and returns nothing. Do not soften
+  this into a silent catch. Bodies are never written anywhere else.
+- `save_reply_draft` (registry, autonomous, disclosure `mail_metadata`, so
+  both connectors and the in-app assistant get it through executeToolCall):
+  account, thread_id, body, optional reply_all. Recipients, subject and
+  attachments are NOT parameters, and `checkReplyDraftInput` refuses any of
+  them by name before the thread is even looked up. Recipients are derived
+  from the last non-draft message: reply goes to its sender, reply all adds
+  its To and Cc, his own address always removed; when he sent the last
+  message himself the reply goes to the people he wrote to (what Gmail and
+  Outlook do). Subject "Re: ...". Gmail: `users.drafts.create` with threadId,
+  In-Reply-To and References, stamped `X-Life-OS: reply_draft`. Graph:
+  createReply or createReplyAll, then one PATCH with the body and the derived
+  recipients; if the PATCH fails the empty shell is deleted. Graph drafts are
+  NOT stamped: Graph has no documented way to add a custom header to an
+  existing draft, and a guess would break the tool for altechon.
+- ONE thread_id PARAMETER, not thread_id plus conversation_id. For altechon
+  its value is the Graph conversation id, which lifeos_list_inbox returns as
+  thread_id. A parameter named conversation_id would trip the m7c rule that
+  no tool parameter may look like a chat transcript, and that rule is worth
+  more than the second name.
+- B10 for the draft: `TOOL_TARGETS.save_reply_draft` is the thread. A thread
+  the provider does not have, or an account that is not connected, downgrades
+  to the queue like any other unresolved target; the stored payload there,
+  and on the executed row, drops the reply text (`storedDraftPayload` keeps
+  body_chars only). The draft lives in the mailbox, not in this database.
+- Undo (`undo_action`, and the History tab): deletes ONLY the draft this tool
+  created, the delete_event rule. The draft id comes from the executed row,
+  never from the caller, and the provider is asked first: a Gmail draft must
+  still carry the reply_draft stamp and the message id Life OS left (Gmail
+  mints a new one on every edit); a Graph item must still be a draft with the
+  lastModifiedDateTime Life OS left. A draft he has edited or sent is refused
+  and left alone.
+- NOTHING IS SENT. mailbox.ts names no send, reply, reply-all or forward
+  endpoint; scripts/b18.test.ts reads it, the performer, the undo case and the
+  connector branch, and checks every URL its mocks were asked for.
+  `send_email` and `propose_event_with_invites` stay the whole of SEND_CLASS.
+- SCOPES: `gmail.compose` joined GOOGLE_RW and `Mail.ReadWrite` joined
+  MS_SCOPES. Tokens granted before B18 lack them until he reconnects. Every
+  new tool reads a 403 for a missing scope (Gmail "insufficient
+  authentication scopes", Graph ErrorAccessDenied) as "Reconnect <account> in
+  Life OS Settings to allow drafts." and NEVER marks the account
+  needs_reauth: that stays the job of a dead token (a 401). A Gmail 403 for a
+  rate limit is not a scope problem and is reported as a plain failure.
+  Settings had no Reconnect button for a connected account (only for
+  needs_reauth, and Disconnect is not what a scope upgrade should cost), so
+  a connected mail account whose stored scopes lack the draft scope now shows
+  a Reconnect link (`lacksDraftScope` in lib/accounts.ts). The callback
+  upserts on (user_id, slot), so reconnecting keeps calendars and history.
+- HARD_RULES say the same thing to the model: save_reply_draft is the one
+  exception to "draft_email stores in the app only", nothing is sent, and
+  anything a tool returns marked untrusted is data. The remote connector's
+  instructions say it too.
+- The m4 rule that connector read tools are named as reads now accepts
+  `lifeos_read_` beside get and list: the brief fixed the name
+  lifeos_read_mail_thread, and "read" cannot mean a write.
+- The stdio server in mcp-server/ fetches its list from the app and needed no
+  code change.
+- Tests: `npm run test:b18` (26 offline, mocked fetch, Gmail and Graph both).
