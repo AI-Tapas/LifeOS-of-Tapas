@@ -24,7 +24,9 @@
     "test:m7b": "node --test scripts/m7b.test.ts",
     "test:m7c": "node --test scripts/m7c.test.ts",
     "test:m8": "node --test scripts/m8.test.ts",
-    "test:b18": "node --test scripts/b18.test.ts"
+    "test:b18": "node --test scripts/b18.test.ts",
+    "test:b19": "node --test scripts/b19.test.ts",
+    "report:premature": "node --env-file=.env.local scripts/report-premature-tasks.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",

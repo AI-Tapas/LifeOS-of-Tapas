@@ -63,11 +63,18 @@ export interface TripRollup extends TriageTask {
 
 // The steps a trip is judged by, best-ranked first. The band order is
 // triage's own, so the leading step is exactly the one that would have led
-// the list if the steps were still loose rows.
+// the list if the steps were still loose rows. A step still waiting for its
+// start date (B19) leads only when every open step is waiting, and then the
+// rollup inherits its not_before, so the whole trip line waits with it.
 function leadingStep<T extends TriageTask>(open: T[], nowMs: number): T | null {
   const bands = triage(open, nowMs);
   return (
-    bands.do_first[0] ?? bands.important[0] ?? bands.urgent[0] ?? bands.later[0] ?? null
+    bands.do_first[0] ??
+    bands.important[0] ??
+    bands.urgent[0] ??
+    bands.later[0] ??
+    bands.waiting[0] ??
+    null
   );
 }
 
@@ -130,6 +137,7 @@ export function rollUpTrips(steps: TripStep[], nowMs: number): TripRollup[] {
       // band that step earned, no higher and no lower.
       priority: lead.priority,
       due_ts: lead.due_ts,
+      not_before: lead.not_before ?? null,
       status: "todo",
       done: done.length,
       total,

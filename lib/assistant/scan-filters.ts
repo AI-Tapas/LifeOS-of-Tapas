@@ -1,6 +1,9 @@
 // Pure filters that keep the mail scan from feeding on its own output.
-// Zero imports on purpose so scripts/m5.test.ts can load this directly under
-// node --test type-stripping, same convention as lib/oauth/core.ts.
+// The one import is the pure, import-free near-duplicate scorer (B19), by a
+// relative .ts path, so scripts/m5.test.ts can still load this directly under
+// node --test type-stripping, same convention as lib/tasks/triage.ts.
+
+import { duplicateScore, NEAR_DUPLICATE_THRESHOLD } from "../tasks/near-duplicate.ts";
 //
 // Why this exists: the 7 AM brief is sent from ca_tapasnr to itself, so it
 // lands in the very inbox the 3 AM scan reads. The scanner saw its own brief
@@ -73,10 +76,15 @@ export function normaliseTitle(title: string): string {
     .trim();
 }
 
+// Since B19 "the same task" also means a near duplicate: the same words give
+// or take punctuation and filler ("raise the AICA invoice - September" is
+// "Raise AICA invoice for September"), with the month kept, so next month's
+// occurrence is never mistaken for this one. lib/tasks/near-duplicate.ts.
 export function isAlreadyOpen(title: string, openTitles: Iterable<string>): boolean {
   const key = normaliseTitle(title);
   for (const t of openTitles) {
     if (normaliseTitle(t) === key) return true;
+    if (duplicateScore(title, t) >= NEAR_DUPLICATE_THRESHOLD) return true;
   }
   return false;
 }

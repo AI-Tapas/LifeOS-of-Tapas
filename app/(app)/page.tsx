@@ -103,7 +103,7 @@ export default async function DashboardPage() {
       supabase
         .from("tasks")
         .select(
-          "id, title, status, priority, priority_source, priority_reason, due_ts, work_stream_id, trip_id"
+          "id, title, status, priority, priority_source, priority_reason, due_ts, not_before, work_stream_id, trip_id"
         )
         .in("status", ["inbox", "todo", "doing"]),
       // Trip checklist steps with their trip. Travel admin does not stand in
@@ -138,7 +138,7 @@ export default async function DashboardPage() {
   const open = ((tasks ?? []) as Row[]).filter((t) => !t.trip_id);
   const streamName = new Map((streams ?? []).map((s) => [s.id, s.name]));
 
-  type Ranked = Pick<Row, "id" | "title" | "priority" | "due_ts"> & {
+  type Ranked = Pick<Row, "id" | "title" | "priority" | "due_ts" | "not_before"> & {
     priority_source?: PrioritySource;
     priority_reason?: string | null;
     status: string;
@@ -153,6 +153,7 @@ export default async function DashboardPage() {
       status: r.status,
       priority: r.priority,
       due_ts: r.due_ts,
+      not_before: r.not_before ?? null,
       work_stream_id: "",
       rollup: r,
     })),
@@ -178,6 +179,8 @@ export default async function DashboardPage() {
     important: bandsRaw.important.map(toRow),
     urgent: bandsRaw.urgent.map(toRow),
     later_count: bandsRaw.later.length,
+    // B19: work that cannot start yet is counted, never listed or urgent.
+    waiting_count: bandsRaw.waiting.length,
   };
   const inboxCount = open.filter((t) => t.status === "inbox").length;
   const narrative = narrativeLine(bands);
@@ -189,7 +192,7 @@ export default async function DashboardPage() {
     civilKey(addDays(saturday, 1)),
     civilKey(addDays(saturday, 2)),
   ];
-  const weekendRisk = weekendGuard(open, civilWeekday(today), guardKeys);
+  const weekendRisk = weekendGuard(open, civilWeekday(today), guardKeys, nowMs);
 
   const todayKey = civilKey(today);
   const dueReviews = reviewsDue(

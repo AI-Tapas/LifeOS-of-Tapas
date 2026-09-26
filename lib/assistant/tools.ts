@@ -117,6 +117,12 @@ const enumOrNull = (values: string[], desc: string): Frag =>
   opt(enumOf(values, desc));
 
 const DATE_DESC = "Date as YYYY-MM-DD (IST calendar date). Omit if not applicable.";
+
+// B19. The start date, same format as a due date. Tapas, 26 September 2026:
+// the October and November invoices sat in "urgent" in September, and there
+// is no point starting either before September is over.
+const NOT_BEFORE_DESC =
+  "The first day this task can sensibly start, as YYYY-MM-DD (IST calendar date). Until then it stays off Home, the Tasks overview and the morning brief, and it is never urgent whatever its due date. Set it for period work: a month's invoice starts after that month ends (the invoice for October waits until 1 November); next month's work is never urgent this month. It must not be after the due date. Omit when the work can start now.";
 const TIME_DESC = "Time of day as HH:MM in 24 hour IST. Omit if not applicable.";
 
 // The four connected account slots the assistant may act through.
@@ -139,7 +145,7 @@ export const TOOLS: ToolDef[] = [
     bucket: "autonomous",
     disclosure: "app_data",
     description:
-      "Create a task on Tapas's own list. Executes immediately and is undoable from the queue history.",
+      "Create a task on Tapas's own list. Executes immediately and is undoable from the queue history. Refused when the title closely matches a task that is already open (the reply names its id): update that task instead. Set not_before for work that cannot start yet.",
     input_schema: schema({
       title: str("Short task title."),
       note: strOrNull("Optional extra detail."),
@@ -147,6 +153,7 @@ export const TOOLS: ToolDef[] = [
         "Work stream name, e.g. ICAI, Tax Strategia, Altechon, Cygnet, Personal. Omit to file it under Personal."
       ),
       due_date: { ...strOrNull(DATE_DESC) },
+      not_before: strOrNull(NOT_BEFORE_DESC),
       priority: enumOrNull(["low", "medium", "high"], "Task priority."),
       priority_reason: strOrNull(
         "Why this priority, in one short sentence, e.g. \"statutory deadline, penalty for late filing\". Required whenever you set a priority: Tapas is shown the reason and can disagree with it. Judge by consequence, never by how urgent a sender says something is."
@@ -166,7 +173,7 @@ export const TOOLS: ToolDef[] = [
     bucket: "autonomous",
     disclosure: "app_data",
     description:
-      "Update an existing task (title, note, status, priority, due date). Undo restores the previous values.",
+      "Update an existing task (title, note, status, priority, due date, start date). Undo restores the previous values.",
     input_schema: schema({
       task_id: str("The task id from context."),
       title: strOrNull("New title. Omit to keep the current one."),
@@ -180,6 +187,10 @@ export const TOOLS: ToolDef[] = [
         "Why this priority, in one short sentence, e.g. \"statutory deadline, penalty for late filing\". Required whenever you set a priority: Tapas is shown the reason and can disagree with it. Judge by consequence, never by how urgent a sender says something is."
       ),
       due_date: { ...strOrNull(DATE_DESC + " Omit to keep the current due date.") },
+      not_before: strOrNull(
+        NOT_BEFORE_DESC +
+          " Omit to keep the current start date; to make a waiting task visible now, set today's date."
+      ),
       trip_id: strOrNull(
         "Move the task under a trip as a checklist step, using a trip id from lifeos_list_trips. Omit to leave it where it is."
       ),

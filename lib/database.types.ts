@@ -801,6 +801,7 @@ export type Database = {
           external_ref: string | null
           id: string
           is_billable: boolean
+          not_before: string | null
           notes: string | null
           priority: Database["public"]["Enums"]["task_priority"]
           priority_reason: string | null
@@ -823,6 +824,7 @@ export type Database = {
           external_ref?: string | null
           id?: string
           is_billable?: boolean
+          not_before?: string | null
           notes?: string | null
           priority?: Database["public"]["Enums"]["task_priority"]
           priority_reason?: string | null
@@ -845,6 +847,7 @@ export type Database = {
           external_ref?: string | null
           id?: string
           is_billable?: boolean
+          not_before?: string | null
           notes?: string | null
           priority?: Database["public"]["Enums"]["task_priority"]
           priority_reason?: string | null

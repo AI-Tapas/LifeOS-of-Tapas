@@ -33,6 +33,7 @@ import {
   deleteTripExpense,
   updateTrip,
 } from "@/lib/trips/write";
+import { findNearDuplicate } from "@/lib/tasks/near-duplicate";
 import { TRANSPORT_MODES, type TransportMode, type TripLeg } from "@/lib/trips/core";
 import { HOTEL_ARRANGEMENTS, type HotelArrangement } from "@/lib/trips/checklist";
 import { isFinanceKeyDateType, isReminderMode } from "@/lib/reminders/core";
@@ -546,19 +547,31 @@ const performers: Record<string, Performer> = {
     const title = s(input.title);
     if (!title) throw new Error("A task title is required.");
     // A connected chat that "prepares his week" twice must not add the same
-    // task twice. One open task per title; the model is told which one.
-    const { data: dup } = await supabase
+    // task twice, and it rarely words it the same way twice. Since B19 a NEAR
+    // duplicate of any open task (waiting ones included) is refused too, month
+    // and year kept, so next month's occurrence is never mistaken for this
+    // one. The model is told which task to update instead.
+    // ponytail: every open title, read whole. Hundreds of rows, one query;
+    // move the scoring into Postgres only if this read ever shows up.
+    // A step being attached to one trip is not a copy of the same step on
+    // another trip: two Rajkot trips each need their own onward ticket.
+    const tripId = s(input.trip_id);
+    const { data: openRows } = await supabase
       .from("tasks")
-      .select("id, title")
-      .in("status", ["inbox", "todo", "doing"])
-      .ilike("title", title.trim())
-      .limit(1)
-      .maybeSingle();
+      .select("id, title, trip_id")
+      .in("status", ["inbox", "todo", "doing"]);
+    const dup = findNearDuplicate(
+      title,
+      (openRows ?? []).filter((t) => !tripId || !t.trip_id || t.trip_id === tripId)
+    );
     if (dup) {
-      throw new Error(`Already on the list as an open task (id ${dup.id}): "${dup.title}". Update that one instead of adding another.`);
+      throw new Error(
+        `Already on the list as an open task (id ${dup.task.id}): "${dup.task.title}". Update that one with update_task instead of adding another.`
+      );
     }
     const workStreamId = await resolveWorkStream(supabase, s(input.work_stream));
     const due = s(input.due_date);
+    const notBefore = s(input.not_before);
     const priority = s(input.priority) as TaskInput["priority"] | null;
     const r = await createTask(supabase, _userId, {
       title,
@@ -570,10 +583,13 @@ const performers: Record<string, Performer> = {
       ...(priority ? { priority } : {}),
       priority_reason: s(input.priority_reason),
       due_ts: due ? dueIso(due) : null,
+      // B19. Validated inside createTask (format, and never after the due
+      // date), so a bad date is refused with a message the model can act on.
+      not_before: notBefore,
       work_stream_id: workStreamId,
       // A trip id attaches the task as a checklist step, so it rolls up under
       // the trip instead of standing on its own in every ranked list.
-      trip_id: s(input.trip_id),
+      trip_id: tripId,
       // Validated here, never trusted from the wire: anything but the two
       // real values is dropped and the row takes the 'calendar' default.
       ...(isReminderMode(input.reminder_mode)
@@ -586,6 +602,7 @@ const performers: Record<string, Performer> = {
     return {
       summary:
         `Task created: ${title}${due ? `, due ${formatDateIST(dueIso(due))}` : ""}.` +
+        (notBefore ? ` Waiting until ${formatDateIST(dueIso(notBefore))}: it stays off the ranked lists until then.` : "") +
         priorityLine(priority, s(input.priority_reason)),
       undo: { task_id: r.id },
     };
@@ -597,7 +614,7 @@ const performers: Record<string, Performer> = {
     const { data: prev } = await supabase
       .from("tasks")
       .select(
-        "title, notes, status, priority, priority_source, priority_reason, due_ts, remind_offsets, reminder_mode, trip_id"
+        "title, notes, status, priority, priority_source, priority_reason, due_ts, not_before, remind_offsets, reminder_mode, trip_id"
       )
       .eq("id", taskId)
       .single();
@@ -609,6 +626,7 @@ const performers: Record<string, Performer> = {
     if (s(input.priority)) patch.priority = s(input.priority) as TaskInput["priority"];
     if (s(input.priority_reason)) patch.priority_reason = s(input.priority_reason);
     if (s(input.due_date)) patch.due_ts = dueIso(s(input.due_date)!);
+    if (s(input.not_before)) patch.not_before = s(input.not_before);
     if (s(input.trip_id)) patch.trip_id = s(input.trip_id);
     if (isReminderMode(input.reminder_mode)) patch.reminder_mode = input.reminder_mode;
     const r = await updateTask(supabase, _userId, taskId, patch, "assistant");
@@ -619,6 +637,9 @@ const performers: Record<string, Performer> = {
       // says so rather than claiming a change that never happened.
       summary:
         `Task updated: ${patch.title ?? prev.title}.` +
+        (patch.not_before
+          ? ` Waiting until ${formatDateIST(dueIso(patch.not_before))}: it stays off the ranked lists until then.`
+          : "") +
         (r.priorityNote
           ? ` ${r.priorityNote}`
           : priorityLine(patch.priority ?? null, patch.priority_reason ?? null)),
@@ -632,7 +653,7 @@ const performers: Record<string, Performer> = {
     if (!taskId || !due) throw new Error("task_id and due_date are required.");
     const { data: prev } = await supabase
       .from("tasks")
-      .select("title, notes, status, priority, priority_source, priority_reason, due_ts, remind_offsets, reminder_mode")
+      .select("title, notes, status, priority, priority_source, priority_reason, due_ts, not_before, remind_offsets, reminder_mode")
       .eq("id", taskId)
       .single();
     if (!prev) throw new Error("Task not found.");
@@ -1653,6 +1674,11 @@ async function performUndo(
         priority_source: prev.priority_source as TaskInput["priority_source"],
         priority_reason: (prev.priority_reason as string | null | undefined) ?? null,
         due_ts: (prev.due_ts as string | null | undefined) ?? null,
+        // A snapshot taken before B19 has no not_before key at all; leave the
+        // column alone then rather than clearing a date set since.
+        ...("not_before" in prev
+          ? { not_before: (prev.not_before as string | null) ?? null }
+          : {}),
         remind_offsets: prev.remind_offsets as number[] | undefined,
         reminder_mode: isReminderMode(prev.reminder_mode)
           ? prev.reminder_mode

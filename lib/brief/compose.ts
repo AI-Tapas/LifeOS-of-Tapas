@@ -10,6 +10,7 @@
 
 import {
   triage,
+  waitingLine,
   weekendGuard,
   type TriageTask,
 } from "../tasks/triage.ts";
@@ -158,6 +159,7 @@ export function composeBrief(input: ComposeBriefInput): ComposedBrief {
     title: r.label,
     priority: r.priority,
     due_ts: r.due_ts,
+    not_before: r.not_before ?? null,
     status: r.status,
     stream: `${r.progress}, next: ${r.next_title}`,
     source: "manual",
@@ -175,7 +177,9 @@ export function composeBrief(input: ComposeBriefInput): ComposedBrief {
     civilKey(addDays(saturday, 1)),
     civilKey(addDays(saturday, 2)),
   ];
-  const weekendRisk = weekendGuard(standalone, weekday, guardKeys);
+  const weekendRisk = weekendGuard(standalone, weekday, guardKeys, nowMs);
+  // B19: work that cannot start yet is in no band. One line says how much.
+  const waitingNote = waitingLine(bands.waiting.length);
 
   // "Last night's mail scan" = the one automated scan, which runs at 03:00
   // IST. Tasks it proposed all land with source 'email' and a created_at
@@ -222,6 +226,7 @@ export function composeBrief(input: ComposeBriefInput): ComposedBrief {
     receiptGapLine,
     moneyReviewLine,
     recoveryNote,
+    waitingNote,
     nowIso,
     appBaseUrl,
   });
@@ -237,6 +242,7 @@ export function composeBrief(input: ComposeBriefInput): ComposedBrief {
     receiptGapLine,
     moneyReviewLine,
     recoveryNote,
+    waitingNote,
     nowIso,
     appBaseUrl,
   });
@@ -274,6 +280,7 @@ interface RenderInput {
   receiptGapLine: string | null;
   moneyReviewLine: string | null;
   recoveryNote: string | null;
+  waitingNote: string | null;
   nowIso: string;
   appBaseUrl: string;
 }
@@ -376,6 +383,13 @@ function renderHtml(r: RenderInput): string {
         bandSection("urgent", r.bands.urgent, r.nowIso),
       ].join("");
 
+  const waitingHtml = r.waitingNote
+    ? `
+    <tr><td style="padding:10px 32px 0 32px;">
+      <p style="margin:0;font-size:12px;color:${COLORS.muted};font-family:${FONT};">${esc(r.waitingNote)} They join the list on the day they can start.</p>
+    </td></tr>`
+    : "";
+
   const eventsHtml = r.events.length
     ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0">
         ${r.events
@@ -473,6 +487,7 @@ function renderHtml(r: RenderInput): string {
       ${weekendBlock}
       ${recoveryBlock}
       ${bandsHtml}
+      ${waitingHtml}
       <tr><td style="padding:20px 32px 0 32px;">
         <div style="border-top:1px solid ${COLORS.cardBorder};padding-top:14px;">
           <h2 style="margin:0 0 8px 0;font-size:13px;color:${COLORS.muted};font-family:${FONT};text-transform:uppercase;letter-spacing:0.03em;">Also today</h2>
@@ -529,6 +544,9 @@ function renderText(r: RenderInput): string {
       }
       lines.push("");
     }
+  }
+  if (r.waitingNote) {
+    lines.push(`${r.waitingNote} They join the list on the day they can start.`, "");
   }
 
   lines.push("Also today:");

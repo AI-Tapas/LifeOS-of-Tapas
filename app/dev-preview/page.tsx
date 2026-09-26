@@ -145,6 +145,24 @@ const tasks: TaskRow[] = [
     is_billable: true,
     remind_offsets: [7, 3, 1, 0],
   },
+  // B19: next month's invoice, waiting for its start date. The overview
+  // counts it instead of ranking it; the Board lists it with "starts".
+  {
+    id: "t4",
+    title: "Raise the AICA invoice for last month",
+    notes: null,
+    status: "todo",
+    priority: "high",
+    due_ts: "2026-09-03T04:00:00Z",
+    not_before: "2026-09-01",
+    work_stream_id: "w1",
+    project_id: null,
+    trip_id: null,
+    recurring_rule: "monthly:1",
+    is_billable: false,
+    remind_offsets: [7, 3, 1, 0],
+    reminder_mode: "in_app",
+  },
   // And the state B3 exists to fix: open tasks nobody has rated, which puts
   // the standing line on the Tasks overview.
   ...(["Chase the Bhavnagar coordinator", "Renew the office broadband", "Read the circular on ITC"].map(
@@ -220,6 +238,7 @@ const nextUpBands: NextUpBands = {
     },
   ],
   later_count: 4,
+  waiting_count: 1,
 };
 
 const pendingItem = {

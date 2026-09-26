@@ -16,7 +16,8 @@
 
 import { syncTaskReminder, removeTaskReminder } from "@/lib/reminders/writer";
 import type { ReminderMode } from "@/lib/reminders/core";
-import { nextDueIso, isValidRecurringRule } from "@/lib/tasks/recurring";
+import { nextOccurrence, isValidRecurringRule } from "@/lib/tasks/recurring";
+import { startDateProblem } from "@/lib/tasks/triage";
 import { runStatusTransition, type TransitionOutcome } from "@/lib/tasks/transitions";
 import {
   decidePriorityWrite,
@@ -37,6 +38,10 @@ export interface TaskInput {
   status?: TaskStatus;
   priority?: TaskPriority;
   due_ts?: string | null;
+  // B19. IST date (YYYY-MM-DD) before which the task cannot sensibly start.
+  // Until then it is left out of every ranked list and is never urgent. Null
+  // or absent means available now.
+  not_before?: string | null;
   work_stream_id: string;
   project_id?: string | null;
   // A checklist step belongs to a trip. Loose link: deleting the trip leaves
@@ -90,6 +95,8 @@ export async function createTask(
   if (!isValidRecurringRule(input.recurring_rule)) {
     return { ok: false, message: "Invalid recurring rule." };
   }
+  const startProblem = startDateProblem(input.not_before, input.due_ts);
+  if (startProblem) return { ok: false, message: startProblem };
   const decision = decidePriorityWrite(origin, input, null);
   if (decision.kind === "refuse") return { ok: false, message: decision.message };
   const priorityFields =
@@ -105,6 +112,7 @@ export async function createTask(
       status: input.status ?? "inbox",
       ...priorityFields,
       due_ts: input.due_ts ?? null,
+      not_before: input.not_before ?? null,
       work_stream_id: input.work_stream_id,
       project_id: input.project_id ?? null,
       trip_id: input.trip_id ?? null,
@@ -140,6 +148,24 @@ export async function updateTask(
   if (patch.recurring_rule !== undefined && !isValidRecurringRule(patch.recurring_rule)) {
     return { ok: false, message: "Invalid recurring rule." };
   }
+  // A start date is judged against the due date the row will END UP with, so
+  // when only one of the two is in the patch the other is read first. One
+  // small read, only when either date is changing.
+  if (patch.not_before !== undefined || patch.due_ts !== undefined) {
+    let notBefore = patch.not_before;
+    let dueTs = patch.due_ts;
+    if (notBefore === undefined || dueTs === undefined) {
+      const { data: cur } = await supabase
+        .from("tasks")
+        .select("due_ts, not_before")
+        .eq("id", id)
+        .single();
+      if (notBefore === undefined) notBefore = cur?.not_before ?? null;
+      if (dueTs === undefined) dueTs = cur?.due_ts ?? null;
+    }
+    const startProblem = startDateProblem(notBefore, dueTs);
+    if (startProblem) return { ok: false, message: startProblem };
+  }
   // The priority columns are decided against the row as it stands, so an
   // assistant path can see that he has already rated this task and leave it
   // alone. One small read, only when a priority is actually in the patch.
@@ -165,6 +191,7 @@ export async function updateTask(
       ...(patch.notes !== undefined ? { notes: patch.notes } : {}),
       ...priorityFields,
       ...(patch.due_ts !== undefined ? { due_ts: patch.due_ts } : {}),
+      ...(patch.not_before !== undefined ? { not_before: patch.not_before } : {}),
       ...(patch.work_stream_id !== undefined
         ? { work_stream_id: patch.work_stream_id }
         : {}),
@@ -250,7 +277,7 @@ async function spawnNextOccurrence(
     .eq("id", taskId)
     .single();
   if (!t || !t.recurring_rule || !t.due_ts) return undefined;
-  const next = nextDueIso(t.recurring_rule, t.due_ts);
+  const next = nextOccurrence(t.recurring_rule, t.due_ts);
   if (!next) return undefined;
 
   const { data: created } = await supabase
@@ -265,7 +292,12 @@ async function spawnNextOccurrence(
       priority: t.priority,
       priority_source: t.priority_source,
       priority_reason: t.priority_reason,
-      due_ts: next,
+      due_ts: next.due_ts,
+      // B19. The next occurrence waits for the start of its own period (the
+      // first of its month, for the monthly invoice), so completing
+      // September's invoice does not put October's on the list as work to do
+      // today. Only the current occurrence is ever visible.
+      not_before: next.not_before,
       work_stream_id: t.work_stream_id,
       project_id: t.project_id,
       trip_id: t.trip_id,

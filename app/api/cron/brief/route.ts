@@ -48,7 +48,7 @@ export async function GET(req: Request): Promise<Response> {
       await Promise.all([
         supabase
           .from("tasks")
-          .select("id, title, status, priority, due_ts, work_stream_id, source, created_at, trip_id")
+          .select("id, title, status, priority, due_ts, not_before, work_stream_id, source, created_at, trip_id")
           .eq("user_id", userId)
           .in("status", ["inbox", "todo", "doing"]),
         // Trip checklist steps with their trip: the brief shows one rolled-up
@@ -112,6 +112,7 @@ export async function GET(req: Request): Promise<Response> {
       title: t.title,
       priority: t.priority,
       due_ts: t.due_ts,
+      not_before: t.not_before,
       status: t.status,
       source: t.source,
       created_at: t.created_at,

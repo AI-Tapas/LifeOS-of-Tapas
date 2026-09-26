@@ -18,7 +18,7 @@ import {
   inputCls,
 } from "@/components/ui";
 import { formatDateIST, formatTimeIST, istInstant, istDayKey } from "@/lib/datetime";
-import { triage, needsDeadline } from "@/lib/tasks/triage";
+import { triage, needsDeadline, isWaiting, waitingLine } from "@/lib/tasks/triage";
 import { unratedPrompt, type PrioritySource } from "@/lib/tasks/priority";
 import { rollUpTrips, type TripRollup, type TripStep } from "@/lib/tasks/trip-rollup";
 import {
@@ -45,6 +45,10 @@ export interface TaskRow {
   priority_source?: PrioritySource;
   priority_reason?: string | null;
   due_ts: string | null;
+  // The first day it can start (B19), an IST date. Until then the overview
+  // counts it instead of ranking it. Optional so the dev-preview fixtures
+  // stay small; a row without it is available now.
+  not_before?: string | null;
   work_stream_id: string;
   project_id: string | null;
   // A checklist step of a trip. It keeps its own due date and reminder, but
@@ -317,6 +321,9 @@ function TaskItem({
               due {formatDateIST(task.due_ts)}, {formatTimeIST(task.due_ts)}
             </span>
           )}
+          {task.not_before && isWaiting(task, Date.parse(nowIso)) && (
+            <span>starts {formatDateIST(`${task.not_before}T04:00:00Z`)}</span>
+          )}
           {task.recurring_rule && <span>repeats {task.recurring_rule}</span>}
           {task.is_billable && <span>billable</span>}
         </div>
@@ -400,6 +407,8 @@ function OverviewTab({
     ...rollups.map((r) => ({ ...r, rollup: r })),
   ];
   const bands = triage(ranked, now);
+  // B19: counted, not ranked. The Board tab still lists each one.
+  const waiting = waitingLine(bands.waiting.length);
   const starved = bands.important.filter((t) => !t.rollup && needsDeadline(t));
   const inboxCount = tasks.filter((t) => !t.trip_id && t.status === "inbox").length;
   // Nobody has rated most of these. The ranking above is only as good as
@@ -462,6 +471,19 @@ function OverviewTab({
             Go through them with the assistant
           </Link>
           . It proposes one and says why; you can argue with every one.
+        </p>
+      )}
+
+      {waiting && (
+        <p className="mt-3 text-xs text-secondary">
+          {waiting} They join this ranking on the day they can start; the{" "}
+          <button
+            onClick={() => onGoTo("board")}
+            className="font-medium text-accent underline-offset-2 hover:underline"
+          >
+            Board
+          </button>{" "}
+          lists them now.
         </p>
       )}
 
@@ -936,6 +958,8 @@ interface FormFields {
   isBillable: boolean;
   offsets: number[];
   onCalendar: boolean;
+  // YYYY-MM-DD from the date input, or "" for "can start now".
+  notBefore: string;
 }
 
 function taskToFields(t: TaskRow | null, workStreams: WorkStreamRow[]): FormFields {
@@ -961,6 +985,7 @@ function taskToFields(t: TaskRow | null, workStreams: WorkStreamRow[]): FormFiel
     // A new task interrupts him on the calendar unless he says otherwise,
     // which is what every task did before M7a.
     onCalendar: (t?.reminder_mode ?? "calendar") === "calendar",
+    notBefore: t?.not_before ?? "",
   };
 }
 
@@ -1008,6 +1033,7 @@ function TaskForm({
       is_billable: f.isBillable,
       remind_offsets: offsets.length ? offsets : [7, 3, 1, 0],
       reminder_mode: f.onCalendar ? "calendar" : "in_app",
+      not_before: f.notBefore || null,
     };
   }
 
@@ -1194,6 +1220,18 @@ function TaskForm({
             )}
           </>
         )}
+        <Field label="Can start from">
+          <input
+            type="date"
+            value={f.notBefore}
+            onChange={(e) => setF({ ...f, notBefore: e.target.value })}
+            className={inputCls}
+          />
+        </Field>
+        <p className="-mt-1 text-xs text-secondary">
+          Optional. Until this date it stays off Home and the morning brief and
+          is never urgent. Leave it empty when you can start now.
+        </p>
         <div className="flex gap-2">
           <Field label="Repeats">
             <select

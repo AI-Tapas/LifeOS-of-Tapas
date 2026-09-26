@@ -31,7 +31,7 @@ export async function loadTripSteps(
 
   let stepsQ = supabase
     .from("tasks")
-    .select("id, title, status, priority, due_ts, trip_id")
+    .select("id, title, status, priority, due_ts, not_before, trip_id")
     .in("trip_id", trips.map((t) => t.id));
   if (userId) stepsQ = stepsQ.eq("user_id", userId);
   const { data: steps } = await stepsQ;
@@ -46,6 +46,7 @@ export async function loadTripSteps(
         title: s.title,
         priority: s.priority,
         due_ts: s.due_ts,
+        not_before: s.not_before,
         status: s.status,
         trip: {
           ...trip,

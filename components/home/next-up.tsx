@@ -15,6 +15,7 @@ import {
 } from "@/app/(app)/tasks/actions";
 import { addDays, civilToday, civilWeekday, istInstant } from "@/lib/datetime";
 import type { PrioritySource } from "@/lib/tasks/priority";
+import { waitingLine } from "@/lib/tasks/triage";
 
 export interface NextUpRow {
   id: string;
@@ -38,10 +39,14 @@ export interface NextUpBands {
   important: NextUpRow[];
   urgent: NextUpRow[];
   later_count: number;
+  // Open tasks whose start date is still ahead (B19). Counted, never listed:
+  // they cannot be worked on yet. Optional so the dev-preview fixtures stay
+  // small.
+  waiting_count?: number;
 }
 
 const SECTIONS: {
-  key: keyof Omit<NextUpBands, "later_count">;
+  key: keyof Omit<NextUpBands, "later_count" | "waiting_count">;
   label: string;
   hint: string;
   cap: number;
@@ -301,6 +306,12 @@ export default function NextUp({
             Tasks
           </Link>
           .
+        </p>
+      )}
+      {waitingLine(bands.waiting_count ?? 0) && (
+        <p className="mt-1.5 text-xs text-neutral-400">
+          {waitingLine(bands.waiting_count ?? 0)} They join this list on the day
+          they can start.
         </p>
       )}
     </div>

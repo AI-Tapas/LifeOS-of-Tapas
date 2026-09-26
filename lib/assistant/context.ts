@@ -46,7 +46,7 @@ export async function buildAppContext(supabase: Db): Promise<string> {
       supabase
         .from("tasks")
         .select(
-          "id, title, status, priority, priority_source, priority_reason, due_ts, source, work_stream_id, work_streams(name)"
+          "id, title, status, priority, priority_source, priority_reason, due_ts, not_before, source, work_stream_id, work_streams(name)"
         )
         .in("status", ["inbox", "todo", "doing"])
         .order("due_ts", { ascending: true, nullsFirst: false })
@@ -103,7 +103,18 @@ export async function buildAppContext(supabase: Db): Promise<string> {
         .join("; ") || "none")
   );
 
-  const trusted = (tasks ?? []).filter((t) => t.source !== "email");
+  // B19. A task that cannot start before a later date is not on today's
+  // list, so it is kept out of "Open tasks" and named apart with its start
+  // date: the model still has its id (to update it, or to avoid adding it
+  // twice) but is told plainly that it is neither current nor urgent.
+  // Mail-derived rows all stay inside the untrusted fence, waiting or not.
+  const todayKey = civilKey(today);
+  const isWaiting = (t: { not_before: string | null }) =>
+    !!t.not_before && t.not_before > todayKey;
+  const startsLabel = (t: { not_before: string | null }) =>
+    formatDateIST(`${t.not_before}T04:00:00Z`);
+  const trusted = (tasks ?? []).filter((t) => t.source !== "email" && !isWaiting(t));
+  const waiting = (tasks ?? []).filter((t) => t.source !== "email" && isWaiting(t));
   const fromMail = (tasks ?? []).filter((t) => t.source === "email");
 
   // "set by" is not decoration: a priority marked Tapas is his own judgment
@@ -132,13 +143,29 @@ export async function buildAppContext(supabase: Db): Promise<string> {
     );
   }
 
+  if (waiting.length) {
+    lines.push(
+      "",
+      "Waiting for their start date (cannot start yet, never urgent before then; not for today) (id | title | starts | due):"
+    );
+    for (const t of waiting) {
+      lines.push(
+        `  ${t.id} | ${t.title} | ${startsLabel(t)} | ${
+          t.due_ts ? formatDateIST(t.due_ts) : "no due date"
+        }`
+      );
+    }
+  }
+
   if (fromMail.length) {
     const body = fromMail
       .map(
         (t) =>
           `${t.id} | ${t.title} | ${rating(t)} | ${
             t.due_ts ? formatDateIST(t.due_ts) : "no due date"
-          } | ${t.status}`
+          } | ${t.status}${
+            isWaiting(t) ? ` | waiting, cannot start before ${startsLabel(t)}` : ""
+          }`
       )
       .join("\n");
     lines.push("", fenceUntrusted("tasks created from scanned email", body));
