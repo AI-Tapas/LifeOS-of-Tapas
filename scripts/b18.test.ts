@@ -24,7 +24,6 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   BODY_CAP,
-  DRAFT_TAG,
   LIST_INBOX_TOOL,
   READ_THREAD_TOOL,
   SAVE_DRAFT_TOOL,
@@ -231,10 +230,10 @@ const GRAPH_LIST_ROUTES: Route[] = [
             from: { emailAddress: { address: "someone@elsewhere.com" } },
             subject: "Re: Rates",
             receivedDateTime: "2026-09-25T04:00:00Z",
-            bodyPreview: "Sent from a Life OS draft",
+            bodyPreview: "Your day: three tasks",
             isRead: true,
             hasAttachments: false,
-            internetMessageHeaders: [h("X-Life-OS", DRAFT_TAG)],
+            internetMessageHeaders: [h("X-Life-OS", "brief")],
           },
         ],
       },
@@ -404,28 +403,27 @@ test("the executed row keeps no reply text", () => {
 });
 
 test("undo deletes a Gmail draft only while it is ours and untouched", async () => {
-  const draftRoute = (tag: string | null, messageId: string): Route => [
+  // Ownership is the record (draft id r-1, left at message msg-9), never a
+  // header: a draft carries none.
+  const draftRoute = (messageId: string): Route => [
     "GET",
     (u) => u.startsWith(`${GMAIL}/drafts/r-1?`),
-    {
-      json: {
-        id: "r-1",
-        message: { id: messageId, payload: { headers: tag ? [h("X-Life-OS", tag)] : [h("Subject", "his own")] } },
-      },
-    },
+    { json: { id: "r-1", message: { id: messageId, threadId: "th1" } } },
   ];
   const del: Route = ["DELETE", (u) => u === `${GMAIL}/drafts/r-1`, { status: 204 }];
 
-  // Not created by Life OS: refused, and no DELETE is ever issued.
-  const foreign = mock([draftRoute(null, "msg-9"), del]);
+  // A draft id with no recorded version cannot be proved ours: refused, and
+  // the provider is not even asked.
+  const unrecorded = mock([draftRoute("msg-9"), del]);
   await assert.rejects(
-    deleteReplyDraft(foreign.request, G, { draft_id: "r-1", version: "msg-9" }),
-    /not created by Life OS/
+    deleteReplyDraft(unrecorded.request, G, { draft_id: "r-1", version: "" }),
+    /no record of how it left that draft/
   );
-  assert.equal(foreign.calls.some((c) => c.method === "DELETE"), false);
+  assert.equal(unrecorded.calls.length, 0);
 
-  // Edited by Tapas since (Gmail mints a new message id): refused.
-  const edited = mock([draftRoute(DRAFT_TAG, "msg-10"), del]);
+  // A draft that is not the one recorded (edited by Tapas since, which mints a
+  // new message id, or any other draft under that id): refused, no DELETE.
+  const edited = mock([draftRoute("msg-10"), del]);
   await assert.rejects(
     deleteReplyDraft(edited.request, G, { draft_id: "r-1", version: "msg-9" }),
     /edited since/
@@ -436,16 +434,16 @@ test("undo deletes a Gmail draft only while it is ours and untouched", async () 
   const gone = mock([del]);
   await assert.rejects(deleteReplyDraft(gone.request, G, { draft_id: "r-1", version: "msg-9" }), /no longer in the mailbox/);
   assert.equal(gone.calls.some((c) => c.method === "DELETE"), false);
-  await assert.rejects(deleteReplyDraft(gone.request, G, { draft_id: " ", version: "" }), /no longer/);
+  await assert.rejects(deleteReplyDraft(gone.request, G, { draft_id: " ", version: "msg-9" }), /no longer/);
 
   // Ours and untouched: deleted, through the drafts endpoint only.
-  const ours = mock([draftRoute(DRAFT_TAG, "msg-9"), del]);
+  const ours = mock([draftRoute("msg-9"), del]);
   await deleteReplyDraft(ours.request, G, { draft_id: "r-1", version: "msg-9" });
   assert.deepEqual(
     ours.calls.filter((c) => c.method === "DELETE").map((c) => c.url),
     [`${GMAIL}/drafts/r-1`]
   );
-  remember([...foreign.calls, ...edited.calls, ...ours.calls]);
+  remember([...edited.calls, ...ours.calls]);
 });
 
 test("undo deletes a Graph item only while it is still a draft and untouched", async () => {
@@ -483,6 +481,16 @@ test("undo takes the draft id from the executed row, never from the caller", () 
   const undoCase = exec.slice(exec.indexOf('case "save_reply_draft":'));
   assert.match(undoCase.slice(0, 900), /deleteReplyDraft\(/);
   assert.match(undoCase.slice(0, 900), /undo\.draft_id/, "the id recorded when the draft was made");
+  assert.match(undoCase.slice(0, 900), /undo\.version/, "and the version it was left at");
+  // Both are written when the draft is made: the id and version on the
+  // executed row's undo record, the id again on the audit row.
+  const perf = exec.slice(exec.indexOf("async save_reply_draft("), exec.indexOf('case "save_reply_draft":'));
+  assert.match(perf, /undo: \{[\s\S]*draft_id: r\.draft_id,[\s\S]*version: r\.version,[\s\S]*\}/);
+  assert.match(perf, /auditMeta: \{[\s\S]*draft_id: r\.draft_id/);
+  // Ownership is never read from a header.
+  const undoFn = src("lib/assistant/mailbox.ts");
+  const del = undoFn.slice(undoFn.indexOf("export async function deleteReplyDraft("));
+  assert.doesNotMatch(del, /X-Life-OS|gHeader\(/, "undo proves ownership by the record, not a header");
   // The History tab offers Undo for it as well.
   assert.match(src("app/(app)/assistant/page.tsx"), /"save_reply_draft",\n\]\);/);
 });
@@ -591,7 +599,15 @@ test("Gmail: the draft threads onto the last real message, recipients derived", 
   assert.equal(mime.headers.Subject, "Re: Query on ITC");
   assert.equal(mime.headers["In-Reply-To"], "<abc@client.com>");
   assert.equal(mime.headers.References, "<root@client.com> <abc@client.com>");
-  assert.equal(mime.headers["X-Life-OS"], DRAFT_TAG);
+  // No X-Life-OS header, in any spelling: it would travel to the client when
+  // Tapas sends the draft, and make the scan skip his own sent reply.
+  assert.equal(
+    Object.keys(mime.headers).some((k) => k.toLowerCase() === "x-life-os"),
+    false,
+    "a reply draft carries no X-Life-OS header"
+  );
+  assert.doesNotMatch(Buffer.from(JSON.parse(post.body).message.raw, "base64url").toString("utf8"), /x-life-os/i);
+  assert.doesNotMatch(src("lib/assistant/mailbox.ts"), /X-Life-OS:/, "no draft path writes the header");
   assert.equal(mime.headers.From, "tapas@taxstrategia.com");
   assert.equal(mime.body, body.replace(/\n/g, "\r\n"));
   assert.equal(JSON.stringify(mime.headers).includes("wrong@example.com"), false, "a draft in the thread is not the last message");
@@ -750,7 +766,7 @@ test("Gmail inbox: untrusted items, attachment names only, app mail left out", a
 test("Graph inbox: untrusted items, attachment names only, app mail left out", async () => {
   const m = mock(GRAPH_LIST_ROUTES);
   const r = await listInbox(m.request, M, { unread_only: true }, new Date("2026-09-26T00:00:00Z"));
-  assert.deepEqual(r.items.map((i) => i.id), ["g1"], "the X-Life-OS draft reply is excluded");
+  assert.deepEqual(r.items.map((i) => i.id), ["g1"], "X-Life-OS mail (the brief) is excluded");
   const g1 = r.items[0];
   assert.equal(g1.untrusted, true);
   assert.equal(g1.thread_id, "conv1", "Graph's conversation id travels as thread_id");

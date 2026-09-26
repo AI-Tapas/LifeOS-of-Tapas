@@ -974,11 +974,15 @@ free text and `audit_log.meta` has always been jsonb.
   its To and Cc, his own address always removed; when he sent the last
   message himself the reply goes to the people he wrote to (what Gmail and
   Outlook do). Subject "Re: ...". Gmail: `users.drafts.create` with threadId,
-  In-Reply-To and References, stamped `X-Life-OS: reply_draft`. Graph:
-  createReply or createReplyAll, then one PATCH with the body and the derived
-  recipients; if the PATCH fails the empty shell is deleted. Graph drafts are
-  NOT stamped: Graph has no documented way to add a custom header to an
-  existing draft, and a guess would break the tool for altechon.
+  In-Reply-To and References. Graph: createReply or createReplyAll, then one
+  PATCH with the body and the derived recipients; if the PATCH fails the
+  empty shell is deleted.
+- NO X-Life-OS HEADER ON A DRAFT, in either dialect, and do not add one. When
+  Tapas sends the draft every header goes with it: the stamp would tell his
+  clients a tool drafted the mail, and isAppGeneratedMail would make the
+  inbox list and the 3 AM scan skip his own sent reply. The brief keeps its
+  stamp and isAppGeneratedMail is unchanged. scripts/b18.test.ts fails if a
+  draft's MIME carries the header or mailbox.ts writes one.
 - ONE thread_id PARAMETER, not thread_id plus conversation_id. For altechon
   its value is the Graph conversation id, which lifeos_list_inbox returns as
   thread_id. A parameter named conversation_id would trip the m7c rule that
@@ -990,12 +994,15 @@ free text and `audit_log.meta` has always been jsonb.
   and on the executed row, drops the reply text (`storedDraftPayload` keeps
   body_chars only). The draft lives in the mailbox, not in this database.
 - Undo (`undo_action`, and the History tab): deletes ONLY the draft this tool
-  created, the delete_event rule. The draft id comes from the executed row,
-  never from the caller, and the provider is asked first: a Gmail draft must
-  still carry the reply_draft stamp and the message id Life OS left (Gmail
-  mints a new one on every edit); a Graph item must still be a draft with the
-  lastModifiedDateTime Life OS left. A draft he has edited or sent is refused
-  and left alone.
+  created, the delete_event rule. Ownership is proved by the record, never by
+  a header: the draft id and the version it was left at are written on the
+  executed assistant_actions row when the draft is made (the id also on the
+  audit row), and undo takes both from that row, never from the caller. No
+  recorded version, no delete. The provider is then asked: a Gmail draft must
+  still have the message id Life OS left (Gmail mints a new one on every
+  edit, and a sent draft is gone), a Graph item must still be a draft with
+  the lastModifiedDateTime Life OS left. A draft he has edited or sent is
+  refused and left alone.
 - NOTHING IS SENT. mailbox.ts names no send, reply, reply-all or forward
   endpoint; scripts/b18.test.ts reads it, the performer, the undo case and the
   connector branch, and checks every URL its mocks were asked for.

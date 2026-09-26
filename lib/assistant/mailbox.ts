@@ -30,9 +30,12 @@ export const LIST_INBOX_TOOL = "lifeos_list_inbox";
 export const READ_THREAD_TOOL = "lifeos_read_mail_thread";
 export const SAVE_DRAFT_TOOL = "save_reply_draft";
 
-// The X-Life-OS value a reply draft carries (the brief carries "brief"). Undo
-// deletes a Gmail draft only while it still carries this stamp.
-export const DRAFT_TAG = "reply_draft";
+// A reply draft carries NO X-Life-OS header, deliberately. When Tapas sends
+// it, every header goes with it: the stamp would tell his clients a tool
+// drafted the mail, and would make the inbox list and the 3 AM scan skip his
+// own sent replies (isAppGeneratedMail drops anything stamped). The brief
+// keeps its stamp; a draft is proved ours by the id and version recorded when
+// it was made (see deleteReplyDraft).
 
 export const BODY_CAP = 8000;
 export const THREAD_CAP = 30000;
@@ -362,7 +365,6 @@ export function buildReplyMime(p: {
     `Subject: ${encodeHeader(headerValue(p.subject))}`,
     ...(p.inReplyTo ? [`In-Reply-To: ${headerValue(p.inReplyTo)}`] : []),
     ...(p.references ? [`References: ${headerValue(p.references)}`] : []),
-    `X-Life-OS: ${DRAFT_TAG}`,
     "MIME-Version: 1.0",
     'Content-Type: text/plain; charset="UTF-8"',
     "Content-Transfer-Encoding: base64",
@@ -959,10 +961,13 @@ export async function saveReplyDraft(
 }
 
 // Undo: delete ONLY a draft this tool created, the way delete_event removes
-// only an app-created event. The id comes from the executed action's own
-// record, and the provider is asked first: a Gmail draft must still carry the
-// reply_draft stamp, a Graph item must still be a draft, and neither may have
-// been edited since. Anything else is refused and left exactly where it is.
+// only an app-created event. Proof of ownership is the record, not a header:
+// the draft id and version come from the executed action's own row (written
+// when the draft was made, and in the audit row beside it), never from the
+// caller. The provider is then asked, and the draft must still be exactly as
+// Life OS left it: for Gmail the same message id (a sent draft is gone, and
+// an edited one has a new message id), for Graph still a draft with the same
+// lastModifiedDateTime. Anything else is refused and left where it is.
 export async function deleteReplyDraft(
   request: MailRequest,
   account: MailAccount,
@@ -975,16 +980,18 @@ export async function deleteReplyDraft(
     "That draft has been edited since Life OS saved it, so it was left alone. Delete it in the mailbox if it is not wanted."
   );
   if (!undo.draft_id.trim()) throw gone;
+  // Without the recorded version there is nothing to prove the draft is
+  // untouched, so nothing is deleted.
+  if (!undo.version.trim()) {
+    throw new Error("Life OS has no record of how it left that draft, so it will not be deleted.");
+  }
   if (account.provider === "google") {
     const url = `${GMAIL}/drafts/${encodeURIComponent(undo.draft_id)}`;
-    const res = await request(`${url}?` + new URLSearchParams({ format: "metadata" }));
+    const res = await request(`${url}?` + new URLSearchParams({ format: "minimal" }));
     if (res.status === 400 || res.status === 404) throw gone;
     await ensureOk(res, account.slot, "Looking up the draft");
-    const d = (await res.json()) as { id?: string; message?: GmailMessage };
-    if (gHeader(d.message?.payload, "X-Life-OS").trim() !== DRAFT_TAG) {
-      throw new Error("That draft was not created by Life OS, so it will not be deleted.");
-    }
-    if (undo.version && d.message?.id !== undo.version) throw edited;
+    const d = (await res.json()) as { id?: string; message?: { id?: string } };
+    if (d.message?.id !== undo.version) throw edited;
     const del = await request(url, { method: "DELETE" });
     await ensureOk(del, account.slot, "Deleting the draft");
     return;
@@ -997,7 +1004,7 @@ export async function deleteReplyDraft(
   if (m.isDraft !== true) {
     throw new Error("That message is not a draft, so it will not be deleted.");
   }
-  if (undo.version && m.lastModifiedDateTime !== undo.version) throw edited;
+  if (m.lastModifiedDateTime !== undo.version) throw edited;
   const del = await request(url, { method: "DELETE" });
   await ensureOk(del, account.slot, "Deleting the draft");
 }
