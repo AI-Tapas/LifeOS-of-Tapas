@@ -194,7 +194,8 @@ and email-verification rules live in lib/accounts.ts.
   isAppGeneratedMail drops anything carrying the X-Life-OS header the brief
   now sets, or a self-addressed message whose subject starts with the brief
   prefix (for briefs predating the header); isAlreadyOpen refuses a proposal
-  whose normalised title already matches an open task, or any task created in
+  whose normalised title already matches (since B19: or nearly matches, see
+  that section) an open task, or any task created in
   the last 45 days whatever its status, so a task he dropped does not return
   when a chaser arrives. Never widen the first
   to "ignore all mail from myself": mailing yourself a reminder must still
@@ -262,7 +263,8 @@ and email-verification rules live in lib/accounts.ts.
   app so it cannot drift).
 - create_task (chat and both connectors) refuses a title that is already an
   open task, naming the existing id, since 13 September 2026: a project chat
-  that plans his week twice was adding the same rows twice.
+  that plans his week twice was adding the same rows twice. Since B19 a NEAR
+  duplicate is refused too (see the B19 section).
 - Tool surface (32 registry tools, shared by the in-app assistant and both
   connectors, which serve the 31 that are not stubs): create/update/delete
   for tasks, notes, people, obligations and
@@ -1029,3 +1031,58 @@ free text and `audit_log.meta` has always been jsonb.
 - The stdio server in mcp-server/ fetches its list from the app and needed no
   code change.
 - Tests: `npm run test:b18` (26 offline, mocked fetch, Gmail and Graph both).
+
+## No repeated tasks, nothing shown before it can start (B19)
+
+Migration `20260927000100_b19_task_not_before.sql`. NOT applied anywhere
+when it was written; it must be applied before (or with) the deploy of this
+code, because every ranked surface now selects the column.
+
+- The problem, in his words on 26 September 2026: repeated tasks, and the
+  October and November invoices sitting in "urgent" in September when
+  neither can start until September is over.
+- `tasks.not_before date null`: the IST date before which the task cannot
+  sensibly start. Null means available now, and nothing was backfilled.
+  A check constraint (`tasks_not_before_by_due`) refuses a start after the
+  due date's IST day, because that would hide a task until it is overdue;
+  `startDateProblem` (lib/tasks/triage.ts) refuses it first with a readable
+  message, in createTask and updateTask, so every caller inherits it.
+- Waiting is decided once, in triage.ts: `isWaiting` (not_before after
+  today, IST), a `waiting` list beside the four bands, `isUrgent` false for a
+  waiting task whatever its due date, `weekendGuard` leaving them out when
+  given the clock, and `waitingLine` the one sentence every surface prints.
+  Home, the Tasks overview and the 7 AM brief count waiting tasks instead of
+  listing them. A trip line waits only when every open step waits (the
+  rollup inherits the leading step's not_before). The Board, Inbox and
+  Projects tabs still list every task, and a waiting one says "starts
+  <date>", so nothing is unreachable. The task form has a "Can start from"
+  date: his own hand can set or clear it.
+- The assistant context lists waiting tasks apart, ids included, marked not
+  for today and never urgent; mail-derived rows stay inside the untrusted
+  fence either way. `lifeos_list_tasks` leaves waiting tasks out by default,
+  returns `waiting_count`, and takes `include_waiting` for "show me
+  everything". Finished rows are never "waiting".
+- create_task and update_task take an optional `not_before` (one string
+  type, YYYY-MM-DD) whose description tells the model a month's invoice
+  starts after that month ends and next month's work is never urgent this
+  month. Undo restores it; a pre-B19 snapshot without the key leaves it alone.
+- Recurring spawn: `nextOccurrence` (lib/tasks/recurring.ts) gives the next
+  due date and `not_before` = the first day of the calendar period (day,
+  Monday week, month, year) its due date falls in. For the monthly invoice
+  due on the 3rd: the occurrence covering October is due 3 November and waits
+  until 1 November. The spawner in lib/tasks/write.ts writes both through
+  that one function.
+- Near duplicates: `lib/tasks/near-duplicate.ts`, pure and import-free.
+  Lower case, punctuation gone, month abbreviations spelled out, stop words
+  dropped; period tokens (months, four-digit years, Q1 to Q4) must agree
+  exactly or the titles are different work; otherwise Jaccard word overlap,
+  refused at 0.8 or more. create_task (chat and both connectors) refuses
+  against every open task, waiting ones included, and names the id to
+  update; a step attached to one trip is not compared with another trip's
+  steps. The mail scan's isAlreadyOpen uses the same score. His own form is
+  never refused.
+- `scripts/report-premature-tasks.ts` (`npm run report:premature`, which
+  reads .env.local): one select, prints open tasks naming a future month or
+  year and near-duplicate pairs for him to review. It writes nothing, and
+  b19.test.ts fails if an insert, update, upsert, delete or rpc appears in it.
+- Tests: `npm run test:b19` (20 offline).
