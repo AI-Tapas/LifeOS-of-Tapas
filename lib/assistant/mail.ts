@@ -6,6 +6,24 @@
 // needs_reauth).
 
 import { withResourceAuth } from "@/lib/oauth/tokens";
+import type { MailRequest } from "@/lib/assistant/mailbox";
+
+// B18: the authorised request the pure mailbox module (inbox, thread, reply
+// draft) is handed. Same withResourceAuth path as every other resource call,
+// so a dead token flips needs_reauth and a 403 comes back as a response for
+// mailbox.ts to read as a scope shortfall.
+export function mailRequest(accountId: string): MailRequest {
+  return (url, init = {}) =>
+    withResourceAuth(accountId, (token) =>
+      fetch(url, {
+        ...init,
+        headers: {
+          ...(init.headers as Record<string, string> | undefined),
+          authorization: `Bearer ${token}`,
+        },
+      })
+    );
+}
 
 export interface MailMeta {
   id: string;

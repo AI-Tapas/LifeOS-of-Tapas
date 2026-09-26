@@ -122,6 +122,10 @@ const TIME_DESC = "Time of day as HH:MM in 24 hour IST. Omit if not applicable."
 // The four connected account slots the assistant may act through.
 const SLOT_KEYS = ["taxstrategia", "ca_tapasnr", "altechon", "icai"];
 
+// B18: the mailboxes whose inbox, threads and reply drafts the connector may
+// reach. icai is out, and stays out: it has no tool of this kind at all.
+export const MAIL_SLOTS = SLOT_KEYS.filter((s) => s !== "icai");
+
 // Where a holding is held. Money invites exactly the fields this app must
 // never hold, so the tool that records one says the rule in the schema the
 // model reads, not only in a comment. scripts/m7b.test.ts pins this wording
@@ -368,6 +372,34 @@ export const TOOLS: ToolDef[] = [
         }),
         description: "People to invite.",
       },
+    }),
+  },
+  {
+    // B18. Autonomous because nothing leaves the mailbox: the draft waits in
+    // Drafts until Tapas sends it himself, and no code path here can send it.
+    // Recipients, subject and attachments are deliberately NOT parameters:
+    // who a reply goes to is derived from the thread in lib/assistant/
+    // mailbox.ts, and the executor refuses any of them by name. It reads the
+    // last message's headers to do that, so its class is mail_metadata.
+    name: "save_reply_draft",
+    bucket: "autonomous",
+    disclosure: "mail_metadata",
+    description:
+      "Save a reply to an existing mail thread as a DRAFT in that mailbox's Drafts folder, for Tapas to check and send himself. Nothing is ever sent. Replies only: a thread_id from lifeos_list_inbox is required. Who it goes to and the subject are taken from the thread (the last message's sender, or with reply_all also its To and Cc, never his own address), and nothing is ever attached. Reversible with undo_action while the draft is untouched.",
+    input_schema: schema({
+      account: enumOf(
+        MAIL_SLOTS,
+        "The mailbox the thread is in. icai has no drafts."
+      ),
+      thread_id: str(
+        "The thread_id from lifeos_list_inbox: the Gmail thread id, or for altechon the Outlook conversation id."
+      ),
+      body: str(
+        "The reply in plain text, in Tapas's voice. Only the new words: the earlier messages are not quoted."
+      ),
+      reply_all: boolOrNull(
+        "True to reply to everyone on the last message. Defaults to false: the sender only."
+      ),
     }),
   },
   {
@@ -785,6 +817,9 @@ export const TOOL_TARGETS: Record<string, ToolTarget> = {
   },
   // Not a row id: the account slot must name a connected account.
   add_event_solo: { arg: "account", label: "account" },
+  // Not a row either: the thread must exist in that account's mailbox, asked
+  // of the provider (lib/assistant/mailbox.ts threadExists).
+  save_reply_draft: { arg: "thread_id", label: "mail thread" },
 };
 
 // ---------------------------------------------------------------------------
@@ -917,6 +952,8 @@ export const MCP_READ_TOOLS = [
   "lifeos_list_trips",
   "lifeos_list_pending_actions",
   "lifeos_list_action_history",
+  "lifeos_list_inbox",
+  "lifeos_read_mail_thread",
 ] as const;
 
 export type McpReadTool = (typeof MCP_READ_TOOLS)[number];
@@ -943,6 +980,14 @@ export const READ_TOOL_DISCLOSURES: Record<McpReadTool, ToolDisclosure> = {
   lifeos_list_trips: "app_data",
   lifeos_list_pending_actions: "app_data",
   lifeos_list_action_history: "app_data",
+  // B18. Both see message text: the thread read returns whole bodies, and the
+  // inbox list returns snippets and Graph body previews, which are body text
+  // whatever a description calls them (the same reason scan_mail is
+  // mail_body). Tapas approved, by name, bodies of these three mailboxes
+  // reaching an outside model under this class (the B18 brief, 26 September
+  // 2026). Still no class for document or attachment content.
+  lifeos_list_inbox: "mail_body",
+  lifeos_read_mail_thread: "mail_body",
 };
 
 export function mcpWriteTools(): ToolDef[] {

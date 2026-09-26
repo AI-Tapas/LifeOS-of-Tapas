@@ -21,12 +21,17 @@ export interface Slot {
 // Google scopes carry openid+email so the id_token returns the address the
 // callback verifies the slot against. Microsoft carries offline_access (needed
 // for a refresh token) plus User.Read.
+// gmail.compose and Mail.ReadWrite (B18) let the connector save a reply as a
+// draft. Tokens granted before B18 lack them until the account is
+// reconnected; the draft tool then says so instead of failing, and Settings
+// shows a Reconnect link (lacksDraftScope below).
 const GOOGLE_RW = [
   "openid",
   "email",
   "https://www.googleapis.com/auth/calendar",
   "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/gmail.send",
+  "https://www.googleapis.com/auth/gmail.compose",
 ];
 const GOOGLE_ICAI = [
   "openid",
@@ -43,6 +48,7 @@ const MS_SCOPES = [
   "Calendars.ReadWrite",
   "Mail.Read",
   "Mail.Send",
+  "Mail.ReadWrite",
 ];
 
 export const SLOTS: Slot[] = [
@@ -86,6 +92,17 @@ export const SLOTS: Slot[] = [
 
 // The Supabase sign-in identity. It must never be connected as a data account.
 export const FORBIDDEN_EMAIL = "tapas.tnr@gmail.com";
+
+// True when a connected mail slot was granted before B18 and so cannot yet
+// save reply drafts. Settings shows a Reconnect link for exactly this case:
+// without it the only way to a new grant was Disconnect, which is not what a
+// scope upgrade should cost. Suffix match, because Microsoft may return the
+// scope bare or with its graph.microsoft.com prefix. icai never drafts.
+export function lacksDraftScope(slot: Slot, granted: string[]): boolean {
+  if (slot.key === "icai") return false;
+  const want = slot.provider === "google" ? "gmail.compose" : "mail.readwrite";
+  return !granted.some((s) => s.toLowerCase().endsWith(want));
+}
 
 export function slotByKey(key: string | null | undefined): Slot | undefined {
   if (!key) return undefined;

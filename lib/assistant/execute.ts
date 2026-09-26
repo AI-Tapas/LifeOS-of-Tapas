@@ -55,6 +55,15 @@ import {
   type Provenance,
 } from "./core";
 import {
+  SAVE_DRAFT_TOOL,
+  checkReplyDraftInput,
+  deleteReplyDraft,
+  saveReplyDraft,
+  storedDraftPayload,
+  threadExists,
+} from "./mailbox";
+import { mailRequest } from "@/lib/assistant/mail";
+import {
   removeFinanceReminder,
   removeObligationReminder,
   syncFinanceReminder,
@@ -196,7 +205,9 @@ async function resolveWorkStream(
   return hit.id;
 }
 
-async function resolveAccount(
+// Exported for the connector's mail reads (B18), so both surfaces agree on
+// what "connected" means.
+export async function resolveAccount(
   supabase: Db,
   slot: string
 ): Promise<{ id: string; email: string; slot: string; provider: string }> {
@@ -371,6 +382,9 @@ interface Performed {
   summary: string;
   undo: Record<string, unknown> | null;
   accountId?: string;
+  // Extra facts for the execute_autonomous audit row, e.g. the draft id a
+  // reply draft created (B18). Identifiers only, never mail text.
+  auditMeta?: Record<string, unknown>;
 }
 
 // ponytail: this re-reads a row most performers read again for their undo
@@ -381,8 +395,21 @@ async function targetResolves(
   supabase: Db,
   userId: string,
   spec: ToolTarget,
-  value: string
+  value: string,
+  input: Record<string, unknown>
 ): Promise<boolean> {
+  if (!spec.table && spec.arg === "thread_id") {
+    // B18: a reply draft's target is a thread in one of his mailboxes. An
+    // account that is not connected, or a thread the provider does not have,
+    // does not resolve; any other provider error is refused as an error.
+    let account;
+    try {
+      account = await resolveAccount(supabase, String(input.account ?? ""));
+    } catch {
+      return false;
+    }
+    return threadExists(mailRequest(account.id), account, value);
+  }
   if (!spec.table) {
     // An account slot resolves only when that account is connected directly.
     try {
@@ -440,9 +467,16 @@ async function performAutonomous(
   if (!AUTONOMOUS_KINDS.has(name)) {
     throw new Error(`${name} is not an autonomous tool.`);
   }
+  // B18: a reply draft's input is checked before its thread is looked up, so
+  // an icai slot, a missing thread or a smuggled recipient is refused outright
+  // rather than queued. And what the row keeps of it leaves the words out:
+  // the draft lives in the mailbox, not in this database.
+  const isDraft = name === SAVE_DRAFT_TOOL;
+  if (isDraft) checkReplyDraftInput(input);
+  const stored = isDraft ? storedDraftPayload(input) : input;
   const spec = TOOL_TARGETS[name];
   const outcome = await runAutonomousAction<Performed>(input, spec, {
-    resolveTarget: (value) => targetResolves(supabase, userId, spec, value),
+    resolveTarget: (value) => targetResolves(supabase, userId, spec, value, input),
     perform: () => performers[name](supabase, userId, input, owner),
     recordExecuted: async (done) => {
       const { data } = await supabase
@@ -454,7 +488,7 @@ async function performAutonomous(
           status: "executed",
           account_id: done.accountId ?? null,
           title: done.summary.slice(0, 200),
-          payload: input as Json,
+          payload: stored as Json,
           payload_hash: hashPayload(input),
           executed_at: new Date().toISOString(),
           result: { undo: done.undo } as Json,
@@ -463,7 +497,7 @@ async function performAutonomous(
         .single();
       return { actionId: data?.id ?? null };
     },
-    downgrade: (reason) => downgradeToQueue(supabase, userId, name, input, reason),
+    downgrade: (reason) => downgradeToQueue(supabase, userId, name, stored, reason),
   });
 
   if (outcome.basis === "downgraded_to_queue") {
@@ -489,7 +523,7 @@ async function performAutonomous(
     userId,
     "execute_autonomous",
     outcome.actionId,
-    { kind: name },
+    { kind: name, ...outcome.done.auditMeta },
     prov(owner, "autonomous_bucket", name, outcome.actionId)
   );
   return { reply: outcome.done.summary, actionId: outcome.actionId ?? undefined };
@@ -1214,6 +1248,34 @@ const performers: Record<string, Performer> = {
       accountId: account.id,
     };
   },
+
+  // --- B18: a reply draft, never a send ------------------------------------
+  // Everything provider-shaped lives in lib/assistant/mailbox.ts, which has
+  // no path to any send endpoint. The draft id is recorded for undo, and undo
+  // deletes only that draft, and only while it is still as Life OS left it.
+  async save_reply_draft(supabase, _userId, input) {
+    const draft = checkReplyDraftInput(input);
+    const account = await resolveAccount(supabase, draft.slot);
+    const r = await saveReplyDraft(mailRequest(account.id), account, draft);
+    return {
+      summary:
+        `Reply draft saved in the ${draft.slot} Drafts folder: "${r.subject}", to ${r.to.join(", ")}` +
+        `${r.cc.length ? `, cc ${r.cc.join(", ")}` : ""}. Nothing was sent: Tapas sends it himself.`,
+      undo: {
+        account_id: account.id,
+        account_slot: draft.slot,
+        draft_id: r.draft_id,
+        version: r.version,
+      },
+      accountId: account.id,
+      auditMeta: {
+        account_slot: draft.slot,
+        draft_id: r.draft_id,
+        thread_id: draft.thread_id,
+        reply_all: draft.reply_all,
+      },
+    };
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -1502,6 +1564,7 @@ const UNDOABLE = new Set([
   "update_trip",
   "log_trip_leg",
   "add_trip_expense",
+  "save_reply_draft",
 ]);
 
 export async function undoExecutedAction(
@@ -1773,6 +1836,22 @@ async function performUndo(
     case "add_trip_expense": {
       const r = await deleteTripExpense(supabase, userId, String(undo.expense_id));
       if (!r.ok) throw new Error(r.message ?? "Could not delete the expense.");
+      return;
+    }
+    case "save_reply_draft": {
+      // The id comes from this executed row's own record, never from the
+      // caller, and deleteReplyDraft asks the provider before it deletes.
+      const { data: account } = await supabase
+        .from("accounts")
+        .select("id, email, slot, provider")
+        .eq("id", String(undo.account_id))
+        .single();
+      if (!account?.slot) throw new Error("The mailbox for that draft is no longer connected.");
+      await deleteReplyDraft(
+        mailRequest(account.id),
+        { id: account.id, email: account.email, slot: account.slot, provider: account.provider },
+        { draft_id: String(undo.draft_id ?? ""), version: String(undo.version ?? "") }
+      );
       return;
     }
     default:

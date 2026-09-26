@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { SLOTS } from "@/lib/accounts";
+import { SLOTS, lacksDraftScope } from "@/lib/accounts";
 import {
   refreshCalendarsAction,
   disconnectAction,
@@ -179,6 +179,16 @@ export default function AccountsPanel({
               <p className="mt-2 text-sm text-today">
                 Access was revoked (this happens after a password change). Reconnect to
                 restore service.
+              </p>
+            )}
+
+            {status === "connected" && lacksDraftScope(slot, acct!.scopes) && (
+              <p className="mt-2 text-sm text-today">
+                Reply drafts need one more permission. Reconnect once to allow them;
+                nothing else changes.{" "}
+                <a href={startHref} className="font-medium underline">
+                  Reconnect
+                </a>
               </p>
             )}
 

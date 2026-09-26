@@ -33,6 +33,7 @@ const UNDOABLE = new Set([
   "add_person",
   "add_obligation",
   "add_event_solo",
+  "save_reply_draft",
 ]);
 
 interface SendPayload {
