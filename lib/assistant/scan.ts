@@ -8,7 +8,8 @@
 //
 // B20 adds a second isolated turn, the ticket pass: mail from allowlisted
 // ticket senders only (scan-filters.ts isTicketSender) is read in full (body
-// text, never attachments) by a context whose one tool is propose_trip_leg,
+// text and up to 3 PDF tickets, text extracted in memory and never stored)
+// by a context whose one tool is propose_trip_leg,
 // and a valid leg is written on its trip through the log_trip_leg performer.
 // No PNR, city or mail text reaches an audit row: ids, counts and matched
 // filter phrases only.
@@ -33,7 +34,8 @@ import {
 } from "@/lib/assistant/core";
 import { loadLlmOverride } from "@/lib/assistant/settings";
 import { listRecentGmail, listRecentGraph, mailRequest, type MailMeta } from "@/lib/assistant/mail";
-import { readMessageBody } from "@/lib/assistant/mailbox";
+import { readTicketMail } from "@/lib/assistant/mailbox";
+import { pdfText } from "@/lib/assistant/pdf-text";
 import {
   dropKnownMail,
   isAppGeneratedMail,
@@ -44,7 +46,12 @@ import {
   sourceKey,
 } from "@/lib/assistant/scan-filters";
 import { logScannedTripLeg } from "@/lib/assistant/execute";
-import { TICKET_LEG_CAP, validateTripLegProposals } from "@/lib/trips/ticket";
+import {
+  TICKET_LEG_CAP,
+  routeFromName,
+  validateTripLegProposals,
+  type NoTripLeg,
+} from "@/lib/trips/ticket";
 import { createTask } from "@/lib/tasks/write";
 import { istInstant } from "@/lib/datetime";
 import type { Json } from "@/lib/database.types";
@@ -171,7 +178,16 @@ export async function runMailScan(actor?: Actor): Promise<ScanSummary> {
     summary.legs += tickets.legs;
     summary.notes.push(...tickets.notes);
 
-    const tasks = await taskPass(owner, acc, mails, refOf, override);
+    // A ticket sender's mail never becomes a task (B20 amendment): the only
+    // "action" in the travel desk's mail is its boarding-pass footer. The
+    // never-extract phrase stays as the backstop for anything else.
+    const tasks = await taskPass(
+      owner,
+      acc,
+      mails.filter((m) => !isTicketSender(m.from)),
+      refOf,
+      override
+    );
     summary.created += tasks.created;
     summary.skipped += tasks.skipped;
     summary.notes.push(...tasks.notes);
@@ -193,7 +209,14 @@ export async function runMailScan(actor?: Actor): Promise<ScanSummary> {
         never_extract: tasks.neverExtract,
         tickets_read: tickets.read,
         trip_legs_logged: tickets.legs,
-        tickets_without_trip: tickets.withoutTrip,
+        // Cities and a date only (the leg fields), never the PNR, so the
+        // morning brief can say which ticket has no trip yet.
+        tickets_without_trip: tickets.withoutTrip.length,
+        tickets_without_trip_legs: tickets.withoutTrip.map(({ from, to, date }) => ({ from, to, date })),
+        tickets_unreadable: tickets.unreadable.length,
+        tickets_unreadable_routes: tickets.unreadable,
+        ticket_pdfs_read: tickets.pdfsRead,
+        ticket_pdfs_skipped: tickets.pdfsSkipped,
         ticket_rejected: tickets.rejected,
         // The scan is the one tool allowed to see message bodies, so its rows
         // say so, and say whether it was Tapas or the 03:00 cron that asked.
@@ -220,9 +243,27 @@ async function ticketPass(
   refOf: (id: string) => string,
   legBudget: number,
   override: LlmOverride | undefined
-): Promise<{ read: number; legs: number; withoutTrip: number; rejected: string[]; notes: string[] }> {
+): Promise<{
+  read: number;
+  legs: number;
+  withoutTrip: NoTripLeg[];
+  unreadable: { from: string; to: string }[];
+  pdfsRead: number;
+  pdfsSkipped: number;
+  rejected: string[];
+  notes: string[];
+}> {
   const { supabase, userId } = owner;
-  const out = { read: 0, legs: 0, withoutTrip: 0, rejected: [] as string[], notes: [] as string[] };
+  const out = {
+    read: 0,
+    legs: 0,
+    withoutTrip: [] as NoTripLeg[],
+    unreadable: [] as { from: string; to: string }[],
+    pdfsRead: 0,
+    pdfsSkipped: 0,
+    rejected: [] as string[],
+    notes: [] as string[],
+  };
   let candidates = mails.filter((m) => isTicketSender(m.from));
   if (!candidates.length || legBudget <= 0) return out;
 
@@ -241,14 +282,30 @@ async function ticketPass(
 
   const request = mailRequest(account.id);
   const ticketMails: TicketMail[] = [];
+  // Mails whose PDFs gave no text at all: the file name (or subject) is all
+  // there is, and without a date no leg can be made.
+  const noText = new Map<string, { from: string; to: string }>();
   for (const m of candidates) {
     try {
+      const read = await readTicketMail(request, account, m, pdfText);
+      out.pdfsRead += read.attachments.length;
+      out.pdfsSkipped += read.skipped_too_big + read.skipped_over_limit;
+      const attachments = read.attachments.map((a) => {
+        const r = routeFromName(a.name);
+        return { name: a.name, text: a.text, route: r ? `${r.from} to ${r.to}` : null };
+      });
+      const hadPdf = read.attachments.length + read.skipped_too_big > 0;
+      if (hadPdf && !read.attachments.some((a) => a.text)) {
+        const r = read.attachments.map((a) => routeFromName(a.name)).find(Boolean) ?? routeFromName(m.subject);
+        noText.set(refOf(m.id), r ?? { from: "", to: "" });
+      }
       ticketMails.push({
         ref: refOf(m.id),
         from: m.from,
         subject: m.subject,
         date: m.date,
-        body: await readMessageBody(request, account, m.id),
+        body: read.body,
+        attachments,
       });
     } catch {
       out.notes.push(`${account.slot}: could not read one ticket email`);
@@ -268,7 +325,8 @@ async function ticketPass(
     blocks: [{ text: TICKET_SYSTEM, stable: true }],
     conv: [{ kind: "text", role: "user", text: buildTicketUserMessage(ticketMails) }],
     tools: [TICKET_TOOL],
-    maxTokens: 1024,
+    // Several tickets an email, one call each: room for the nightly cap.
+    maxTokens: 2048,
     override,
   });
   if (turn.stop === "refusal") {
@@ -282,7 +340,11 @@ async function ticketPass(
     legBudget
   );
   out.rejected = rejected;
-  out.withoutTrip = withoutTrip.size;
+  out.withoutTrip = withoutTrip;
+  for (const [ref, route] of noText) {
+    const placed = accepted.some((a) => a.external_ref === ref) || withoutTrip.some((w) => w.ref === ref);
+    if (!placed) out.unreadable.push(route);
+  }
   for (const t of accepted) {
     try {
       await logScannedTripLeg(owner, t, account.id);
@@ -294,9 +356,14 @@ async function ticketPass(
   if (out.legs) {
     out.notes.push(`${account.slot}: recorded ${out.legs} trip ${out.legs === 1 ? "leg" : "legs"} from ticket mail`);
   }
-  if (out.withoutTrip) {
+  if (out.withoutTrip.length) {
     out.notes.push(
-      `${account.slot}: ${out.withoutTrip} ticket ${out.withoutTrip === 1 ? "email" : "emails"} did not match a trip`
+      `${account.slot}: ${out.withoutTrip.length} ${out.withoutTrip.length === 1 ? "ticket has" : "tickets have"} no trip yet`
+    );
+  }
+  if (out.unreadable.length) {
+    out.notes.push(
+      `${account.slot}: ${out.unreadable.length} ticket ${out.unreadable.length === 1 ? "email" : "emails"} could not be read`
     );
   }
   return out;

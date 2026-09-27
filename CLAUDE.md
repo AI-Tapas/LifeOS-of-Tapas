@@ -1100,20 +1100,40 @@ stream name that never overwrite a hint already written. Health gets none.
   actions, and `matchesNeverExtract` (scan-filters.ts, a constant phrase list
   seeded with "boarding pass") drops a proposal that matches. The audit row
   records the phrase only.
-- Tickets: `isTicketSender` allowlists IRCTC, IndiGo, Air India, Vistara and
-  the ICAI travel desk. THE TRAVEL DESK ENTRY IS A PLACEHOLDER on a .invalid
-  domain until Tapas confirms the address. Ticket senders are exempt from
-  isNoiseMail. For them only, the scan reads the body text
-  (mailbox.ts `readMessageBody`, no attachments) in a second isolated turn
-  whose one tool is `propose_trip_leg` (tools.ts TICKET_TOOL).
-  lib/trips/ticket.ts validates (scanned ref, a trip whose dates cover the
-  day give or take 2, no duplicate leg, 10 legs a run) and
+- Tickets: `isTicketSender` allowlists traveldesk@icai.in and
+  etickets@sharpmail.in (the ICAI travel desk and its booking agent, confirmed
+  from a real email on 27 September 2026) and the domains irctc.co.in,
+  goindigo.in, airindia.com/.in, airvistara.com and akasaair.com. Their mail
+  is exempt from isNoiseMail and NEVER goes to the task pass: the travel
+  desk's body is only a covering note and the boarding-pass footer, and the
+  tickets are PDF attachments.
+- PDF tickets, and this crosses the old "no attachments" line on purpose, at
+  the orchestrator's request relaying Tapas's review: for allowlisted senders
+  only, mailbox.ts `readTicketMail` reads the body and up to 3 attachments of
+  mime type application/pdf, 2 MB each (bigger ones are never downloaded),
+  and `lib/assistant/pdf-text.ts` extracts at most 6,000 characters of text in
+  memory with unpdf (MIT, zero dependencies, a serverless pdf.js build). No
+  OCR. readTicketMail refuses any other sender itself, before any provider
+  call. The text goes, fenced as untrusted, only to the isolated ticket turn
+  (TICKET_TOOL, propose_trip_leg), with each file name's airport codes read
+  as a route (`routeFromName`, PLACE_CODES in lib/trips/ticket.ts). It is
+  stored nowhere: only the leg fields (from, to, date, mode, ref) are
+  written. No disclosure class was added (still five); the scan stays
+  mail_body. gmail.readonly already covers attachments.get, so no scope
+  changed.
+- lib/trips/ticket.ts validates (scanned ref, a trip whose dates cover the
+  day give or take 2, no duplicate leg, 10 legs a night across accounts) and
   execute.ts `logScannedTripLeg` writes through the log_trip_leg performer,
   storing the PNR as the leg's optional `ref` jsonb key (no migration), and
   sets an empty billable transport expense's receipt_ref to
-  `email:<message ref>` in the same action; one undo reverses both. A ticket
-  that matches no trip is counted in the scan's audit row and the brief says
-  "1 ticket email did not match a trip". The task pass still runs on them.
+  `email:<message ref>` in the same action; one undo reverses both. Tickets
+  usually arrive before the trip exists: an unmatched leg is kept in the
+  scan's audit row as cities and date only (never the PNR) and the brief says
+  "1 ticket (Mumbai to Kolkata, 25 Sept) has no trip yet". A ticket email
+  whose PDFs gave no text is counted as "could not be read", with the route
+  from the file name when it has one. An unlogged ticket is read again the
+  next night while it is inside the 3-day window, so it lands once the trip
+  exists.
 - Repeats: the scan fetches Gmail threadId and Graph conversationId, and
   `dropKnownMail` drops, before the model, mail whose thread has an open task
   or one from the last 45 days, and mail whose sha256(sender, normalised
@@ -1135,4 +1155,5 @@ stream name that never overwrite a hint already written. Health gets none.
   update_task refuse an unknown stream name with the real list
   (lib/tasks/stream.ts); update_task can now move a task's stream, and undo
   restores it.
-- Tests: `npm run test:b20` (30 offline).
+- Tests: `npm run test:b20` (38 offline, synthetic ticket texts, and one real
+  unpdf extraction of a hand-built PDF).

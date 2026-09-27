@@ -192,15 +192,17 @@ export function matchesNeverExtract(title: string, note: string | null = null): 
 }
 
 // ---------------------------------------------------------------------------
-// B20. Ticket senders: their mail is read for a trip leg, not only a task.
+// B20. Ticket senders: their mail (and, for them only, its PDF tickets) is
+// read for a trip leg and never becomes a task.
 //
-// TRAVEL DESK PLACEHOLDER: the ICAI travel desk address has not been
-// confirmed by Tapas yet. Replace the .invalid entry below with the address
-// (or addresses) he confirms. An .invalid domain can never match real mail,
-// so until then the travel desk's mail is scanned exactly as before.
+// Confirmed from a real travel desk email on 27 September 2026: the ICAI
+// travel desk writes from traveldesk@icai.in with the booking agent, Sharp
+// Travels, in cc; the agent sends e-tickets from etickets@sharpmail.in. The
+// body carries only a standing footer; the tickets are PDF attachments.
 // ---------------------------------------------------------------------------
 export const TICKET_SENDER_ADDRESSES: readonly string[] = [
-  "travel-desk-to-confirm@placeholder.invalid",
+  "traveldesk@icai.in",
+  "etickets@sharpmail.in",
 ];
 // Whole domains, matched on the domain itself or any subdomain of it.
 export const TICKET_SENDER_DOMAINS: readonly string[] = [
@@ -209,6 +211,7 @@ export const TICKET_SENDER_DOMAINS: readonly string[] = [
   "airindia.com",
   "airindia.in",
   "airvistara.com",
+  "akasaair.com",
 ];
 
 export function isTicketSender(from: string): boolean {

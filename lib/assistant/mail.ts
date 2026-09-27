@@ -2,9 +2,9 @@
 // Gmail is queried in metadata format (headers plus snippet, never the body,
 // never attachment parts) and Graph selects only subject, from, the
 // conversation id and bodyPreview. Links inside mail arrive as inert strings
-// inside the snippet. Since B20 the scan also reads the full body text of
-// mail from allowlisted ticket senders only, through lib/assistant/mailbox.ts
-// readMessageBody; attachments are still never fetched.
+// inside the snippet. Since B20 the scan also reads the body text and PDF
+// ticket attachments of mail from allowlisted ticket senders only, through
+// lib/assistant/mailbox.ts readTicketMail; no other attachment is fetched.
 // Every call routes through withResourceAuth (401 retry, revocation to
 // needs_reauth).
 

@@ -69,7 +69,7 @@ update work_streams set scan_hint =
 where name = 'Tax Strategia' and scan_hint is null;
 
 update work_streams set scan_hint =
-  'AI and automation consulting and solution projects, proposals, workflows.'
+  'AI and automation consulting and solution projects, proposals, workflows; apps Tapas built and maintains for clients, and their cloud bills or alerts (e.g. a realty app on AWS).'
 where name = 'Individual consulting' and scan_hint is null;
 
 update work_streams set scan_hint =
@@ -81,7 +81,7 @@ update work_streams set scan_hint =
 where name = 'Personal' and scan_hint is null;
 
 update work_streams set scan_hint =
-  'Only mail about Altechon as a brand itself. Client work that arrives in the Altechon mailbox goes to its topic''s stream.'
+  'Altechon as a brand itself, and its own Microsoft and Azure subscriptions and bills. Client work arriving in the Altechon mailbox goes to its topic''s stream.'
 where name = 'Altechon' and scan_hint is null;
 
 update work_streams set scan_hint =

@@ -8,7 +8,8 @@ import { serviceActor } from "@/lib/assistant/actor";
 import { sendBriefEmail } from "@/lib/brief/send";
 import { composeBrief, type BriefTask, type BriefEvent, type BriefAccountIssue } from "@/lib/brief/compose";
 import { staleTripStepIds } from "@/lib/tasks/trip-rollup";
-import { lapsedLine, sweepLapsed, ticketsWithoutTripLine } from "@/lib/tasks/lapse";
+import { lapsedLine, sweepLapsed } from "@/lib/tasks/lapse";
+import { ticketBriefLine } from "@/lib/trips/ticket";
 import { loadTripSteps } from "@/lib/tasks/trip-steps";
 import { setTaskStatus } from "@/lib/tasks/write";
 import type { MonthExpense } from "@/lib/trips/month";
@@ -149,11 +150,23 @@ export async function GET(req: Request): Promise<Response> {
       .eq("user_id", userId)
       .eq("action", "mail_scan")
       .gte("ts", istInstant(today, 0, 0).toISOString());
-    const ticketsWithoutTrip = (scanRows ?? []).reduce((n, r) => {
-      const v = (r.meta as Record<string, unknown> | null)?.tickets_without_trip;
-      return n + (typeof v === "number" ? v : 0);
-    }, 0);
-    const housekeeping = [lapsedLine(lapsedIds.size), ticketsWithoutTripLine(ticketsWithoutTrip)].filter(
+    // Cities and dates only; the scan never records a PNR.
+    const noTrip: { from: string; to: string; date: string }[] = [];
+    const unreadable: { from: string; to: string }[] = [];
+    for (const r of scanRows ?? []) {
+      const meta = (r.meta ?? {}) as Record<string, unknown>;
+      for (const l of Array.isArray(meta.tickets_without_trip_legs) ? meta.tickets_without_trip_legs : []) {
+        const x = (l ?? {}) as Record<string, unknown>;
+        if (typeof x.from === "string" && typeof x.to === "string" && typeof x.date === "string") {
+          noTrip.push({ from: x.from, to: x.to, date: x.date });
+        }
+      }
+      for (const u of Array.isArray(meta.tickets_unreadable_routes) ? meta.tickets_unreadable_routes : []) {
+        const x = (u ?? {}) as Record<string, unknown>;
+        unreadable.push({ from: String(x.from ?? ""), to: String(x.to ?? "") });
+      }
+    }
+    const housekeeping = [lapsedLine(lapsedIds.size), ticketBriefLine(noTrip, unreadable)].filter(
       (l): l is string => l !== null
     );
 

@@ -23,7 +23,7 @@
 // relative .ts imports only, so the offline suite loads it directly under
 // node --test type stripping. The server wiring is mailRequest in mail.ts.
 
-import { addressOf, isAppGeneratedMail } from "./scan-filters.ts";
+import { addressOf, isAppGeneratedMail, isTicketSender } from "./scan-filters.ts";
 import { MAIL_SLOTS, disclosureOf } from "./tools.ts";
 
 export const LIST_INBOX_TOOL = "lifeos_list_inbox";
@@ -386,7 +386,7 @@ interface GmailPart {
   mimeType?: string;
   filename?: string;
   headers?: GmailHeader[];
-  body?: { size?: number; data?: string };
+  body?: { size?: number; data?: string; attachmentId?: string };
   parts?: GmailPart[];
 }
 
@@ -734,36 +734,131 @@ export async function readThread(
   return { account: account.slot, thread_id: threadId, message_count: messages.length, messages };
 }
 
-// B20: the body of ONE message, as plain text with quoted history trimmed and
-// capped at BODY_CAP. Used by the mail scan for allowlisted ticket senders
-// only (lib/assistant/scan-filters.ts isTicketSender). No attachment is ever
-// fetched: a text part with a file name is an attachment and is skipped, and
-// no attachments endpoint is called. Unlike the connector reads this has no
-// MAIL_SLOTS check: the scan already reads every connected mailbox, icai
-// included, and its audit row carries the mail_body class.
-export async function readMessageBody(
+// ---------------------------------------------------------------------------
+// B20. One ticket email, read for the scan's ticket pass.
+//
+// ONLY for mail from an allowlisted ticket sender (scan-filters.ts
+// isTicketSender), checked again here so no other caller can reach an
+// attachment through it: anything else returns empty without a single
+// provider call. The body comes back as plain text (quoted history trimmed,
+// BODY_CAP). Attachments: only application/pdf, at most TICKET_PDF_MAX a
+// mail and TICKET_PDF_BYTES each, and the bytes go straight to the injected
+// text extractor and are dropped. Nothing here stores anything. The ICAI
+// travel desk's body carries no ticket at all: the tickets are the PDFs.
+// ---------------------------------------------------------------------------
+export const TICKET_PDF_MAX = 3;
+export const TICKET_PDF_BYTES = 2 * 1024 * 1024;
+
+export type PdfTextFn = (bytes: Uint8Array) => Promise<string>;
+
+export interface TicketAttachmentText {
+  name: string;
+  // Null when the PDF gave no text (image only, damaged, or refused).
+  text: string | null;
+}
+
+export interface TicketMailRead {
+  body: string;
+  attachments: TicketAttachmentText[];
+  skipped_too_big: number;
+  skipped_over_limit: number;
+}
+
+interface PdfRef {
+  name: string;
+  size: number;
+  fetchBytes: () => Promise<Uint8Array>;
+}
+
+function gmailPdfParts(part: GmailPart | undefined, out: GmailPart[] = []): GmailPart[] {
+  if (!part) return out;
+  if (part.filename && part.mimeType?.toLowerCase() === "application/pdf" && part.body?.attachmentId) {
+    out.push(part);
+  }
+  for (const child of part.parts ?? []) gmailPdfParts(child, out);
+  return out;
+}
+
+export async function readTicketMail(
   request: MailRequest,
   account: MailAccount,
-  messageId: string
-): Promise<string> {
-  let text: string;
+  mail: { id: string; from: string },
+  extract: PdfTextFn
+): Promise<TicketMailRead> {
+  const out: TicketMailRead = { body: "", attachments: [], skipped_too_big: 0, skipped_over_limit: 0 };
+  if (!isTicketSender(mail.from)) return out;
+  const id = encodeURIComponent(mail.id);
+  let pdfs: PdfRef[] = [];
   if (account.provider === "google") {
-    const res = await request(
-      `${GMAIL}/messages/${encodeURIComponent(messageId)}?` + new URLSearchParams({ format: "full" })
-    );
+    const res = await request(`${GMAIL}/messages/${id}?` + new URLSearchParams({ format: "full" }));
     await ensureOk(res, account.slot, "Reading the message");
-    text = gmailBody(((await res.json()) as GmailMessage).payload);
+    const m = (await res.json()) as GmailMessage;
+    out.body = gmailBody(m.payload);
+    pdfs = gmailPdfParts(m.payload).map((p) => ({
+      name: p.filename ?? "",
+      size: p.body?.size ?? 0,
+      fetchBytes: async () => {
+        const r = await request(
+          `${GMAIL}/messages/${id}/attachments/${encodeURIComponent(p.body!.attachmentId!)}`
+        );
+        await ensureOk(r, account.slot, "Reading a ticket attachment");
+        const j = (await r.json()) as { data?: string };
+        return new Uint8Array(Buffer.from(j.data ?? "", "base64url"));
+      },
+    }));
   } else {
     const res = await request(
-      `${GRAPH}/messages/${encodeURIComponent(messageId)}?` + new URLSearchParams({ $select: "body" }),
+      `${GRAPH}/messages/${id}?` + new URLSearchParams({ $select: "body,hasAttachments" }),
       { headers: { prefer: 'outlook.body-content-type="text"' } }
     );
     await ensureOk(res, account.slot, "Reading the message");
     const m = (await res.json()) as GraphMessage;
     const content = m.body?.content ?? "";
-    text = m.body?.contentType?.toLowerCase() === "html" ? htmlToText(content) : content;
+    out.body = m.body?.contentType?.toLowerCase() === "html" ? htmlToText(content) : content;
+    if (m.hasAttachments) {
+      const list = await request(
+        `${GRAPH}/messages/${id}/attachments?` + new URLSearchParams({ $select: "id,name,contentType,size" })
+      );
+      await ensureOk(list, account.slot, "Listing attachments");
+      const j = (await list.json()) as { value?: { id: string; name?: string; contentType?: string; size?: number }[] };
+      pdfs = (j.value ?? [])
+        .filter((a) => a.contentType?.toLowerCase() === "application/pdf")
+        .map((a) => ({
+          name: a.name ?? "",
+          size: a.size ?? 0,
+          fetchBytes: async () => {
+            const r = await request(`${GRAPH}/messages/${id}/attachments/${encodeURIComponent(a.id)}/$value`);
+            await ensureOk(r, account.slot, "Reading a ticket attachment");
+            return new Uint8Array(await r.arrayBuffer());
+          },
+        }));
+    }
   }
-  return trimQuoted(text).slice(0, BODY_CAP);
+  out.body = trimQuoted(out.body).slice(0, BODY_CAP);
+  for (const p of pdfs) {
+    if (p.size > TICKET_PDF_BYTES) {
+      out.skipped_too_big += 1;
+      continue;
+    }
+    if (out.attachments.length >= TICKET_PDF_MAX) {
+      out.skipped_over_limit += 1;
+      continue;
+    }
+    let text: string | null = null;
+    try {
+      const bytes = await p.fetchBytes();
+      // The provider's size can be missing; the real length decides too.
+      if (bytes.length > TICKET_PDF_BYTES) {
+        out.skipped_too_big += 1;
+        continue;
+      }
+      text = (await extract(bytes)).trim() || null;
+    } catch {
+      text = null;
+    }
+    out.attachments.push({ name: p.name, text });
+  }
+  return out;
 }
 
 // B10 for save_reply_draft: the thread has to be there before the autonomous

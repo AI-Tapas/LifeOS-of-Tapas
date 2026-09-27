@@ -62,8 +62,3 @@ export function lapsedLine(count: number): string | null {
   if (!count) return null;
   return `${count} closed ${count === 1 ? "window" : "windows"} dropped.`;
 }
-
-export function ticketsWithoutTripLine(count: number): string | null {
-  if (!count) return null;
-  return `${count} ticket ${count === 1 ? "email" : "emails"} did not match a trip.`;
-}
