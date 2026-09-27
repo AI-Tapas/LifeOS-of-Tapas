@@ -27,6 +27,7 @@
     "test:b18": "node --test scripts/b18.test.ts",
     "test:b19": "node --test scripts/b19.test.ts",
     "test:b20": "node --test scripts/b20.test.ts",
+    "test:b21": "node --test scripts/b21.test.ts",
     "report:premature": "node --env-file=.env.local scripts/report-premature-tasks.ts",
     "report:lapsed": "node --env-file=.env.local scripts/report-lapsed-tasks.ts"
   },

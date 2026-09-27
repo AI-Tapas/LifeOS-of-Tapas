@@ -10,6 +10,7 @@ import { composeBrief, type BriefTask, type BriefEvent, type BriefAccountIssue }
 import { staleTripStepIds } from "@/lib/tasks/trip-rollup";
 import { lapsedLine, sweepLapsed } from "@/lib/tasks/lapse";
 import { ticketBriefLine } from "@/lib/trips/ticket";
+import { cabBriefLine } from "@/lib/trips/cab";
 import { loadTripSteps } from "@/lib/tasks/trip-steps";
 import { setTaskStatus } from "@/lib/tasks/write";
 import type { MonthExpense } from "@/lib/trips/month";
@@ -153,8 +154,19 @@ export async function GET(req: Request): Promise<Response> {
     // Cities and dates only; the scan never records a PNR.
     const noTrip: { from: string; to: string; date: string }[] = [];
     const unreadable: { from: string; to: string }[] = [];
+    // B21: cab rides added, by the trip's own label, and Bharat Taxi invoices
+    // that could not be split. Personal rides are never read here.
+    const cabAdded: { label: string; count: number; amount: number }[] = [];
+    let cabUnsplit = 0;
     for (const r of scanRows ?? []) {
       const meta = (r.meta ?? {}) as Record<string, unknown>;
+      for (const c of Array.isArray(meta.cab_added_by_trip) ? meta.cab_added_by_trip : []) {
+        const x = (c ?? {}) as Record<string, unknown>;
+        if (typeof x.label === "string" && typeof x.count === "number" && typeof x.amount === "number") {
+          cabAdded.push({ label: x.label, count: x.count, amount: x.amount });
+        }
+      }
+      if (typeof meta.cab_receipts_unsplit === "number") cabUnsplit += meta.cab_receipts_unsplit;
       for (const l of Array.isArray(meta.tickets_without_trip_legs) ? meta.tickets_without_trip_legs : []) {
         const x = (l ?? {}) as Record<string, unknown>;
         if (typeof x.from === "string" && typeof x.to === "string" && typeof x.date === "string") {
@@ -166,7 +178,11 @@ export async function GET(req: Request): Promise<Response> {
         unreadable.push({ from: String(x.from ?? ""), to: String(x.to ?? "") });
       }
     }
-    const housekeeping = [lapsedLine(lapsedIds.size), ticketBriefLine(noTrip, unreadable)].filter(
+    const housekeeping = [
+      lapsedLine(lapsedIds.size),
+      ticketBriefLine(noTrip, unreadable),
+      cabBriefLine(cabAdded, cabUnsplit),
+    ].filter(
       (l): l is string => l !== null
     );
 

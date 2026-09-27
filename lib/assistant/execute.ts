@@ -43,6 +43,7 @@ import {
   type TicketLeg,
   type TicketUndo,
 } from "@/lib/trips/ticket";
+import { cabActionPayload, cabDescription, cabExpenseInput, type CabRide } from "@/lib/trips/cab";
 import { TRANSPORT_MODES, type TransportMode, type TripLeg } from "@/lib/trips/core";
 import { HOTEL_ARRANGEMENTS, type HotelArrangement } from "@/lib/trips/checklist";
 import { isFinanceKeyDateType, isReminderMode } from "@/lib/reminders/core";
@@ -1415,6 +1416,52 @@ export async function logScannedTripLeg(
     prov(owner, "autonomous_bucket", "log_trip_leg", actionId)
   );
   return { actionId, receiptLinked: undo.receipt_links.length > 0 };
+}
+
+// ---------------------------------------------------------------------------
+// B21. A billable cab ride from a scanned receipt.
+//
+// The scan's cab pass hands over rides lib/trips/cab.ts has already validated
+// (a scanned ref, the sender's own provider, a trip within a day of the ride,
+// no duplicate, the cap). Each is written through the add_trip_expense
+// performer, so it is the same expense write, the same assistant_actions kind
+// and the same undo (delete that expense) as an expense added in chat. The row
+// keeps the expense fields only, never receipt text. Not on any tool surface.
+// ---------------------------------------------------------------------------
+export async function logScannedCabExpense(
+  owner: Actor,
+  ride: CabRide,
+  accountId: string
+): Promise<{ actionId: string | null }> {
+  const { supabase, userId } = owner;
+  const done = await performers.add_trip_expense(supabase, userId, cabExpenseInput(ride), owner);
+  const stored = cabActionPayload(ride);
+  const { data } = await supabase
+    .from("assistant_actions")
+    .insert({
+      user_id: userId,
+      kind: "add_trip_expense",
+      mode: "auto",
+      status: "executed",
+      account_id: accountId,
+      title: `Cab receipt from mail: ${cabDescription(ride)}`.slice(0, 200),
+      payload: stored as unknown as Json,
+      payload_hash: hashPayload(stored),
+      executed_at: new Date().toISOString(),
+      result: { undo: done.undo } as unknown as Json,
+    })
+    .select("id")
+    .single();
+  const actionId = data?.id ?? null;
+  await audit(
+    supabase,
+    userId,
+    "execute_autonomous",
+    actionId,
+    { kind: "add_trip_expense", via: "scan_mail", trip_id: ride.trip_id, amount: ride.amount },
+    prov(owner, "autonomous_bucket", "add_trip_expense", actionId)
+  );
+  return { actionId };
 }
 
 export async function approveAndExecute(

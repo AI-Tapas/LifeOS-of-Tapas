@@ -23,7 +23,7 @@
 // relative .ts imports only, so the offline suite loads it directly under
 // node --test type stripping. The server wiring is mailRequest in mail.ts.
 
-import { addressOf, isAppGeneratedMail, isTicketSender } from "./scan-filters.ts";
+import { addressOf, isAppGeneratedMail, mayReadMailContent } from "./scan-filters.ts";
 import { MAIL_SLOTS, disclosureOf } from "./tools.ts";
 
 export const LIST_INBOX_TOOL = "lifeos_list_inbox";
@@ -737,8 +737,8 @@ export async function readThread(
 // ---------------------------------------------------------------------------
 // B20. One ticket email, read for the scan's ticket pass.
 //
-// ONLY for mail from an allowlisted ticket sender (scan-filters.ts
-// isTicketSender), checked again here so no other caller can reach an
+// ONLY for mail from an allowlisted ticket sender or, since B21, cab receipt
+// sender (scan-filters.ts mayReadMailContent), checked again here so no other caller can reach an
 // attachment through it: anything else returns empty without a single
 // provider call. The body comes back as plain text (quoted history trimmed,
 // BODY_CAP). Attachments: only application/pdf, at most TICKET_PDF_MAX a
@@ -786,7 +786,7 @@ export async function readTicketMail(
   extract: PdfTextFn
 ): Promise<TicketMailRead> {
   const out: TicketMailRead = { body: "", attachments: [], skipped_too_big: 0, skipped_over_limit: 0 };
-  if (!isTicketSender(mail.from)) return out;
+  if (!mayReadMailContent(mail.from)) return out;
   const id = encodeURIComponent(mail.id);
   let pdfs: PdfRef[] = [];
   if (account.provider === "google") {

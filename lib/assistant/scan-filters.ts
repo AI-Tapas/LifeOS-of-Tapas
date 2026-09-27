@@ -60,7 +60,8 @@ const NOISE_SENDER =
 export function isNoiseMail(mail: ScanFilterMail): boolean {
   // B20: a ticket sender is taken out of the noise filters, because its
   // e-ticket mail is exactly the "receipt" and "no-reply" mail they drop.
-  if (isTicketSender(mail.from)) return false;
+  // B21: so is a cab receipt sender, for the same reason.
+  if (mayReadMailContent(mail.from)) return false;
   const from = addressOf(mail.from);
   return NOISE_SENDER.test(from) || NOISE_SUBJECT.test(mail.subject);
 }
@@ -220,6 +221,59 @@ export function isTicketSender(from: string): boolean {
   const domain = addr.split("@")[1] ?? "";
   if (!domain) return false;
   return TICKET_SENDER_DOMAINS.some((d) => domain === d || domain.endsWith(`.${d}`));
+}
+
+// ---------------------------------------------------------------------------
+// B21. Cab receipt senders: their mail (and, for them only, its PDF receipts)
+// is read for a billable local ride on an AICA trip and never becomes a task.
+// Approved by Tapas by name on 27 September 2026, on the same terms as the
+// ticket senders above.
+//
+// An entry with an @ is one exact address; anything else is a domain, matched
+// on itself or any subdomain. Bharat Taxi's address was confirmed by Tapas
+// from a real email; the other three are the providers' own receipt domains
+// (Uber's body receipts, Ola's and Rapido's PDF invoices).
+// ponytail: a domain covers a provider's marketing mail too. The receipt
+// turn proposes nothing for a mail with no ride in it, so the cost is one
+// read; narrow a domain to an address once a real receipt shows which one.
+// ---------------------------------------------------------------------------
+export type CabProvider = "uber" | "ola" | "rapido" | "bharat_taxi";
+
+export const CAB_PROVIDER_NAMES: Record<CabProvider, string> = {
+  uber: "Uber",
+  ola: "Ola",
+  rapido: "Rapido",
+  bharat_taxi: "Bharat Taxi",
+};
+
+export const CAB_RECEIPT_SENDERS: readonly { match: string; provider: CabProvider }[] = [
+  { match: "uber.com", provider: "uber" },
+  { match: "olacabs.com", provider: "ola" },
+  { match: "rapido.bike", provider: "rapido" },
+  { match: "rapido.co", provider: "rapido" },
+  { match: "no-reply@bharattaxiapp.com", provider: "bharat_taxi" },
+];
+
+export function cabProviderOf(from: string): CabProvider | null {
+  const addr = addressOf(from);
+  const domain = addr.split("@")[1] ?? "";
+  if (!domain) return null;
+  for (const s of CAB_RECEIPT_SENDERS) {
+    if (s.match.includes("@") ? addr === s.match : domain === s.match || domain.endsWith(`.${s.match}`)) {
+      return s.provider;
+    }
+  }
+  return null;
+}
+
+export function isCabReceiptSender(from: string): boolean {
+  return cabProviderOf(from) !== null;
+}
+
+// The whole rule for reading past the metadata: a mail's body and its PDF
+// attachments may be read for the ticket and cab-receipt allowlists only.
+export function mayReadMailContent(from: string): boolean {
+  return isTicketSender(from) || isCabReceiptSender(from);
 }
 
 // ---------------------------------------------------------------------------

@@ -106,7 +106,9 @@ test("the confirmed travel desk and agent addresses, and Akasa Air, are ticket s
 });
 
 test("a ticket sender's mail never goes to the task pass", () => {
-  assert.ok(src("lib/assistant/scan.ts").includes("mails.filter((m) => !isTicketSender(m.from))"));
+  // B21 widened the filter to mayReadMailContent, which still covers every
+  // ticket sender (and adds the cab receipt senders).
+  assert.ok(src("lib/assistant/scan.ts").includes("mails.filter((m) => !mayReadMailContent(m.from))"));
 });
 
 test("validator: accepts a leg within a trip and rejects one 5 days outside", () => {

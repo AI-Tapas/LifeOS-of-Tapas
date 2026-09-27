@@ -1134,6 +1134,12 @@ stream name that never overwrite a hint already written. Health gets none.
   from the file name when it has one. An unlogged ticket is read again the
   next night while it is inside the 3-day window, so it lands once the trip
   exists.
+- THE CONTENT RULE (widened by B21): a mail's body text and its PDF
+  attachments may be read for the ticket and cab-receipt allowlists only
+  (`isTicketSender`, `isCabReceiptSender`, joined in `mayReadMailContent`,
+  which readTicketMail checks itself), approved by Tapas by name on
+  27 September 2026. No other sender, ever. Adding a sender to either list is
+  a decision for Tapas, not a diff.
 - Repeats: the scan fetches Gmail threadId and Graph conversationId, and
   `dropKnownMail` drops, before the model, mail whose thread has an open task
   or one from the last 45 days, and mail whose sha256(sender, normalised
@@ -1157,3 +1163,54 @@ stream name that never overwrite a hint already written. Health gets none.
   restores it.
 - Tests: `npm run test:b20` (38 offline, synthetic ticket texts, and one real
   unpdf extraction of a hand-built PDF).
+
+## Cab receipts on AICA trips (B21)
+
+No migration. `assistant_actions.payload` and `audit_log.meta` are jsonb, and
+the expense row is the existing trip_expenses shape.
+
+- The problem, in his words on 27 September 2026: local cab rides on AICA
+  trips are billable to ICAI and need a receipt each in the monthly invoice
+  pack, and he collected them by hand. He approved reading receipts from
+  Uber, Ola, Rapido and Bharat Taxi by name, on B20's terms.
+- Senders: `CAB_RECEIPT_SENDERS` in scan-filters.ts, a separate list beside
+  the ticket one. Domains (subdomains included): uber.com, olacabs.com,
+  rapido.bike, rapido.co. One exact address: no-reply@bharattaxiapp.com
+  (confirmed by Tapas from a real email). The three domains were not yet
+  checked against a real receipt in his mailbox; narrow a domain to an
+  address once one is seen. Exempt from isNoiseMail; never a task.
+- Reading: the B20 reader (`readTicketMail`, 3 PDFs, 2 MB each, 6,000
+  characters, unpdf, no OCR). `cabReceiptMail` hands the model the PDF text,
+  or the body only where no PDF gave text (Uber's receipt is its body).
+  Fenced as untrusted, to an isolated turn whose one tool is
+  `propose_cab_expense` (date, time IST, provider, short from and to area,
+  amount, booking id at most 40 characters). The sender decides the
+  provider; a proposal naming another is refused. `cleanArea` keeps the part
+  before the first comma and drops anything with four digits in a row.
+- lib/trips/cab.ts validates: a trip within 1 day of the ride (`tripForDate`
+  from ticket.ts, slack 1), no duplicate (same trip and provider and booking
+  id, or same trip and amount within 10 minutes, against every earlier
+  scanned ride, undone ones included, and the same run), 20 rides a night
+  across accounts. A ride matching no trip is PERSONAL: nothing is stored,
+  not even a rejection reason; the audit row carries a count
+  (`cab_rides_personal`) and the brief never mentions it. This is a privacy
+  rule, not an oversight.
+- Bharat Taxi: its invoice can cover a date range with one total. The model
+  proposes one ride per line with its own date; a Bharat Taxi mail that
+  yields no well-formed ride counts as "could not be split" in the audit row
+  and the brief, and nothing is added from it.
+- Write: execute.ts `logScannedCabExpense` goes through the add_trip_expense
+  performer: category transport (the existing enum value for all travel),
+  billable true, `receipt_ref` = `email:<message ref>`. One
+  assistant_actions row per ride, kind add_trip_expense, titled "Cab receipt
+  from mail: Uber, Airport to Hotel" (trip_expenses has no description
+  column; the History tab shows the title), payload the expense fields only
+  (`cabActionPayload`). Undo is the existing add_trip_expense undo: the
+  expense is deleted. A receipt already recorded, or recorded and undone, is
+  not read again.
+- Brief: "4 cab receipts added to the Kolkata trip (Rs 1,240)." from the
+  scan's `cab_added_by_trip` (the trip's first city, else its title).
+- Month pack: unchanged. A ride carries a receipt_ref, so it is never a gap.
+  The app still builds no invoice.
+- Tests: `npm run test:b21` (16 offline, synthetic receipts, one real unpdf
+  extraction).

@@ -873,6 +873,7 @@ export function toolByName(name: string): ToolDef | undefined {
 export function disclosureOf(name: string): ToolDisclosure {
   if (name === SCAN_TOOL.name) return SCAN_TOOL.disclosure;
   if (name === TICKET_TOOL.name) return TICKET_TOOL.disclosure;
+  if (name === CAB_TOOL.name) return CAB_TOOL.disclosure;
   const read = READ_TOOL_DISCLOSURES[name as McpReadTool];
   if (read) return read;
   return toolByName(name)?.disclosure ?? "none";
@@ -1069,13 +1070,36 @@ export const TICKET_TOOL: ToolDef = {
   }),
 };
 
+// B21. The cab receipt pass's ONLY tool, in its own isolated turn over mail
+// from the cab receipt allowlist. It proposes; lib/trips/cab.ts decides, and a
+// valid ride is written through the add_trip_expense performer.
+export const CAB_TOOL: ToolDef = {
+  name: "propose_cab_expense",
+  bucket: "autonomous",
+  disclosure: "app_data",
+  description:
+    "Propose one cab ride found in a receipt: its IST date and time, the provider, a short from and to area, the total paid in rupees, the booking or trip id, and the message ref. One call per ride; an invoice listing several rides is several calls. Propose nothing when there is no ride, or when the rides cannot be told apart.",
+  input_schema: schema({
+    external_ref: str("The exact message ref given in the email's data block."),
+    provider: enumOf(["uber", "ola", "rapido", "bharat_taxi"], "Who ran the ride."),
+    ride_date: str("Date of the ride as YYYY-MM-DD, the IST calendar date."),
+    ride_time: str("Start time of the ride as HH:MM, 24-hour IST."),
+    from_area: strOrNull(
+      "Where the ride started, as a short area such as Airport, Hotel or Railway Station. Never a street address, house number, pin code or phone number. Omit if unclear."
+    ),
+    to_area: strOrNull("Where the ride ended, in the same short form. Omit if unclear."),
+    amount: { type: "number", description: "Total paid for this ride in rupees." },
+    booking_id: strOrNull("The booking, trip or CRN id, at most 40 characters. Omit when there is none."),
+  }),
+};
+
 // ---------------------------------------------------------------------------
 // Registry self-check, at import time. TypeScript already refuses a bad
 // disclosure class, but a cast or a hand-edited build output would not be
 // caught by the compiler, and this registry is the security boundary. A bad
 // registry stops the process rather than serving one request under it.
 // ---------------------------------------------------------------------------
-for (const t of [...TOOLS, SCAN_TOOL, TICKET_TOOL]) {
+for (const t of [...TOOLS, SCAN_TOOL, TICKET_TOOL, CAB_TOOL]) {
   if (!(TOOL_DISCLOSURES as readonly string[]).includes(t.disclosure)) {
     throw new Error(
       `Tool ${t.name} has disclosure "${t.disclosure}", which is not one of ${TOOL_DISCLOSURES.join(", ")}.`

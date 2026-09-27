@@ -13,14 +13,22 @@
 // and a valid leg is written on its trip through the log_trip_leg performer.
 // No PNR, city or mail text reaches an audit row: ids, counts and matched
 // filter phrases only.
+//
+// B21 adds a third isolated turn, the cab receipt pass: mail from the cab
+// receipt allowlist only (scan-filters.ts isCabReceiptSender), read by the
+// same B20 reader, whose one tool is propose_cab_expense. A ride inside a trip
+// becomes a billable transport expense through the add_trip_expense
+// performer; a ride outside every trip is personal and only counted.
 
 import { cookieActor, type Actor } from "@/lib/assistant/actor";
 import { runLlmTurn } from "@/lib/assistant/llm";
 import type { LlmOverride } from "@/lib/assistant/config";
-import { SCAN_TOOL, TICKET_TOOL, disclosureOf } from "@/lib/assistant/tools";
+import { CAB_TOOL, SCAN_TOOL, TICKET_TOOL, disclosureOf } from "@/lib/assistant/tools";
 import {
+  CAB_SYSTEM,
   SCAN_SYSTEM,
   TICKET_SYSTEM,
+  buildCabUserMessage,
   buildScanUserMessage,
   buildTicketUserMessage,
   type ScanMail,
@@ -37,15 +45,19 @@ import { listRecentGmail, listRecentGraph, mailRequest, type MailMeta } from "@/
 import { readTicketMail } from "@/lib/assistant/mailbox";
 import { pdfText } from "@/lib/assistant/pdf-text";
 import {
+  cabProviderOf,
   dropKnownMail,
   isAppGeneratedMail,
   isAlreadyOpen,
   isNoiseMail,
   isTicketSender,
   matchesNeverExtract,
+  mayReadMailContent,
   sourceKey,
+  type CabProvider,
 } from "@/lib/assistant/scan-filters";
-import { logScannedTripLeg } from "@/lib/assistant/execute";
+import { logScannedCabExpense, logScannedTripLeg } from "@/lib/assistant/execute";
+import { CAB_RIDE_CAP, cabReceiptMail, priorFromPayload, validateCabProposals, type PriorCab } from "@/lib/trips/cab";
 import {
   TICKET_LEG_CAP,
   routeFromName,
@@ -74,6 +86,8 @@ export interface ScanSummary {
   skipped: number;
   // B20: trip legs recorded from ticket mail.
   legs: number;
+  // B21: billable cab rides recorded from receipt mail.
+  cabs: number;
   notes: string[];
 }
 
@@ -102,11 +116,13 @@ export async function runMailScan(actor?: Actor): Promise<ScanSummary> {
     .eq("status", "connected")
     .eq("connect_mode", "direct");
 
-  const summary: ScanSummary = { scanned: 0, created: 0, skipped: 0, legs: 0, notes: [] };
+  const summary: ScanSummary = { scanned: 0, created: 0, skipped: 0, legs: 0, cabs: 0, notes: [] };
   const override = await loadLlmOverride(supabase, "scan");
   // Trip legs have their own cap per run, across accounts, and do not count
   // against the daily task cap.
   let legBudget = TICKET_LEG_CAP;
+  // B21: cab rides likewise, 20 a night across accounts.
+  let cabBudget = CAB_RIDE_CAP;
 
   for (const account of accounts ?? []) {
     if (!account.slot) continue;
@@ -178,13 +194,19 @@ export async function runMailScan(actor?: Actor): Promise<ScanSummary> {
     summary.legs += tickets.legs;
     summary.notes.push(...tickets.notes);
 
+    const cabs = await cabPass(owner, acc, mails, refOf, cabBudget, override);
+    cabBudget -= cabs.added.length;
+    summary.cabs += cabs.added.length;
+    summary.notes.push(...cabs.notes);
+
     // A ticket sender's mail never becomes a task (B20 amendment): the only
     // "action" in the travel desk's mail is its boarding-pass footer. The
-    // never-extract phrase stays as the backstop for anything else.
+    // never-extract phrase stays as the backstop for anything else. Nor does
+    // a cab receipt sender's (B21).
     const tasks = await taskPass(
       owner,
       acc,
-      mails.filter((m) => !isTicketSender(m.from)),
+      mails.filter((m) => !mayReadMailContent(m.from)),
       refOf,
       override
     );
@@ -218,6 +240,15 @@ export async function runMailScan(actor?: Actor): Promise<ScanSummary> {
         ticket_pdfs_read: tickets.pdfsRead,
         ticket_pdfs_skipped: tickets.pdfsSkipped,
         ticket_rejected: tickets.rejected,
+        // B21. Counts, amounts and the trip's own label only. A personal
+        // ride is a number and nothing else.
+        cab_receipts_read: cabs.read,
+        cab_rides_added: cabs.added.length,
+        cab_added_by_trip: cabs.byTrip,
+        cab_rides_personal: cabs.personal,
+        cab_receipts_unsplit: cabs.unsplit,
+        cab_pdfs_read: cabs.pdfsRead,
+        cab_rejected: cabs.rejected,
         // The scan is the one tool allowed to see message bodies, so its rows
         // say so, and say whether it was Tapas or the 03:00 cron that asked.
         provenance: provenance({
@@ -364,6 +395,136 @@ async function ticketPass(
   if (out.unreadable.length) {
     out.notes.push(
       `${account.slot}: ${out.unreadable.length} ticket ${out.unreadable.length === 1 ? "email" : "emails"} could not be read`
+    );
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// B21. The cab receipt pass.
+// ---------------------------------------------------------------------------
+async function cabPass(
+  owner: Actor,
+  account: ScanAccount,
+  mails: MailMeta[],
+  refOf: (id: string) => string,
+  budget: number,
+  override: LlmOverride | undefined
+): Promise<{
+  read: number;
+  added: { trip_id: string; label: string; amount: number }[];
+  byTrip: { label: string; count: number; amount: number }[];
+  personal: number;
+  unsplit: number;
+  pdfsRead: number;
+  rejected: string[];
+  notes: string[];
+}> {
+  const { supabase, userId } = owner;
+  const out = {
+    read: 0,
+    added: [] as { trip_id: string; label: string; amount: number }[],
+    byTrip: [] as { label: string; count: number; amount: number }[],
+    personal: 0,
+    unsplit: 0,
+    pdfsRead: 0,
+    rejected: [] as string[],
+    notes: [] as string[],
+  };
+  let candidates = mails.filter((m) => cabProviderOf(m.from) !== null);
+  if (!candidates.length || budget <= 0) return out;
+
+  // A receipt already recorded (or recorded and undone) is not read again,
+  // and every earlier scanned ride feeds the duplicate check.
+  // ponytail: a Bharat Taxi invoice cut short by the nightly cap is not
+  // re-read either; the cap of 20 is far above a night of his receipts.
+  const { data: done } = await supabase
+    .from("assistant_actions")
+    .select("payload")
+    .eq("user_id", userId)
+    .eq("kind", "add_trip_expense")
+    .eq("payload->>via", "cab_receipt");
+  const prior: PriorCab[] = [];
+  const logged = new Set<string>();
+  for (const r of done ?? []) {
+    const p = (r.payload ?? {}) as Record<string, unknown>;
+    if (typeof p.external_ref === "string") logged.add(p.external_ref);
+    const x = priorFromPayload(p);
+    if (x) prior.push(x);
+  }
+  candidates = candidates.filter((m) => !logged.has(refOf(m.id)));
+  if (!candidates.length) return out;
+
+  const request = mailRequest(account.id);
+  const receiptMails: TicketMail[] = [];
+  const senders = new Map<string, CabProvider>();
+  for (const m of candidates) {
+    try {
+      const read = await readTicketMail(request, account, m, pdfText);
+      out.pdfsRead += read.attachments.length;
+      receiptMails.push(cabReceiptMail({ ref: refOf(m.id), from: m.from, subject: m.subject, date: m.date }, read));
+      senders.set(refOf(m.id), cabProviderOf(m.from)!);
+    } catch {
+      out.notes.push(`${account.slot}: could not read one cab receipt email`);
+    }
+  }
+  out.read = receiptMails.length;
+  if (!receiptMails.length) return out;
+
+  const { data: trips } = await supabase
+    .from("trips")
+    .select("id, title, cities, start_date, end_date, legs, status")
+    .eq("user_id", userId)
+    .neq("status", "cancelled")
+    .not("start_date", "is", null);
+
+  const turn = await runLlmTurn({
+    blocks: [{ text: CAB_SYSTEM, stable: true }],
+    conv: [{ kind: "text", role: "user", text: buildCabUserMessage(receiptMails) }],
+    tools: [CAB_TOOL],
+    // An invoice can list many rides, one call each: room for the cap.
+    maxTokens: 4096,
+    override,
+  });
+  if (turn.stop === "refusal") {
+    out.notes.push(`${account.slot}: the model declined the cab receipt pass`);
+    return out;
+  }
+  const { accepted, rejected, personal, wellFormedRefs } = validateCabProposals(
+    turn.calls.map((c): RawToolCall => ({ name: c.name, input: c.input })),
+    senders,
+    trips ?? [],
+    prior,
+    budget
+  );
+  out.rejected = rejected;
+  out.personal = personal;
+  // A Bharat Taxi invoice that gave no well-formed ride could not be split.
+  for (const [ref, provider] of senders) {
+    if (provider === "bharat_taxi" && !wellFormedRefs.has(ref)) out.unsplit += 1;
+  }
+  for (const r of accepted) {
+    try {
+      await logScannedCabExpense(owner, r, account.id);
+      out.added.push({ trip_id: r.trip_id, label: r.trip_label, amount: r.amount });
+    } catch (e) {
+      out.notes.push(`${account.slot}: ${e instanceof Error ? e.message : "could not record a cab ride"}`);
+    }
+  }
+  const byTrip = new Map<string, { label: string; count: number; amount: number }>();
+  for (const a of out.added) {
+    const cur = byTrip.get(a.trip_id) ?? { label: a.label, count: 0, amount: 0 };
+    byTrip.set(a.trip_id, { label: a.label, count: cur.count + 1, amount: cur.amount + a.amount });
+  }
+  out.byTrip = [...byTrip.values()];
+  if (out.added.length) {
+    out.notes.push(
+      `${account.slot}: recorded ${out.added.length} billable cab ${out.added.length === 1 ? "ride" : "rides"} from receipts`
+    );
+  }
+  if (out.unsplit) {
+    out.notes.push(
+      `${account.slot}: ${out.unsplit} Bharat Taxi ${out.unsplit === 1 ? "receipt" : "receipts"} could not be split into rides`
     );
   }
   return out;

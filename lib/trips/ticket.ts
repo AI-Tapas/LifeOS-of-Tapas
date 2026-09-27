@@ -84,16 +84,21 @@ function sameLeg(a: TripLeg, b: TripLeg): boolean {
 
 // The trip a date belongs to: one whose dates contain it first, otherwise one
 // within the slack either side. A trip with no start date cannot be matched.
-export function tripForDate(trips: TicketTrip[], date: string): TicketTrip | null {
-  let near: TicketTrip | null = null;
+// B21 cab receipts pass a slack of 1.
+export function tripForDate<T extends TicketTrip>(
+  trips: T[],
+  date: string,
+  slack: number = TRIP_DATE_SLACK_DAYS
+): T | null {
+  let near: T | null = null;
   for (const t of trips) {
     if (!t.start_date) continue;
     const end = t.end_date ?? t.start_date;
     if (date >= t.start_date && date <= end) return t;
     if (
       !near &&
-      date >= shiftKey(t.start_date, -TRIP_DATE_SLACK_DAYS) &&
-      date <= shiftKey(end, TRIP_DATE_SLACK_DAYS)
+      date >= shiftKey(t.start_date, -slack) &&
+      date <= shiftKey(end, slack)
     ) {
       near = t;
     }
