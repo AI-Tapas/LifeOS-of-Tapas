@@ -734,6 +734,38 @@ export async function readThread(
   return { account: account.slot, thread_id: threadId, message_count: messages.length, messages };
 }
 
+// B20: the body of ONE message, as plain text with quoted history trimmed and
+// capped at BODY_CAP. Used by the mail scan for allowlisted ticket senders
+// only (lib/assistant/scan-filters.ts isTicketSender). No attachment is ever
+// fetched: a text part with a file name is an attachment and is skipped, and
+// no attachments endpoint is called. Unlike the connector reads this has no
+// MAIL_SLOTS check: the scan already reads every connected mailbox, icai
+// included, and its audit row carries the mail_body class.
+export async function readMessageBody(
+  request: MailRequest,
+  account: MailAccount,
+  messageId: string
+): Promise<string> {
+  let text: string;
+  if (account.provider === "google") {
+    const res = await request(
+      `${GMAIL}/messages/${encodeURIComponent(messageId)}?` + new URLSearchParams({ format: "full" })
+    );
+    await ensureOk(res, account.slot, "Reading the message");
+    text = gmailBody(((await res.json()) as GmailMessage).payload);
+  } else {
+    const res = await request(
+      `${GRAPH}/messages/${encodeURIComponent(messageId)}?` + new URLSearchParams({ $select: "body" }),
+      { headers: { prefer: 'outlook.body-content-type="text"' } }
+    );
+    await ensureOk(res, account.slot, "Reading the message");
+    const m = (await res.json()) as GraphMessage;
+    const content = m.body?.content ?? "";
+    text = m.body?.contentType?.toLowerCase() === "html" ? htmlToText(content) : content;
+  }
+  return trimQuoted(text).slice(0, BODY_CAP);
+}
+
 // B10 for save_reply_draft: the thread has to be there before the autonomous
 // grant applies. False only when the provider says there is no such thread.
 export async function threadExists(

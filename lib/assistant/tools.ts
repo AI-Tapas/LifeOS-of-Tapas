@@ -123,6 +123,11 @@ const DATE_DESC = "Date as YYYY-MM-DD (IST calendar date). Omit if not applicabl
 // is no point starting either before September is over.
 const NOT_BEFORE_DESC =
   "The first day this task can sensibly start, as YYYY-MM-DD (IST calendar date). Until then it stays off Home, the Tasks overview and the morning brief, and it is never urgent whatever its due date. Set it for period work: a month's invoice starts after that month ends (the invoice for October waits until 1 November); next month's work is never urgent this month. It must not be after the due date. Omit when the work can start now.";
+// B20. A window that simply closes. Tapas, 27 September 2026: early-bird
+// deadlines, a "before 3 PM" authorisation, a faculty day and an e-vote window
+// were all still open weeks after they had passed.
+export const LAPSES_ON_DESC =
+  "Only for an opportunity or window that is simply gone after a date: an early-bird price, an RSVP, an e-vote window, an event or session day, a \"before 3 PM today\" authorisation. The IST date (YYYY-MM-DD) after which it no longer matters; the next morning's sweep drops the task, undoably. NEVER set it for a statutory, client or payment deadline: those stay open and overdue until Tapas decides. Omit otherwise.";
 const TIME_DESC = "Time of day as HH:MM in 24 hour IST. Omit if not applicable.";
 
 // The four connected account slots the assistant may act through.
@@ -150,10 +155,11 @@ export const TOOLS: ToolDef[] = [
       title: str("Short task title."),
       note: strOrNull("Optional extra detail."),
       work_stream: strOrNull(
-        "Work stream name, e.g. ICAI, Tax Strategia, Altechon, Cygnet, Personal. Omit to file it under Personal."
+        "Work stream name exactly as it exists, e.g. ICAI, Tax Strategia, Altechon, Cygnet, Individual consulting, Personal. An unknown name is refused with the list of real ones. Omit to file it under Personal."
       ),
       due_date: { ...strOrNull(DATE_DESC) },
       not_before: strOrNull(NOT_BEFORE_DESC),
+      lapses_on: strOrNull(LAPSES_ON_DESC),
       priority: enumOrNull(["low", "medium", "high"], "Task priority."),
       priority_reason: strOrNull(
         "Why this priority, in one short sentence, e.g. \"statutory deadline, penalty for late filing\". Required whenever you set a priority: Tapas is shown the reason and can disagree with it. Judge by consequence, never by how urgent a sender says something is."
@@ -173,7 +179,7 @@ export const TOOLS: ToolDef[] = [
     bucket: "autonomous",
     disclosure: "app_data",
     description:
-      "Update an existing task (title, note, status, priority, due date, start date). Undo restores the previous values.",
+      "Update an existing task (title, note, status, priority, due date, start date, lapse date, work stream). Undo restores the previous values.",
     input_schema: schema({
       task_id: str("The task id from context."),
       title: strOrNull("New title. Omit to keep the current one."),
@@ -190,6 +196,10 @@ export const TOOLS: ToolDef[] = [
       not_before: strOrNull(
         NOT_BEFORE_DESC +
           " Omit to keep the current start date; to make a waiting task visible now, set today's date."
+      ),
+      lapses_on: strOrNull(LAPSES_ON_DESC + " Omit to keep the current value."),
+      work_stream: strOrNull(
+        "Move the task to this work stream, named exactly as it exists (e.g. ICAI, Tax Strategia, Individual consulting). An unknown name is refused with the list of real ones. Omit to keep the current stream."
       ),
       trip_id: strOrNull(
         "Move the task under a trip as a checklist step, using a trip id from lifeos_list_trips. Omit to leave it where it is."
@@ -707,6 +717,7 @@ export const TOOLS: ToolDef[] = [
         "How he travels, in his order of preference."
       ),
       cost: numOrNull("Fare in rupees. Omit when it is not known yet."),
+      reference: strOrNull("The PNR or booking id, at most 40 characters. Omit when there is none."),
     }),
   },
   {
@@ -861,6 +872,7 @@ export function toolByName(name: string): ToolDef | undefined {
 // default.
 export function disclosureOf(name: string): ToolDisclosure {
   if (name === SCAN_TOOL.name) return SCAN_TOOL.disclosure;
+  if (name === TICKET_TOOL.name) return TICKET_TOOL.disclosure;
   const read = READ_TOOL_DISCLOSURES[name as McpReadTool];
   if (read) return read;
   return toolByName(name)?.disclosure ?? "none";
@@ -1031,6 +1043,29 @@ export const SCAN_TOOL: ToolDef = {
     priority_reason: strOrNull(
       "Why that priority, in one short sentence. Required whenever you set a priority."
     ),
+    lapses_on: strOrNull(LAPSES_ON_DESC),
+  }),
+};
+
+// B20. The ticket pass's ONLY tool, in its own isolated turn over mail from
+// allowlisted ticket senders. It proposes; lib/trips/ticket.ts decides, and a
+// valid leg is written through the log_trip_leg performer.
+export const TICKET_TOOL: ToolDef = {
+  name: "propose_trip_leg",
+  bucket: "autonomous",
+  disclosure: "app_data",
+  description:
+    "Propose one journey found in a ticket email: where from, where to, the date and the mode, the booking reference, and the message ref. One call per journey; a return ticket is two calls. Propose nothing when the email carries no ticket.",
+  input_schema: schema({
+    external_ref: str("The exact message ref given in the email's data block."),
+    from_city: str("City the journey starts from."),
+    to_city: str("City the journey ends in."),
+    date: str("Journey date as YYYY-MM-DD, the IST calendar date of departure."),
+    mode: enumOf(
+      ["vande_bharat", "tejas", "ac_sleeper", "cab", "flight", "other"],
+      "How he travels. Any other train is other."
+    ),
+    reference: strOrNull("The PNR or booking id, at most 40 characters. Omit when there is none."),
   }),
 };
 
@@ -1040,7 +1075,7 @@ export const SCAN_TOOL: ToolDef = {
 // caught by the compiler, and this registry is the security boundary. A bad
 // registry stops the process rather than serving one request under it.
 // ---------------------------------------------------------------------------
-for (const t of [...TOOLS, SCAN_TOOL]) {
+for (const t of [...TOOLS, SCAN_TOOL, TICKET_TOOL]) {
   if (!(TOOL_DISCLOSURES as readonly string[]).includes(t.disclosure)) {
     throw new Error(
       `Tool ${t.name} has disclosure "${t.disclosure}", which is not one of ${TOOL_DISCLOSURES.join(", ")}.`

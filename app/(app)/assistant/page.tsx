@@ -33,6 +33,10 @@ const UNDOABLE = new Set([
   "add_person",
   "add_obligation",
   "add_event_solo",
+  // B20: a ticket leg the scan recorded (the receipt link goes with it) and
+  // the morning sweep of closed windows, each one tap to reverse.
+  "log_trip_leg",
+  "lapse_tasks",
   "save_reply_draft",
 ]);
 

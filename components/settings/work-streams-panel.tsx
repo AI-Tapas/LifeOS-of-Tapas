@@ -14,7 +14,11 @@ export interface WorkStreamView {
   billing_entity: string | null;
   feeds_billing: boolean;
   hourly_rate: number | null;
+  // B20: what mail belongs here, for the mail scan. At most 200 characters.
+  scan_hint?: string | null;
 }
+
+const HINT_MAX = 200;
 
 // The list Settings already showed, with one number added: what an hour of
 // that stream is worth. Editing it is the whole feature. There is no quoting
@@ -42,6 +46,7 @@ function StreamRow({ stream }: { stream: WorkStreamView }) {
   const [value, setValue] = useState(
     stream.hourly_rate != null ? String(stream.hourly_rate) : ""
   );
+  const [hint, setHint] = useState(stream.scan_hint ?? "");
   const [err, setErr] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -51,7 +56,8 @@ function StreamRow({ stream }: { stream: WorkStreamView }) {
     startTransition(async () => {
       const r = await setWorkStreamRateAction(
         stream.id,
-        trimmed === "" ? null : Number(trimmed)
+        trimmed === "" ? null : Number(trimmed),
+        hint.trim() === "" ? null : hint
       );
       if (r.ok) {
         setEditing(false);
@@ -78,7 +84,23 @@ function StreamRow({ stream }: { stream: WorkStreamView }) {
       </div>
 
       {editing ? (
-        <div className="mt-2 flex items-end gap-2">
+        <div className="mt-2 space-y-2">
+        <label className="block space-y-1">
+          <span className="text-xs font-medium text-secondary">
+            What mail belongs here (the mail scan reads this). Leave it empty for none.
+          </span>
+          <input
+            type="text"
+            maxLength={HINT_MAX}
+            value={hint}
+            onChange={(e) => setHint(e.target.value)}
+            className={inputCls}
+          />
+          <span className="text-xs text-muted">
+            {hint.length} of {HINT_MAX} characters
+          </span>
+        </label>
+        <div className="flex items-end gap-2">
           <label className="block flex-1 space-y-1">
             <span className="text-xs font-medium text-secondary">
               Rate an hour (₹). Leave it empty for no rate.
@@ -104,6 +126,7 @@ function StreamRow({ stream }: { stream: WorkStreamView }) {
               setEditing(false);
               setErr(null);
               setValue(stream.hourly_rate != null ? String(stream.hourly_rate) : "");
+              setHint(stream.scan_hint ?? "");
             }}
             disabled={pending}
             className="press min-h-11 rounded-lg border border-border-strong px-3 text-sm font-medium disabled:opacity-50"
@@ -111,15 +134,21 @@ function StreamRow({ stream }: { stream: WorkStreamView }) {
             Cancel
           </button>
         </div>
+        </div>
       ) : (
-        <button
-          onClick={() => setEditing(true)}
-          className="press mt-1 text-sm font-medium text-accent"
-        >
-          {stream.hourly_rate != null
-            ? `${formatINR(stream.hourly_rate)} an hour`
-            : "No rate recorded"}
-        </button>
+        <>
+          <button
+            onClick={() => setEditing(true)}
+            className="press mt-1 text-sm font-medium text-accent"
+          >
+            {stream.hourly_rate != null
+              ? `${formatINR(stream.hourly_rate)} an hour`
+              : "No rate recorded"}
+          </button>
+          <p className="mt-1 text-xs text-secondary">
+            {stream.scan_hint ? `Mail scan: ${stream.scan_hint}` : "No mail scan hint"}
+          </p>
+        </>
       )}
 
       {err && <p className="mt-1 text-sm text-overdue">{err}</p>}

@@ -47,6 +47,9 @@ export interface TripLeg {
   date: string; // YYYY-MM-DD
   mode: TransportMode;
   cost: number | null;
+  // B20: the PNR or booking id from a ticket email, at most 40 characters.
+  // An optional jsonb key, so no migration: rows without it read as before.
+  ref?: string | null;
 }
 
 // legs is jsonb, so anything could be in there. Read it defensively and drop
@@ -70,6 +73,7 @@ export function parseLegs(raw: unknown): TripLeg[] {
       date,
       mode,
       cost: typeof r.cost === "number" ? r.cost : null,
+      ...(typeof r.ref === "string" && r.ref ? { ref: r.ref.slice(0, 40) } : {}),
     });
   }
   return out.sort((a, b) => a.date.localeCompare(b.date));

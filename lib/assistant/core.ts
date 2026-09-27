@@ -290,11 +290,18 @@ export interface ScanProposal {
   // dropped and the task lands unrated rather than silently rated.
   priority: TaskPriority | null;
   priority_reason: string | null;
+  // B20: the IST date after which this window is gone, or null. Format-checked
+  // only; the prompt says it is never a statutory, client or payment date.
+  lapses_on: string | null;
 }
 
 export interface RawToolCall {
   name: string;
   input: Record<string, unknown>;
+}
+
+function isDateOnly(v: unknown): boolean {
+  return typeof v === "string" && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(v);
 }
 
 export function validateScanProposals(
@@ -362,6 +369,7 @@ export function validateScanProposals(
       work_stream: streamByKey.get(streamRaw.toLowerCase()) ?? null,
       priority,
       priority_reason: priority ? reason : null,
+      lapses_on: isDateOnly(call.input.lapses_on) ? (call.input.lapses_on as string) : null,
     });
   }
   return { accepted, rejected };

@@ -42,6 +42,10 @@ export interface TaskInput {
   // Until then it is left out of every ranked list and is never urgent. Null
   // or absent means available now.
   not_before?: string | null;
+  // B20. IST date after which this window is simply gone (early bird, RSVP,
+  // e-vote, event day). The morning sweep drops the task after it. Never a
+  // statutory, client or payment deadline.
+  lapses_on?: string | null;
   work_stream_id: string;
   project_id?: string | null;
   // A checklist step belongs to a trip. Loose link: deleting the trip leaves
@@ -59,6 +63,10 @@ export interface TaskInput {
   reminder_mode?: ReminderMode;
   source?: Database["public"]["Enums"]["task_source"];
   external_ref?: string | null;
+  // B20, scanned mail only: the provider thread id, and a sha256 of sender
+  // and normalised subject (never the subject), for the repeat checks.
+  external_thread?: string | null;
+  source_key?: string | null;
   // One short sentence of why the priority is what it is. Required whenever
   // an assistant path sets a priority; ignored on the app's own forms, where
   // the priority is his and needs no defence.
@@ -82,6 +90,10 @@ function reminderNote(
   return undefined;
 }
 
+function isDateOrEmpty(v: string | null | undefined): boolean {
+  return v === undefined || v === null || /^\d{4}-\d{2}-\d{2}$/.test(v);
+}
+
 export async function createTask(
   supabase: Db,
   userId: string,
@@ -97,6 +109,9 @@ export async function createTask(
   }
   const startProblem = startDateProblem(input.not_before, input.due_ts);
   if (startProblem) return { ok: false, message: startProblem };
+  if (!isDateOrEmpty(input.lapses_on)) {
+    return { ok: false, message: "The lapse date must be YYYY-MM-DD." };
+  }
   const decision = decidePriorityWrite(origin, input, null);
   if (decision.kind === "refuse") return { ok: false, message: decision.message };
   const priorityFields =
@@ -113,6 +128,7 @@ export async function createTask(
       ...priorityFields,
       due_ts: input.due_ts ?? null,
       not_before: input.not_before ?? null,
+      lapses_on: input.lapses_on ?? null,
       work_stream_id: input.work_stream_id,
       project_id: input.project_id ?? null,
       trip_id: input.trip_id ?? null,
@@ -122,6 +138,8 @@ export async function createTask(
       reminder_mode: input.reminder_mode ?? "calendar",
       source: input.source ?? "manual",
       external_ref: input.external_ref ?? null,
+      external_thread: input.external_thread ?? null,
+      source_key: input.source_key ?? null,
     })
     .select("id")
     .single();
@@ -147,6 +165,9 @@ export async function updateTask(
 ): Promise<TaskResult> {
   if (patch.recurring_rule !== undefined && !isValidRecurringRule(patch.recurring_rule)) {
     return { ok: false, message: "Invalid recurring rule." };
+  }
+  if (!isDateOrEmpty(patch.lapses_on)) {
+    return { ok: false, message: "The lapse date must be YYYY-MM-DD." };
   }
   // A start date is judged against the due date the row will END UP with, so
   // when only one of the two is in the patch the other is read first. One
@@ -192,6 +213,7 @@ export async function updateTask(
       ...priorityFields,
       ...(patch.due_ts !== undefined ? { due_ts: patch.due_ts } : {}),
       ...(patch.not_before !== undefined ? { not_before: patch.not_before } : {}),
+      ...(patch.lapses_on !== undefined ? { lapses_on: patch.lapses_on } : {}),
       ...(patch.work_stream_id !== undefined
         ? { work_stream_id: patch.work_stream_id }
         : {}),

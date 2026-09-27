@@ -114,7 +114,7 @@ export default async function SettingsPage({
         .order("name"),
       supabase
         .from("work_streams")
-        .select("id, name, kind, billing_entity, feeds_billing, active, hourly_rate")
+        .select("id, name, kind, billing_entity, feeds_billing, active, hourly_rate, scan_hint")
         .order("name"),
       supabase
         .from("assistant_persona")

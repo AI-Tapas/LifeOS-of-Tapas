@@ -23,8 +23,10 @@ import {
   createTask,
   updateTask,
   deleteTask,
+  setTaskStatus,
   type TaskInput,
 } from "@/lib/tasks/write";
+import { undoLapse } from "@/lib/tasks/lapse";
 import {
   addTripExpense,
   addTripLeg,
@@ -34,6 +36,13 @@ import {
   updateTrip,
 } from "@/lib/trips/write";
 import { findNearDuplicate } from "@/lib/tasks/near-duplicate";
+import { pickWorkStream } from "@/lib/tasks/stream";
+import {
+  applyTicketLeg,
+  undoTicketLeg,
+  type TicketLeg,
+  type TicketUndo,
+} from "@/lib/trips/ticket";
 import { TRANSPORT_MODES, type TransportMode, type TripLeg } from "@/lib/trips/core";
 import { HOTEL_ARRANGEMENTS, type HotelArrangement } from "@/lib/trips/checklist";
 import { isFinanceKeyDateType, isReminderMode } from "@/lib/reminders/core";
@@ -187,6 +196,16 @@ function priorityLine(
   return reason
     ? ` Priority ${priority}: ${reason}.`
     : ` Priority ${priority}.`;
+}
+
+// B20: for tasks, an unknown stream name is refused with the real list rather
+// than filed under Personal in silence (lib/tasks/stream.ts). No name still
+// means Personal.
+async function strictWorkStream(supabase: Db, name: string | null): Promise<string> {
+  const { data: streams } = await supabase.from("work_streams").select("id, name");
+  const pick = pickWorkStream(streams ?? [], name);
+  if (!pick.ok) throw new Error(pick.message);
+  return pick.id;
 }
 
 async function resolveWorkStream(
@@ -569,7 +588,7 @@ const performers: Record<string, Performer> = {
         `Already on the list as an open task (id ${dup.task.id}): "${dup.task.title}". Update that one with update_task instead of adding another.`
       );
     }
-    const workStreamId = await resolveWorkStream(supabase, s(input.work_stream));
+    const workStreamId = await strictWorkStream(supabase, s(input.work_stream));
     const due = s(input.due_date);
     const notBefore = s(input.not_before);
     const priority = s(input.priority) as TaskInput["priority"] | null;
@@ -586,6 +605,8 @@ const performers: Record<string, Performer> = {
       // B19. Validated inside createTask (format, and never after the due
       // date), so a bad date is refused with a message the model can act on.
       not_before: notBefore,
+      // B20. Validated inside createTask (format only).
+      lapses_on: s(input.lapses_on),
       work_stream_id: workStreamId,
       // A trip id attaches the task as a checklist step, so it rolls up under
       // the trip instead of standing on its own in every ranked list.
@@ -614,12 +635,17 @@ const performers: Record<string, Performer> = {
     const { data: prev } = await supabase
       .from("tasks")
       .select(
-        "title, notes, status, priority, priority_source, priority_reason, due_ts, not_before, remind_offsets, reminder_mode, trip_id"
+        "title, notes, status, priority, priority_source, priority_reason, due_ts, not_before, lapses_on, work_stream_id, remind_offsets, reminder_mode, trip_id"
       )
       .eq("id", taskId)
       .single();
     if (!prev) throw new Error("Task not found.");
     const patch: Partial<TaskInput> = {};
+    // B20: a stream by name, refused with the real list when unknown.
+    if (s(input.work_stream)) {
+      patch.work_stream_id = await strictWorkStream(supabase, s(input.work_stream));
+    }
+    if (s(input.lapses_on)) patch.lapses_on = s(input.lapses_on);
     if (s(input.title)) patch.title = s(input.title)!;
     if (input.note !== null && input.note !== undefined) patch.notes = s(input.note);
     if (s(input.status)) patch.status = s(input.status) as TaskInput["status"];
@@ -1192,6 +1218,8 @@ const performers: Record<string, Performer> = {
       date,
       mode: mode && TRANSPORT_MODES.includes(mode) ? mode : "other",
       cost: typeof input.cost === "number" ? input.cost : null,
+      // B20: the PNR or booking id, stored on the leg (an optional jsonb key).
+      ...(s(input.reference) ? { ref: s(input.reference)!.slice(0, 40) } : {}),
     };
     const r = await addTripLeg(supabase, userId, tripId, leg);
     if (!r.ok) throw new Error(r.message);
@@ -1302,6 +1330,93 @@ const performers: Record<string, Performer> = {
 // ---------------------------------------------------------------------------
 // Approval lifecycle (owner-session server actions call these)
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// B20. A trip leg from a scanned ticket.
+//
+// The mail scan's ticket pass hands over legs lib/trips/ticket.ts has already
+// validated (a scanned ref, a real trip, no duplicate, the cap). Each is
+// written through the log_trip_leg performer, so it is the same leg write,
+// the same assistant_actions kind and the same undo as a leg logged in chat.
+// The one addition: when the trip has a billable transport expense for that
+// day with no receipt yet, its receipt_ref becomes email:<message ref>, in
+// the same action, so one undo reverses both. Not on any tool surface: the
+// receipt link is reachable only from the scan, never from a model's input.
+// ---------------------------------------------------------------------------
+export async function logScannedTripLeg(
+  owner: Actor,
+  t: TicketLeg,
+  accountId: string
+): Promise<{ actionId: string | null; receiptLinked: boolean }> {
+  const { supabase, userId } = owner;
+  const input: Record<string, unknown> = {
+    trip_id: t.trip_id,
+    from_city: t.leg.from,
+    to_city: t.leg.to,
+    date: t.leg.date,
+    mode: t.leg.mode,
+    ...(t.leg.ref ? { reference: t.leg.ref } : {}),
+  };
+  const undo: TicketUndo = await applyTicketLeg(
+    {
+      addLeg: async () => {
+        const done = await performers.log_trip_leg(supabase, userId, input, owner);
+        return (done.undo?.previous_legs ?? []) as TripLeg[];
+      },
+      listExpenses: async (tripId) => {
+        const { data } = await supabase
+          .from("trip_expenses")
+          .select("id, category, date, billable, receipt_ref")
+          .eq("trip_id", tripId)
+          .eq("user_id", userId);
+        return data ?? [];
+      },
+      setReceiptIfEmpty: async (expenseId, receiptRef) => {
+        const { data } = await supabase
+          .from("trip_expenses")
+          .update({ receipt_ref: receiptRef })
+          .eq("id", expenseId)
+          .or("receipt_ref.is.null,receipt_ref.eq.")
+          .select("id");
+        return !!data?.length;
+      },
+    },
+    t
+  );
+  // What the row keeps: ids and the message ref, never the PNR or cities.
+  const stored = { trip_id: t.trip_id, external_ref: t.external_ref, date: t.leg.date, mode: t.leg.mode };
+  const { data } = await supabase
+    .from("assistant_actions")
+    .insert({
+      user_id: userId,
+      kind: "log_trip_leg",
+      mode: "auto",
+      status: "executed",
+      account_id: accountId,
+      title: "Ticket from mail: leg logged on a trip",
+      payload: stored as Json,
+      payload_hash: hashPayload(stored),
+      executed_at: new Date().toISOString(),
+      result: { undo } as unknown as Json,
+    })
+    .select("id")
+    .single();
+  const actionId = data?.id ?? null;
+  await audit(
+    supabase,
+    userId,
+    "execute_autonomous",
+    actionId,
+    {
+      kind: "log_trip_leg",
+      via: "scan_mail",
+      trip_id: t.trip_id,
+      receipt_linked: undo.receipt_links.length > 0,
+    },
+    prov(owner, "autonomous_bucket", "log_trip_leg", actionId)
+  );
+  return { actionId, receiptLinked: undo.receipt_links.length > 0 };
+}
+
 export async function approveAndExecute(
   actionId: string,
   actor?: Actor
@@ -1585,6 +1700,8 @@ const UNDOABLE = new Set([
   "update_trip",
   "log_trip_leg",
   "add_trip_expense",
+  // B20: the morning sweep's drop of closed windows.
+  "lapse_tasks",
   "save_reply_draft",
 ]);
 
@@ -1678,6 +1795,13 @@ async function performUndo(
         // column alone then rather than clearing a date set since.
         ...("not_before" in prev
           ? { not_before: (prev.not_before as string | null) ?? null }
+          : {}),
+        // B20, same rule: a snapshot without the key leaves the column alone.
+        ...("lapses_on" in prev
+          ? { lapses_on: (prev.lapses_on as string | null) ?? null }
+          : {}),
+        ...(typeof prev.work_stream_id === "string"
+          ? { work_stream_id: prev.work_stream_id }
           : {}),
         remind_offsets: prev.remind_offsets as number[] | undefined,
         reminder_mode: isReminderMode(prev.reminder_mode)
@@ -1852,11 +1976,42 @@ async function performUndo(
     }
     case "log_trip_leg": {
       // The whole leg array before the append goes back, so the undo is exact
-      // even if two legs share a date.
-      const r = await updateTrip(supabase, userId, String(undo.trip_id), {
-        legs: (undo.previous_legs ?? []) as TripLeg[],
-      });
-      if (!r.ok) throw new Error(r.message);
+      // even if two legs share a date. A leg the mail scan logged from a
+      // ticket may also have set one expense's receipt_ref (B20); that goes
+      // back too, in the same undo, and only while it still holds our value.
+      await undoTicketLeg(
+        {
+          setLegs: async (tripId, legs) => {
+            const r = await updateTrip(supabase, userId, tripId, { legs });
+            if (!r.ok) throw new Error(r.message);
+          },
+          clearReceiptIf: async (expenseId, receiptRef) => {
+            await supabase
+              .from("trip_expenses")
+              .update({ receipt_ref: null })
+              .eq("id", expenseId)
+              .eq("receipt_ref", receiptRef);
+          },
+        },
+        undo
+      );
+      return;
+    }
+    case "lapse_tasks": {
+      // B20: the morning sweep's drop, reversed task by task to the status
+      // each one had. A task he has moved since is left where he put it.
+      await undoLapse(
+        {
+          currentStatus: async (id) => {
+            const { data } = await supabase.from("tasks").select("status").eq("id", id).maybeSingle();
+            return data?.status ?? null;
+          },
+          setStatus: async (id, status) => {
+            await setTaskStatus(supabase, userId, id, status as NonNullable<TaskInput["status"]>);
+          },
+        },
+        undo
+      );
       return;
     }
     case "add_trip_expense": {

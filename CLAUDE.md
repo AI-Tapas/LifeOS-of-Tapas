@@ -1086,3 +1086,53 @@ code, because every ranked surface now selects the column.
   year and near-duplicate pairs for him to review. It writes nothing, and
   b19.test.ts fails if an insert, update, upsert, delete or rpc appears in it.
 - Tests: `npm run test:b19` (20 offline).
+
+## Mail scanner quality (B20)
+
+Migration `20260927000200_b20_mail_scanner_quality.sql`. NOT applied anywhere
+when it was written; apply it before (or with) the deploy of this code, since
+the scan and the brief select its columns. Nullable additions only:
+`tasks.external_thread`, `tasks.source_key`, `tasks.lapses_on`,
+`work_streams.scan_hint` (check: at most 200 characters), plus hint seeds by
+stream name that never overwrite a hint already written. Health gets none.
+
+- Boilerplate: SCAN_SYSTEM says footers, signatures and disclaimers are never
+  actions, and `matchesNeverExtract` (scan-filters.ts, a constant phrase list
+  seeded with "boarding pass") drops a proposal that matches. The audit row
+  records the phrase only.
+- Tickets: `isTicketSender` allowlists IRCTC, IndiGo, Air India, Vistara and
+  the ICAI travel desk. THE TRAVEL DESK ENTRY IS A PLACEHOLDER on a .invalid
+  domain until Tapas confirms the address. Ticket senders are exempt from
+  isNoiseMail. For them only, the scan reads the body text
+  (mailbox.ts `readMessageBody`, no attachments) in a second isolated turn
+  whose one tool is `propose_trip_leg` (tools.ts TICKET_TOOL).
+  lib/trips/ticket.ts validates (scanned ref, a trip whose dates cover the
+  day give or take 2, no duplicate leg, 10 legs a run) and
+  execute.ts `logScannedTripLeg` writes through the log_trip_leg performer,
+  storing the PNR as the leg's optional `ref` jsonb key (no migration), and
+  sets an empty billable transport expense's receipt_ref to
+  `email:<message ref>` in the same action; one undo reverses both. A ticket
+  that matches no trip is counted in the scan's audit row and the brief says
+  "1 ticket email did not match a trip". The task pass still runs on them.
+- Repeats: the scan fetches Gmail threadId and Graph conversationId, and
+  `dropKnownMail` drops, before the model, mail whose thread has an open task
+  or one from the last 45 days, and mail whose sha256(sender, normalised
+  subject) matches a task from the last 14 days or an earlier mail in the
+  same batch. The model is shown up to 40 open titles, fenced. isAlreadyOpen
+  gained `sameDistinctThing` (shared document code, batch number or
+  counterparty name; months still decide), in the scan only.
+- Lapse: `tasks.lapses_on` is for windows (early bird, RSVP, e-vote, event
+  day), never a statutory, client or payment date. propose_task, create_task
+  and update_task take it. The brief cron drops open tasks whose lapses_on is
+  before today (lib/tasks/lapse.ts), one `lapse_tasks` assistant action
+  (undoable, History tab included) and one `tasks_lapsed` audit row of ids,
+  and the brief says "3 closed windows dropped". A task without lapses_on is
+  never touched. `npm run report:lapsed` (reads .env.local, writes nothing)
+  lists older mail tasks that look like closed windows.
+- Streams: the scan hands each stream's scan_hint beside its name, judges by
+  topic with the mailbox as tie-break, and never files professional mail in
+  Personal. Settings > Work streams edits the hint. create_task and
+  update_task refuse an unknown stream name with the real list
+  (lib/tasks/stream.ts); update_task can now move a task's stream, and undo
+  restores it.
+- Tests: `npm run test:b20` (30 offline).

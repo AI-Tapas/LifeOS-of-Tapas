@@ -8,6 +8,7 @@ import { serviceActor } from "@/lib/assistant/actor";
 import { sendBriefEmail } from "@/lib/brief/send";
 import { composeBrief, type BriefTask, type BriefEvent, type BriefAccountIssue } from "@/lib/brief/compose";
 import { staleTripStepIds } from "@/lib/tasks/trip-rollup";
+import { lapsedLine, sweepLapsed, ticketsWithoutTripLine } from "@/lib/tasks/lapse";
 import { loadTripSteps } from "@/lib/tasks/trip-steps";
 import { setTaskStatus } from "@/lib/tasks/write";
 import type { MonthExpense } from "@/lib/trips/month";
@@ -48,7 +49,7 @@ export async function GET(req: Request): Promise<Response> {
       await Promise.all([
         supabase
           .from("tasks")
-          .select("id, title, status, priority, due_ts, not_before, work_stream_id, source, created_at, trip_id")
+          .select("id, title, status, priority, due_ts, not_before, lapses_on, work_stream_id, source, created_at, trip_id")
           .eq("user_id", userId)
           .in("status", ["inbox", "todo", "doing"]),
         // Trip checklist steps with their trip: the brief shows one rolled-up
@@ -106,8 +107,58 @@ export async function GET(req: Request): Promise<Response> {
           ),
       ]);
 
+    // B20, beside the trip-step sweep: an open task whose window closed
+    // before today (lapses_on) is dropped, never deleted, in ONE undoable
+    // assistant action, and the brief says how many. A task with no
+    // lapses_on is never touched, however overdue.
+    const lapseUndo = await sweepLapsed(
+      async (id, status) => (await setTaskStatus(supabase, userId, id, status)).ok,
+      tasks ?? [],
+      istDate
+    );
+    const lapsedIds = new Set(lapseUndo.tasks.map((t) => t.id));
+    if (lapsedIds.size) {
+      const { data: action } = await supabase
+        .from("assistant_actions")
+        .insert({
+          user_id: userId,
+          kind: "lapse_tasks",
+          mode: "auto",
+          status: "executed",
+          title: `${lapsedLine(lapsedIds.size)} (closed windows)`.slice(0, 200),
+          payload: { task_ids: [...lapsedIds] } as Json,
+          executed_at: new Date().toISOString(),
+          result: { undo: lapseUndo } as unknown as Json,
+        })
+        .select("id")
+        .single();
+      await supabase.from("audit_log").insert({
+        user_id: userId,
+        actor: "assistant",
+        action: "tasks_lapsed",
+        entity: "tasks",
+        entity_id: action?.id ?? null,
+        meta: { ist_date: istDate, dropped: [...lapsedIds], action_id: action?.id ?? null } as Json,
+      });
+    }
+    // Ticket emails the night's scan could not place on a trip: a count only,
+    // from the scan's own audit rows. Not a task.
+    const { data: scanRows } = await supabase
+      .from("audit_log")
+      .select("meta")
+      .eq("user_id", userId)
+      .eq("action", "mail_scan")
+      .gte("ts", istInstant(today, 0, 0).toISOString());
+    const ticketsWithoutTrip = (scanRows ?? []).reduce((n, r) => {
+      const v = (r.meta as Record<string, unknown> | null)?.tickets_without_trip;
+      return n + (typeof v === "number" ? v : 0);
+    }, 0);
+    const housekeeping = [lapsedLine(lapsedIds.size), ticketsWithoutTripLine(ticketsWithoutTrip)].filter(
+      (l): l is string => l !== null
+    );
+
     const streamName = new Map((streams ?? []).map((s) => [s.id, s.name]));
-    const briefTasks: BriefTask[] = (tasks ?? []).map((t) => ({
+    const briefTasks: BriefTask[] = (tasks ?? []).filter((t) => !lapsedIds.has(t.id)).map((t) => ({
       id: t.id,
       title: t.title,
       priority: t.priority,
@@ -184,6 +235,7 @@ export async function GET(req: Request): Promise<Response> {
       pendingApprovalsCount: pendingCount ?? 0,
       accountsNeedingReconnect,
       appBaseUrl,
+      housekeeping,
     });
 
     if (!briefAccount || briefAccount.status !== "connected" || briefAccount.connect_mode !== "direct") {

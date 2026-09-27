@@ -393,17 +393,26 @@ export async function clearInAppCalendarEntriesAction(): Promise<{
 // Clearing it is a real answer, not a failure: an empty rate means "no rate
 // recorded" and the assistant falls back to the floor and says so. This
 // stores one number. It quotes nothing and invoices nothing.
+// B20: the same form also carries the stream's mail scan hint, one line of
+// plain text (at most 200 characters) saying what mail belongs in it. Left
+// out (undefined) means unchanged; empty means none.
 export async function setWorkStreamRateAction(
   workStreamId: string,
-  rate: number | null
+  rate: number | null,
+  scanHint?: string | null
 ): Promise<{ ok: boolean; message?: string }> {
   const { supabase } = await requireUser("/settings");
   if (rate !== null && (!Number.isFinite(rate) || rate < 0)) {
     return { ok: false, message: "A rate must be a number." };
   }
+  const hint =
+    scanHint === undefined ? undefined : (scanHint ?? "").replace(/\s+/g, " ").trim() || null;
+  if (hint && hint.length > 200) {
+    return { ok: false, message: "Keep the mail scan hint to 200 characters." };
+  }
   const { error } = await supabase
     .from("work_streams")
-    .update({ hourly_rate: rate })
+    .update({ hourly_rate: rate, ...(hint !== undefined ? { scan_hint: hint } : {}) })
     .eq("id", workStreamId);
   if (error) return { ok: false, message: error.message };
   revalidatePath("/settings");

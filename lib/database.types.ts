@@ -799,8 +799,10 @@ export type Database = {
           created_at: string
           due_ts: string | null
           external_ref: string | null
+          external_thread: string | null
           id: string
           is_billable: boolean
+          lapses_on: string | null
           not_before: string | null
           notes: string | null
           priority: Database["public"]["Enums"]["task_priority"]
@@ -809,6 +811,7 @@ export type Database = {
           project_id: string | null
           recurring_rule: string | null
           remind_offsets: number[]
+          source_key: string | null
           reminder_mode: Database["public"]["Enums"]["reminder_mode"]
           source: Database["public"]["Enums"]["task_source"]
           status: Database["public"]["Enums"]["task_status"]
@@ -822,8 +825,10 @@ export type Database = {
           created_at?: string
           due_ts?: string | null
           external_ref?: string | null
+          external_thread?: string | null
           id?: string
           is_billable?: boolean
+          lapses_on?: string | null
           not_before?: string | null
           notes?: string | null
           priority?: Database["public"]["Enums"]["task_priority"]
@@ -832,6 +837,7 @@ export type Database = {
           project_id?: string | null
           recurring_rule?: string | null
           remind_offsets?: number[]
+          source_key?: string | null
           reminder_mode?: Database["public"]["Enums"]["reminder_mode"]
           source?: Database["public"]["Enums"]["task_source"]
           status?: Database["public"]["Enums"]["task_status"]
@@ -845,8 +851,10 @@ export type Database = {
           created_at?: string
           due_ts?: string | null
           external_ref?: string | null
+          external_thread?: string | null
           id?: string
           is_billable?: boolean
+          lapses_on?: string | null
           not_before?: string | null
           notes?: string | null
           priority?: Database["public"]["Enums"]["task_priority"]
@@ -855,6 +863,7 @@ export type Database = {
           project_id?: string | null
           recurring_rule?: string | null
           remind_offsets?: number[]
+          source_key?: string | null
           reminder_mode?: Database["public"]["Enums"]["reminder_mode"]
           source?: Database["public"]["Enums"]["task_source"]
           status?: Database["public"]["Enums"]["task_status"]
@@ -1010,6 +1019,7 @@ export type Database = {
           linked_account_hint: string | null
           name: string
           notes: string | null
+          scan_hint: string | null
           user_id: string
         }
         Insert: {
@@ -1022,6 +1032,7 @@ export type Database = {
           linked_account_hint?: string | null
           name: string
           notes?: string | null
+          scan_hint?: string | null
           user_id?: string
         }
         Update: {
@@ -1034,6 +1045,7 @@ export type Database = {
           linked_account_hint?: string | null
           name?: string
           notes?: string | null
+          scan_hint?: string | null
           user_id?: string
         }
         Relationships: []

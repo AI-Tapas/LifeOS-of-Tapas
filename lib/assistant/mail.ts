@@ -1,7 +1,10 @@
 // Recent-mail metadata fetchers. The confidential boundary lives here too:
 // Gmail is queried in metadata format (headers plus snippet, never the body,
-// never attachment parts) and Graph selects only subject, from and
-// bodyPreview. Links inside mail arrive as inert strings inside the snippet.
+// never attachment parts) and Graph selects only subject, from, the
+// conversation id and bodyPreview. Links inside mail arrive as inert strings
+// inside the snippet. Since B20 the scan also reads the full body text of
+// mail from allowlisted ticket senders only, through lib/assistant/mailbox.ts
+// readMessageBody; attachments are still never fetched.
 // Every call routes through withResourceAuth (401 retry, revocation to
 // needs_reauth).
 
@@ -36,6 +39,9 @@ export interface MailMeta {
   // X-Life-OS when present: the app stamps its own outgoing mail so the scan
   // can refuse to read it back in (lib/assistant/scan-filters.ts).
   appTag?: string;
+  // B20: Gmail threadId, Graph conversationId. An id, used only to drop a
+  // mail whose thread already has a task.
+  threadId?: string;
 }
 
 const LOOKBACK_DAYS = 3;
@@ -53,7 +59,7 @@ export async function listRecentGmail(accountId: string): Promise<MailMeta[]> {
     )
   );
   if (!listRes.ok) throw new Error(`Gmail list failed (${listRes.status}).`);
-  const list = (await listRes.json()) as { messages?: { id: string }[] };
+  const list = (await listRes.json()) as { messages?: { id: string; threadId?: string }[] };
   const out: MailMeta[] = [];
   for (const m of list.messages ?? []) {
     const res = await withResourceAuth(accountId, (token) =>
@@ -70,6 +76,7 @@ export async function listRecentGmail(accountId: string): Promise<MailMeta[]> {
     if (!res.ok) continue;
     const j = (await res.json()) as {
       id: string;
+      threadId?: string;
       snippet?: string;
       payload?: { headers?: { name: string; value: string }[] };
     };
@@ -84,6 +91,7 @@ export async function listRecentGmail(accountId: string): Promise<MailMeta[]> {
       snippet: j.snippet ?? "",
       contentType: header("Content-Type"),
       appTag: header("X-Life-OS"),
+      threadId: j.threadId ?? m.threadId,
     });
   }
   return out;
@@ -97,7 +105,7 @@ export async function listRecentGraph(accountId: string): Promise<MailMeta[]> {
         new URLSearchParams({
           $top: String(PER_ACCOUNT),
           $orderby: "receivedDateTime desc",
-          $select: "id,subject,from,receivedDateTime,bodyPreview",
+          $select: "id,conversationId,subject,from,receivedDateTime,bodyPreview",
           $filter: `receivedDateTime ge ${since}`,
         }),
       { headers: { authorization: `Bearer ${token}` } }
@@ -107,6 +115,7 @@ export async function listRecentGraph(accountId: string): Promise<MailMeta[]> {
   const j = (await res.json()) as {
     value?: {
       id: string;
+      conversationId?: string;
       subject?: string;
       from?: { emailAddress?: { name?: string; address?: string } };
       receivedDateTime?: string;
@@ -120,5 +129,6 @@ export async function listRecentGraph(accountId: string): Promise<MailMeta[]> {
     subject: m.subject ?? "",
     date: m.receivedDateTime ?? "",
     snippet: m.bodyPreview ?? "",
+    threadId: m.conversationId,
   }));
 }

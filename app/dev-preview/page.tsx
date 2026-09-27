@@ -560,6 +560,8 @@ const rateStreams: WorkStreamView[] = [
     billing_entity: "Tax Strategia",
     feeds_billing: true,
     hourly_rate: 12000,
+    scan_hint:
+      "GST work for clients: registrations, returns, ledger or balance confirmations, notices, refunds, litigation.",
   },
   {
     id: "w3",

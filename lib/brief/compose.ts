@@ -109,6 +109,10 @@ export interface ComposeBriefInput {
   pendingApprovalsCount: number;
   accountsNeedingReconnect: BriefAccountIssue[];
   appBaseUrl: string;
+  // B20: one-line housekeeping notes from the night, e.g. "3 closed windows
+  // dropped." and "1 ticket email did not match a trip." Not tasks. Optional
+  // so older fixtures stay valid.
+  housekeeping?: string[];
 }
 
 export interface ComposedBrief {
@@ -227,6 +231,7 @@ export function composeBrief(input: ComposeBriefInput): ComposedBrief {
     moneyReviewLine,
     recoveryNote,
     waitingNote,
+    housekeeping: input.housekeeping ?? [],
     nowIso,
     appBaseUrl,
   });
@@ -243,6 +248,7 @@ export function composeBrief(input: ComposeBriefInput): ComposedBrief {
     moneyReviewLine,
     recoveryNote,
     waitingNote,
+    housekeeping: input.housekeeping ?? [],
     nowIso,
     appBaseUrl,
   });
@@ -281,6 +287,7 @@ interface RenderInput {
   moneyReviewLine: string | null;
   recoveryNote: string | null;
   waitingNote: string | null;
+  housekeeping: string[];
   nowIso: string;
   appBaseUrl: string;
 }
@@ -464,6 +471,13 @@ function renderHtml(r: RenderInput): string {
     </td></tr>`
     : "";
 
+  const housekeepingBlock = r.housekeeping.length
+    ? `
+    <tr><td style="padding:16px 32px 0 32px;">
+      <p style="margin:0;font-size:12px;color:${COLORS.muted};font-family:${FONT};">${r.housekeeping.map(esc).join(" ")}</p>
+    </td></tr>`
+    : "";
+
   const scannedBlock = r.scannedTasks.length
     ? `
     <tr><td style="padding:16px 32px 0 32px;">
@@ -498,6 +512,7 @@ function renderHtml(r: RenderInput): string {
       ${moneyBlock}
       ${approvalsBlock}
       ${scannedBlock}
+      ${housekeepingBlock}
       <tr><td style="padding:24px 32px 28px 32px;">
         <div style="border-top:1px solid ${COLORS.cardBorder};padding-top:14px;">
           <a href="${r.appBaseUrl}/" style="font-size:12px;color:${COLORS.clay};font-family:${FONT};">Open Life OS</a>
@@ -583,6 +598,8 @@ function renderText(r: RenderInput): string {
     for (const t of r.scannedTasks) lines.push(`- ${t.title} (${t.stream})`);
     lines.push(`Open the Tasks inbox: ${r.appBaseUrl}/tasks`, "");
   }
+
+  if (r.housekeeping.length) lines.push(r.housekeeping.join(" "), "");
 
   lines.push(`Open Life OS: ${r.appBaseUrl}/`);
   return lines.join("\n");
