@@ -9,6 +9,7 @@ import { providerOptions } from "@/lib/assistant/config";
 import { requireUser } from "@/lib/auth/require-user";
 import { sweepInAppReminderEvents } from "@/lib/reminders/writer";
 import { reportable, describeError, recordEvent } from "@/lib/errors";
+import { checkStreamEdit } from "@/lib/tasks/stream";
 
 export type RefreshResult =
   | { ok: true; count: number }
@@ -402,17 +403,12 @@ export async function setWorkStreamRateAction(
   scanHint?: string | null
 ): Promise<{ ok: boolean; message?: string }> {
   const { supabase } = await requireUser("/settings");
-  if (rate !== null && (!Number.isFinite(rate) || rate < 0)) {
-    return { ok: false, message: "A rate must be a number." };
-  }
-  const hint =
-    scanHint === undefined ? undefined : (scanHint ?? "").replace(/\s+/g, " ").trim() || null;
-  if (hint && hint.length > 200) {
-    return { ok: false, message: "Keep the mail scan hint to 200 characters." };
-  }
+  // B22: the same check update_work_stream uses, so the two cannot disagree.
+  const edit = checkStreamEdit(rate, scanHint);
+  if (!edit.ok) return { ok: false, message: edit.message };
   const { error } = await supabase
     .from("work_streams")
-    .update({ hourly_rate: rate, ...(hint !== undefined ? { scan_hint: hint } : {}) })
+    .update(edit.patch)
     .eq("id", workStreamId);
   if (error) return { ok: false, message: error.message };
   revalidatePath("/settings");

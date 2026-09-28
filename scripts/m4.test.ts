@@ -782,8 +782,10 @@ test("the MCP write surface exposes no approval, execution or stub tools", async
   // Read tools are all prefixed and read-only by name. "read" joined get and
   // list in B18 (lifeos_read_mail_thread, the name the brief fixed): still a
   // verb that cannot mean a write.
+  // B22 added lifeos_search and two lifeos_report_ reviews, the names its
+  // brief fixed: neither verb can mean a write either.
   for (const n of MCP_READ_TOOLS) {
-    assert.match(n, /^lifeos_(get|list|read)_/, `${n} should read, not write`);
+    assert.match(n, /^lifeos_((get|list|read|report)_|search$)/, `${n} should read, not write`);
   }
 });
 

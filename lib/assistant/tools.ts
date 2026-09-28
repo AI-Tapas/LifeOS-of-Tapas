@@ -9,7 +9,9 @@
 //               is the approved-queue executor after an owner-session approval
 //   stub        returns a fixed string, touches nothing
 //
-// Structurally absent, deliberately: document-content tools, credential tools,
+// Structurally absent, deliberately: document-content tools (the one
+// exception is the B22 connector read lifeos_read_mail_attachment, one named
+// mail attachment on request, approved by Tapas by name), credential tools,
 // payment tools, deletion of external data the app did not create, generic
 // SQL/rpc, and any tool that mutates assistant_actions.status.
 //
@@ -66,6 +68,12 @@ export interface ToolDef {
   bucket: ToolBucket;
   disclosure: ToolDisclosure;
 }
+
+// What a model is shown of a tool: its name, description and schema. The
+// bucket and the class stay on this side. Since B22 the in-app chat is also
+// shown the B22 connector reads (mcp-api.ts inAppReadTools), which are not
+// registry tools and have no bucket: they change nothing.
+export type LlmTool = Pick<ToolDef, "name" | "description" | "input_schema">;
 
 // Schema helpers. Optionality is expressed the plain JSON Schema way: the
 // property carries a single concrete type and simply stays out of `required`.
@@ -129,6 +137,12 @@ const NOT_BEFORE_DESC =
 export const LAPSES_ON_DESC =
   "Only for an opportunity or window that is simply gone after a date: an early-bird price, an RSVP, an e-vote window, an event or session day, a \"before 3 PM today\" authorisation. The IST date (YYYY-MM-DD) after which it no longer matters; the next morning's sweep drops the task, undoably. NEVER set it for a statutory, client or payment deadline: those stay open and overdue until Tapas decides. Omit otherwise.";
 const TIME_DESC = "Time of day as HH:MM in 24 hour IST. Omit if not applicable.";
+// B22. A project id is checked against his projects before anything is
+// written; the repeat rule is the M1 "<freq>:<interval>" rule.
+const PROJECT_ID_DESC =
+  "File the task under a project, using a project id from lifeos_list_projects. An unknown id is refused.";
+const RECURRING_RULE_DESC =
+  "Repeat rule: daily, weekly, monthly or yearly, optionally with an interval after a colon (weekly:2 is fortnightly, monthly:3 is quarterly). Completing the task then creates the next one. Anything else is refused.";
 
 // The four connected account slots the assistant may act through.
 const SLOT_KEYS = ["taxstrategia", "ca_tapasnr", "altechon", "icai"];
@@ -165,6 +179,8 @@ export const TOOLS: ToolDef[] = [
         "Why this priority, in one short sentence, e.g. \"statutory deadline, penalty for late filing\". Required whenever you set a priority: Tapas is shown the reason and can disagree with it. Judge by consequence, never by how urgent a sender says something is."
       ),
       billable: boolOrNull("Whether the work is billable."),
+      project_id: strOrNull(PROJECT_ID_DESC),
+      recurring_rule: strOrNull(RECURRING_RULE_DESC),
       trip_id: strOrNull(
         "Attach the task to a trip as a checklist step, using a trip id from lifeos_list_trips. The Tasks screen then shows one line for the trip instead of a row per step. Use it for travel admin (booking, hotel, receipts), never for client work."
       ),
@@ -179,7 +195,7 @@ export const TOOLS: ToolDef[] = [
     bucket: "autonomous",
     disclosure: "app_data",
     description:
-      "Update an existing task (title, note, status, priority, due date, start date, lapse date, work stream). Undo restores the previous values.",
+      "Update an existing task (title, note, status, priority, due date, start date, lapse date, work stream, billable, project, repeat rule). Undo restores the previous values.",
     input_schema: schema({
       task_id: str("The task id from context."),
       title: strOrNull("New title. Omit to keep the current one."),
@@ -204,6 +220,10 @@ export const TOOLS: ToolDef[] = [
       trip_id: strOrNull(
         "Move the task under a trip as a checklist step, using a trip id from lifeos_list_trips. Omit to leave it where it is."
       ),
+      // B22. Closes tool gap #3: billable could be set at creation only.
+      billable: boolOrNull("Whether the work is billable. Omit to keep the current value."),
+      project_id: strOrNull(PROJECT_ID_DESC + " Omit to keep the current project."),
+      recurring_rule: strOrNull(RECURRING_RULE_DESC + " Omit to keep the current rule."),
       reminder_mode: enumOrNull(
         ["calendar", "in_app"],
         "Whether this task interrupts him on the Google Calendar. 'calendar' writes one calendar event with its reminders and is the default. 'in_app' writes no calendar event: the task still ranks on Home and still appears in the morning brief. Use 'in_app' for routine admin (booking a ticket, a standing monthly job) and keep 'calendar' for work where missing the date has a real consequence, such as a client deadline or a statutory filing."
@@ -691,9 +711,14 @@ export const TOOLS: ToolDef[] = [
         "How it is billed: icai_monthly, chapter_aed (overseas, AED, never on the ICAI claim) or none. Omit to keep."
       ),
       notes: strOrNull("New notes. Omit to keep."),
+      cities: opt({
+        type: "array",
+        items: { type: "string" },
+        description: "The cities the trip covers, in order. Replaces the whole list. Omit to keep.",
+      }),
       hotel_arrangement: enumOrNull(
         ["branch", "self", "relative", "same_day"],
-        "How the accommodation is handled: branch, self, relative or same_day. Changing it does not rewrite checklist steps already there; the trip screen offers that separately. Omit to keep."
+        "How the accommodation is handled: branch, self, relative or same_day. Changing it does not rewrite checklist steps already there: call sync_trip_hotel_step for that. Omit to keep."
       ),
       session_label: strOrNull(
         "Short session identity, e.g. L1D2 for AICA Level 1 Day 2. Omit to keep."
@@ -740,6 +765,112 @@ export const TOOLS: ToolDef[] = [
       ),
     }),
   },
+  // --- B22: connector completeness -----------------------------------------
+  // Edits of records that already exist, each undoable. No delete tool for a
+  // trip, an expense or a project: none is added here.
+  {
+    name: "update_trip_expense",
+    bucket: "autonomous",
+    disclosure: "app_data",
+    description:
+      "Change one trip expense line: its receipt reference, whether it is billable, the amount, the date or the category. Take the expense_id from lifeos_list_trip_expenses. Undo restores the old values. There is no tool that deletes an expense.",
+    input_schema: schema({
+      expense_id: str("The expense id from lifeos_list_trip_expenses."),
+      receipt_ref: strOrNull(
+        "Where the receipt lives, as a short note, e.g. 'physical file' or a link he gave. Never the document itself. Omit to keep."
+      ),
+      billable: boolOrNull("True when it is reimbursed. Omit to keep."),
+      amount: numOrNull("Amount in rupees. Omit to keep."),
+      date: strOrNull("Date of the expense as YYYY-MM-DD (IST). Omit to keep."),
+      category: enumOrNull(
+        ["transport", "hotel", "per_diem", "other"],
+        "What kind of expense. Omit to keep."
+      ),
+    }),
+  },
+  {
+    name: "update_project",
+    bucket: "autonomous",
+    disclosure: "app_data",
+    description:
+      "Change a project: its name, work stream, status or notes. Undo restores the old values. There is no tool that deletes a project: set status done or dropped instead.",
+    input_schema: schema({
+      project_id: str("The project id from lifeos_list_projects."),
+      name: strOrNull("New name. Omit to keep."),
+      work_stream: strOrNull(
+        "Move it to this work stream, named exactly as it exists. An unknown name is refused with the real list. Omit to keep."
+      ),
+      status: enumOrNull(
+        ["active", "on_hold", "done", "dropped"],
+        "Where the project stands. Omit to keep."
+      ),
+      note: strOrNull("New notes. Omit to keep."),
+    }),
+  },
+  {
+    name: "update_work_stream",
+    bucket: "autonomous",
+    disclosure: "app_data",
+    description:
+      "Change a work stream's mail scan hint (one line, at most 200 characters, saying what mail belongs in it) or its hourly rate in rupees. The same rules as Settings. Undo restores the old values.",
+    input_schema: schema({
+      name: str("The work stream's name exactly as it exists, from lifeos_list_work_streams."),
+      scan_hint: strOrNull(
+        "One line of plain text, at most 200 characters, telling the nightly mail scan what belongs in this stream. An empty string clears it. Omit to keep."
+      ),
+      hourly_rate: numOrNull("Rate per hour in rupees. Omit to keep."),
+    }),
+  },
+  {
+    name: "add_trip_checklist",
+    bucket: "autonomous",
+    disclosure: "app_data",
+    description:
+      "Add the standard travel checklist (book onward, book return, the hotel step, collect receipts) to a trip that does not have it yet, dated from the trip's own dates. A step the trip already carries is never added twice. Needs a start date. Undo removes the steps it added.",
+    input_schema: schema({
+      trip_id: str("The trip id from lifeos_list_trips."),
+    }),
+  },
+  {
+    name: "sync_trip_hotel_step",
+    bucket: "autonomous",
+    disclosure: "app_data",
+    description:
+      "Bring a trip's hotel checklist step in line with its hotel_arrangement, as the trip screen's Update the checklist button does. It only touches a step still at todo with the app's own wording; a step Tapas has worked or retitled is left alone. A step no longer wanted is dropped, never deleted. Undo puts the steps back.",
+    input_schema: schema({
+      trip_id: str("The trip id from lifeos_list_trips."),
+    }),
+  },
+  {
+    name: "update_trip_leg",
+    bucket: "autonomous",
+    disclosure: "app_data",
+    description:
+      "Correct one journey on a trip. leg_index is the leg's position in the legs list lifeos_list_trips returns, counting from 0. Only the fields given change. Undo restores the legs exactly as they were.",
+    input_schema: schema({
+      trip_id: str("The trip id from lifeos_list_trips."),
+      leg_index: { type: "integer", description: "Position of the leg in lifeos_list_trips, counting from 0." },
+      from_city: strOrNull("Where the journey starts. Omit to keep."),
+      to_city: strOrNull("Where the journey ends. Omit to keep."),
+      date: strOrNull("Journey date as YYYY-MM-DD (IST). Omit to keep."),
+      mode: enumOrNull(
+        ["vande_bharat", "tejas", "ac_sleeper", "cab", "flight", "other"],
+        "How he travels. Omit to keep."
+      ),
+      ref: strOrNull("The PNR or booking id, at most 40 characters. Omit to keep."),
+    }),
+  },
+  {
+    name: "remove_trip_leg",
+    bucket: "autonomous",
+    disclosure: "app_data",
+    description:
+      "Remove one journey from a trip, for a leg logged twice or cancelled. This edits the trip; nothing else is deleted. leg_index is the leg's position in lifeos_list_trips, counting from 0. Undo restores the legs exactly as they were.",
+    input_schema: schema({
+      trip_id: str("The trip id from lifeos_list_trips."),
+      leg_index: { type: "integer", description: "Position of the leg in lifeos_list_trips, counting from 0." },
+    }),
+  },
 ];
 
 export const AUTONOMOUS_KINDS = new Set(
@@ -783,6 +914,8 @@ export type TargetTable =
   | "finance_items"
   | "events"
   | "trips"
+  | "trip_expenses"
+  | "projects"
   | "assistant_actions";
 
 export interface ToolTarget {
@@ -827,6 +960,14 @@ export const TOOL_TARGETS: Record<string, ToolTarget> = {
   update_trip: { arg: "trip_id", label: "trip", table: "trips" },
   log_trip_leg: { arg: "trip_id", label: "trip", table: "trips" },
   add_trip_expense: { arg: "trip_id", label: "trip", table: "trips" },
+  // B22. update_work_stream is not here: it names a stream, and an unknown
+  // name is refused with the real list (lib/tasks/stream.ts), not queued.
+  update_trip_expense: { arg: "expense_id", label: "trip expense", table: "trip_expenses" },
+  update_project: { arg: "project_id", label: "project", table: "projects" },
+  add_trip_checklist: { arg: "trip_id", label: "trip", table: "trips" },
+  sync_trip_hotel_step: { arg: "trip_id", label: "trip", table: "trips" },
+  update_trip_leg: { arg: "trip_id", label: "trip", table: "trips" },
+  remove_trip_leg: { arg: "trip_id", label: "trip", table: "trips" },
   undo_action: {
     arg: "action_id",
     label: "queued action",
@@ -910,7 +1051,7 @@ export function assertNoAttendees(input: Record<string, unknown>): void {
 // emits. Strict would only save the model from malformed arguments, which the
 // executor already rejects with a readable message.
 export function anthropicTools(
-  defs: ToolDef[] = TOOLS,
+  defs: LlmTool[] = TOOLS,
   strict = false
 ): Array<{
   name: string;
@@ -978,6 +1119,16 @@ export const MCP_READ_TOOLS = [
   "lifeos_list_action_history",
   "lifeos_list_inbox",
   "lifeos_read_mail_thread",
+  // B22.
+  "lifeos_get_month_pack",
+  "lifeos_list_trip_expenses",
+  "lifeos_get_last_brief",
+  "lifeos_list_scan_runs",
+  "lifeos_list_work_streams",
+  "lifeos_search",
+  "lifeos_report_lapsed_tasks",
+  "lifeos_report_premature_tasks",
+  "lifeos_read_mail_attachment",
 ] as const;
 
 export type McpReadTool = (typeof MCP_READ_TOOLS)[number];
@@ -1012,6 +1163,23 @@ export const READ_TOOL_DISCLOSURES: Record<McpReadTool, ToolDisclosure> = {
   // 2026). Still no class for document or attachment content.
   lifeos_list_inbox: "mail_body",
   lifeos_read_mail_thread: "mail_body",
+  // B22. Records Life OS holds. The brief, the search and the reports carry
+  // task titles, some from scanned mail: rows the app owns, flagged untrusted
+  // where they came from mail.
+  lifeos_get_month_pack: "app_data",
+  lifeos_list_trip_expenses: "app_data",
+  lifeos_get_last_brief: "app_data",
+  lifeos_list_scan_runs: "app_data",
+  lifeos_list_work_streams: "app_data",
+  lifeos_search: "app_data",
+  lifeos_report_lapsed_tasks: "app_data",
+  lifeos_report_premature_tasks: "app_data",
+  // B22. The text of ONE named PDF or DOCX attachment, on request only.
+  // Tapas approved attachment text "only on request, from all emails" of the
+  // three connected mailboxes by name on 28 September 2026. It rides the
+  // existing mail_body class, as the B20 ticket reader does: the union still
+  // has five members, and widening it stays his decision.
+  lifeos_read_mail_attachment: "mail_body",
 };
 
 export function mcpWriteTools(): ToolDef[] {

@@ -1,10 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import MonthPack from "@/components/trips/month-pack";
-import {
-  previousMonthKey,
-  type MonthExpense,
-  type MonthTrip,
-} from "@/lib/trips/month";
+import { previousMonthKey, toMonthExpense, toMonthTrip } from "@/lib/trips/month";
 import { civilKey, civilToday } from "@/lib/datetime";
 
 export const dynamic = "force-dynamic";
@@ -31,28 +27,9 @@ export default async function TripMonthPage() {
   return (
     <main>
       <MonthPack
-        trips={(trips ?? []).map(
-          (t): MonthTrip => ({
-            id: t.id,
-            title: t.title,
-            start_date: t.start_date,
-            end_date: t.end_date,
-            cities: Array.isArray(t.cities) ? (t.cities as string[]) : [],
-            bills_to: t.bills_to,
-            legs: t.legs,
-          })
-        )}
-        expenses={(expenses ?? []).map(
-          (e): MonthExpense => ({
-            id: e.id,
-            trip_id: e.trip_id,
-            category: e.category,
-            amount: Number(e.amount),
-            date: e.date,
-            billable: e.billable,
-            receipt_ref: e.receipt_ref,
-          })
-        )}
+        // Mapped by the same functions lifeos_get_month_pack uses (B22).
+        trips={(trips ?? []).map(toMonthTrip)}
+        expenses={(expenses ?? []).map(toMonthExpense)}
         defaultMonth={previousMonthKey(todayKey)}
         maxMonth={todayKey.slice(0, 7)}
       />

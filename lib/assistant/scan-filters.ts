@@ -187,9 +187,24 @@ export function sameDistinctThing(a: string, b: string): boolean {
 // ---------------------------------------------------------------------------
 export const NEVER_EXTRACT_PHRASES: readonly string[] = ["boarding pass"];
 
+// B22, approved by Tapas on 28 September 2026: ICAI mail asking a branch to
+// coordinate faculty or travel arrangements (bookings) for an AICA batch is
+// the branch's work, never a task for him. Tight on purpose: all three of
+// "coordinat", "faculty" or "travel", and "batch" must appear, so "Send travel
+// plan to ICAI" and "Coordinate hotel booking for Kolkata trip" still land.
+// The audit row records this label, never the title.
+export const BRANCH_COORDINATION = "branch coordination for an AICA batch";
+
+function isBranchCoordination(hay: string): boolean {
+  return /coordinat/.test(hay) && /\b(faculty|travel)\b/.test(hay) && /\bbatch/.test(hay);
+}
+
 export function matchesNeverExtract(title: string, note: string | null = null): string | null {
   const hay = `${title}\n${note ?? ""}`.toLowerCase();
-  return NEVER_EXTRACT_PHRASES.find((p) => hay.includes(p)) ?? null;
+  return (
+    NEVER_EXTRACT_PHRASES.find((p) => hay.includes(p)) ??
+    (isBranchCoordination(hay) ? BRANCH_COORDINATION : null)
+  );
 }
 
 // ---------------------------------------------------------------------------

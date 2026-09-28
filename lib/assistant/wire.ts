@@ -4,7 +4,7 @@
 // offline. The security model is format-independent: tool execution and the
 // approval gates live behind these mappers and never change with the dialect.
 
-import type { ToolDef } from "./tools.ts";
+import type { LlmTool } from "./tools.ts";
 
 export interface ToolCall {
   id: string;
@@ -96,7 +96,7 @@ export function toOpenAIMessages(
 }
 
 export function toOpenAITools(
-  defs: ToolDef[],
+  defs: LlmTool[],
   strict: boolean
 ): Array<Record<string, unknown>> {
   return defs.map((t) => ({

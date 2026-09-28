@@ -339,3 +339,61 @@ export function monthPackText(pack: MonthPack): string {
 
   return lines.join("\n");
 }
+
+// ---------------------------------------------------------------------------
+// B22. The same pack from database rows, for /trips/month and for the
+// connector's lifeos_get_month_pack, so the two can never disagree: both map
+// rows here and build with buildMonthPack and monthPackText above.
+// ---------------------------------------------------------------------------
+export interface TripDbRow {
+  id: string;
+  title: string;
+  start_date: string | null;
+  end_date: string | null;
+  cities: unknown; // jsonb
+  bills_to: BillsTo;
+  legs: unknown; // jsonb
+}
+
+export interface ExpenseDbRow {
+  id: string;
+  trip_id: string;
+  category: string;
+  amount: number | string;
+  date: string;
+  billable: boolean;
+  receipt_ref: string | null;
+}
+
+export function toMonthTrip(t: TripDbRow): MonthTrip {
+  return {
+    id: t.id,
+    title: t.title,
+    start_date: t.start_date,
+    end_date: t.end_date,
+    cities: Array.isArray(t.cities) ? (t.cities as string[]) : [],
+    bills_to: t.bills_to,
+    legs: t.legs,
+  };
+}
+
+export function toMonthExpense(e: ExpenseDbRow): MonthExpense {
+  return {
+    id: e.id,
+    trip_id: e.trip_id,
+    category: e.category,
+    amount: Number(e.amount),
+    date: e.date,
+    billable: e.billable,
+    receipt_ref: e.receipt_ref,
+  };
+}
+
+export function monthPackFromRows(
+  trips: TripDbRow[],
+  expenses: ExpenseDbRow[],
+  monthKey: string
+): { pack: MonthPack; text: string } {
+  const pack = buildMonthPack(trips.map(toMonthTrip), expenses.map(toMonthExpense), monthKey);
+  return { pack, text: monthPackText(pack) };
+}

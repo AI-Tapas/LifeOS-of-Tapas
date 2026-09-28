@@ -658,8 +658,13 @@ test("Settings edits the hint on the work stream form, 200 characters at most", 
   const panel = src("components/settings/work-streams-panel.tsx");
   assert.ok(panel.includes("maxLength={HINT_MAX}"));
   assert.ok(panel.includes("const HINT_MAX = 200;"));
+  // B22 moved the check into lib/tasks/stream.ts checkStreamEdit, shared by
+  // Settings and update_work_stream.
   const actions = src("app/(app)/settings/actions.ts");
-  assert.ok(actions.includes("hint.length > 200"));
+  assert.ok(actions.includes("checkStreamEdit(rate, scanHint)"));
+  const stream = src("lib/tasks/stream.ts");
+  assert.ok(stream.includes("export const SCAN_HINT_MAX = 200;"));
+  assert.ok(stream.includes("hint.length > SCAN_HINT_MAX"));
 });
 
 test("an unknown work stream name is refused with the real list; no name still means Personal", () => {
@@ -682,9 +687,13 @@ test("update_task can move a task to another stream, and undo restores it; creat
   const exec = src("lib/assistant/execute.ts");
   const updPerf = exec.slice(exec.indexOf("async update_task("), exec.indexOf("async set_reminder("));
   assert.ok(updPerf.includes("strictWorkStream(supabase, s(input.work_stream))"));
-  assert.ok(updPerf.includes("lapses_on, work_stream_id"), "the undo snapshot keeps the old stream");
+  // B22 moved the snapshot columns and the restore into lib/tasks/tool-fields.ts.
+  const fields = src("lib/tasks/tool-fields.ts");
+  assert.ok(updPerf.includes(".select(TASK_UNDO_COLUMNS)"));
+  assert.ok(fields.includes("lapses_on, work_stream_id"), "the undo snapshot keeps the old stream");
   const undoCase = exec.slice(exec.indexOf('case "update_task":'), exec.indexOf('case "add_note": {'));
-  assert.ok(undoCase.includes("work_stream_id: prev.work_stream_id"));
+  assert.ok(undoCase.includes("taskUndoPatch(prev)"));
+  assert.ok(fields.includes("work_stream_id: prev.work_stream_id"));
   const createPerf = exec.slice(exec.indexOf("async create_task("), exec.indexOf("async update_task("));
   assert.ok(createPerf.includes("strictWorkStream(supabase, s(input.work_stream))"));
 });

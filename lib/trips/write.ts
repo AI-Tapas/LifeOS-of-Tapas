@@ -7,9 +7,14 @@
 // does not produce a bill: it holds the month accurately and hands it over
 // (lib/trips/month.ts). Nothing in this file writes a bills row.
 
-import { buildChecklist, type HotelArrangement } from "./checklist.ts";
+import {
+  HOTEL_STEP_TITLES,
+  ONWARD_STEP_TITLE,
+  buildChecklist,
+  type HotelArrangement,
+} from "./checklist.ts";
 import { parseLegs, type TripLeg } from "./core.ts";
-import { createTask } from "@/lib/tasks/write";
+import { createTask, setTaskStatus, updateTask } from "@/lib/tasks/write";
 import { syncTripEvent, removeTripEvent } from "@/lib/reminders/writer";
 import { civilKey, civilToday, istInstant } from "@/lib/datetime";
 import type { Database, Json } from "@/lib/database.types";
@@ -193,6 +198,165 @@ export async function seedTripChecklist(
     if (r.ok) ids.push(r.id);
   }
   return ids;
+}
+
+// The trip fields the checklist is derived from, read once.
+async function checklistTrip(supabase: Db, tripId: string) {
+  const { data: trip } = await supabase
+    .from("trips")
+    .select(
+      "title, purpose, start_date, end_date, bills_to, cities, hotel_arrangement, work_stream_id"
+    )
+    .eq("id", tripId)
+    .maybeSingle();
+  if (!trip) return null;
+  // cities is jsonb, so the generated type is Json: normalise it the same way
+  // every other caller does.
+  return { ...trip, cities: Array.isArray(trip.cities) ? (trip.cities as string[]) : [] };
+}
+
+// Adds the standard travel checklist to a trip that does not have it yet.
+// Moved here from the trip screen's server action in B22 so the screen, the
+// assistant and both connectors (add_trip_checklist) share it. seedTripChecklist
+// never writes a step the trip already carries, so asking twice adds nothing.
+export async function addTripChecklist(
+  supabase: Db,
+  userId: string,
+  tripId: string
+): Promise<{ ok: true; ids: string[] } | { ok: false; message: string }> {
+  const trip = await checklistTrip(supabase, tripId);
+  if (!trip) return { ok: false, message: "Trip not found." };
+  const ids = await seedTripChecklist(supabase, userId, tripId, trip);
+  if (!ids.length) {
+    return {
+      ok: false,
+      message: trip.start_date
+        ? "The checklist is already on this trip. Nothing was added."
+        : "Set a start date on the trip first: the checklist counts back from it.",
+    };
+  }
+  return { ok: true, ids };
+}
+
+// What a hotel-step sync changed, so undo can put each step back.
+export interface HotelSyncChanges {
+  created: string[];
+  updated: { id: string; prev: { title: string; notes: string | null; due_ts: string | null } }[];
+  dropped: { id: string; prev_status: string }[];
+}
+
+// Changing how the hotel is arranged does NOT rewrite the checklist by
+// itself: the steps are ordinary tasks he may already have worked. This is
+// the explicit "Update the checklist" act, and it only ever touches a step
+// still sitting at 'todo' with the wording the app itself wrote. Anything he
+// has completed, started, dropped or retitled is left exactly as it is, and
+// the caller says so. Moved here from the trip screen's server action in B22
+// (sync_trip_hotel_step), unchanged, plus the record of what it changed.
+export async function syncTripHotelStep(
+  supabase: Db,
+  userId: string,
+  tripId: string
+): Promise<
+  | { ok: true; note: string; changes: HotelSyncChanges }
+  | { ok: false; message: string; changes: HotelSyncChanges }
+> {
+  const changes: HotelSyncChanges = { created: [], updated: [], dropped: [] };
+  const trip = await checklistTrip(supabase, tripId);
+  if (!trip) return { ok: false, message: "Trip not found.", changes };
+  if (!trip.start_date) {
+    return {
+      ok: false,
+      message: "Set a start date on the trip first: the checklist counts back from it.",
+      changes,
+    };
+  }
+  const steps = buildChecklist(trip, civilKey(civilToday()));
+  const wantHotel = steps.find((s) => s.key === "hotel") ?? null;
+  const wantOnward = steps.find((s) => s.key === "onward") ?? null;
+
+  const { data: tasks } = await supabase
+    .from("tasks")
+    .select("id, title, status, notes, due_ts")
+    .eq("trip_id", tripId);
+  const rows = tasks ?? [];
+  const hotelRow = rows.find((t) => HOTEL_STEP_TITLES.includes(t.title)) ?? null;
+  const onwardRow = rows.find((t) => t.title === ONWARD_STEP_TITLE) ?? null;
+
+  const done: string[] = [];
+  let held = false;
+
+  if (hotelRow && hotelRow.status !== "todo") {
+    held = true;
+  } else if (hotelRow && wantHotel) {
+    const r = await updateTask(
+      supabase,
+      userId,
+      hotelRow.id,
+      {
+        title: wantHotel.title,
+        notes: wantHotel.note,
+        due_ts: dueAt(wantHotel.due_date),
+      },
+      "app");
+    if (!r.ok) return { ok: false, message: r.message, changes };
+    changes.updated.push({
+      id: hotelRow.id,
+      prev: { title: hotelRow.title, notes: hotelRow.notes, due_ts: hotelRow.due_ts },
+    });
+    done.push("the hotel step now matches");
+  } else if (hotelRow && !wantHotel) {
+    // Dropped, never deleted: it stays visible as his own record that the
+    // step was decided away rather than vanishing overnight.
+    const r = await setTaskStatus(supabase, userId, hotelRow.id, "dropped");
+    if (!r.ok) return { ok: false, message: r.message ?? "Could not drop the step.", changes };
+    changes.dropped.push({ id: hotelRow.id, prev_status: hotelRow.status });
+    done.push("the hotel step is dropped");
+  } else if (!hotelRow && wantHotel && rows.length > 0) {
+    const r = await createTask(
+      supabase,
+      userId,
+      {
+        title: wantHotel.title,
+        notes: wantHotel.note,
+        status: "todo",
+        priority: "medium",
+        due_ts: dueAt(wantHotel.due_date),
+        work_stream_id: trip.work_stream_id,
+        trip_id: tripId,
+        source: "manual",
+        // Routine travel admin, so it stays off the calendar (M7a). An
+        // update never touches the mode: if he has changed how this trip
+        // reminds him, that choice stands.
+        reminder_mode: wantHotel.reminder_mode,
+      },
+      "app");
+    if (!r.ok) return { ok: false, message: r.message, changes };
+    changes.created.push(r.id);
+    done.push("a hotel step is added");
+  }
+
+  // The onward step's note carries the night-before line, which a day return
+  // makes wrong. Same rule: only while it is untouched.
+  if (onwardRow && wantOnward && onwardRow.status === "todo" && onwardRow.notes !== wantOnward.note) {
+    const r = await updateTask(supabase, userId, onwardRow.id, { notes: wantOnward.note }, "app");
+    if (!r.ok) return { ok: false, message: r.message, changes };
+    changes.updated.push({
+      id: onwardRow.id,
+      prev: { title: onwardRow.title, notes: onwardRow.notes, due_ts: onwardRow.due_ts },
+    });
+    done.push("the onward step's note is corrected");
+  }
+
+  if (held) {
+    return {
+      ok: false,
+      message:
+        "You have already worked the hotel step, so it is left alone. Change it yourself if it should read differently.",
+      changes,
+    };
+  }
+  if (!done.length) return { ok: true, note: "The checklist already matches.", changes };
+  return { ok: true, note: `Updated: ${done.join(", ")}.`, changes };
 }
 
 export async function updateTrip(

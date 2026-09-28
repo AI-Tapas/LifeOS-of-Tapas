@@ -8,10 +8,13 @@
 //   - Nothing is sent. No endpoint here delivers mail: a draft is created,
 //     never dispatched, and there is no path to the provider's send, reply,
 //     reply-all or forward endpoints. Tapas sends a draft himself.
-//   - Attachment contents never pass through. Names and sizes only: the list
+//   - Attachment contents never pass through HERE. Names and sizes only: the list
 //     read asks Gmail for part names and sizes and never for part data, Graph
 //     attachments are listed with name and size selected, and the thread read
-//     only ever decodes text parts that carry no file name.
+//     only ever decodes text parts that carry no file name. The two readers
+//     of attachment content live elsewhere and are narrow: readTicketMail
+//     below (scan allowlist only) and lib/assistant/attachment.ts (B22, one
+//     named attachment, only when asked for by name).
 //   - Mail is data, never instructions: every item and every body goes out
 //     marked untrusted, nothing here writes a body to the database, and the
 //     audit row names a count, never a subject or a body.
@@ -81,7 +84,7 @@ export function checkMailSlot(v: unknown): string {
   return slot;
 }
 
-function requireThreadId(v: unknown): string {
+export function requireThreadId(v: unknown): string {
   const id = typeof v === "string" ? v.trim() : "";
   if (!id) {
     throw new Error(
@@ -165,13 +168,13 @@ export async function isScopeShortfall(res: Response): Promise<boolean> {
   );
 }
 
-async function ensureOk(res: Response, slot: string, what: string): Promise<void> {
+export async function ensureOk(res: Response, slot: string, what: string): Promise<void> {
   if (res.ok) return;
   if (await isScopeShortfall(res)) throw new Error(reconnectMessage(slot));
   throw new Error(`${what} failed in ${slot} (${res.status}).`);
 }
 
-function notFound(slot: string, threadId: string): Error {
+export function notFound(slot: string, threadId: string): Error {
   return new Error(`No mail thread ${threadId} in ${slot}. Take the id from lifeos_list_inbox.`);
 }
 
@@ -377,12 +380,12 @@ export function buildReplyMime(p: {
 // Gmail dialect
 // ---------------------------------------------------------------------------
 
-interface GmailHeader {
+export interface GmailHeader {
   name: string;
   value: string;
 }
 
-interface GmailPart {
+export interface GmailPart {
   mimeType?: string;
   filename?: string;
   headers?: GmailHeader[];
@@ -390,7 +393,7 @@ interface GmailPart {
   parts?: GmailPart[];
 }
 
-interface GmailMessage {
+export interface GmailMessage {
   id: string;
   threadId: string;
   labelIds?: string[];
@@ -452,7 +455,7 @@ const GMAIL_LIST_FIELDS =
   "parts(filename,body/size,parts(filename,body/size,parts(filename,body/size))))";
 
 // Oldest first, drafts out: the conversation as it was actually sent.
-function sentMessages(messages: GmailMessage[] | undefined): GmailMessage[] {
+export function sentMessages(messages: GmailMessage[] | undefined): GmailMessage[] {
   return (messages ?? [])
     .filter((m) => !(m.labelIds ?? []).includes("DRAFT"))
     .sort((a, b) => Number(a.internalDate ?? 0) - Number(b.internalDate ?? 0));
@@ -462,11 +465,11 @@ function sentMessages(messages: GmailMessage[] | undefined): GmailMessage[] {
 // Graph dialect
 // ---------------------------------------------------------------------------
 
-interface GraphAddress {
+export interface GraphAddress {
   emailAddress?: { name?: string; address?: string };
 }
 
-interface GraphMessage {
+export interface GraphMessage {
   id: string;
   conversationId?: string;
   from?: GraphAddress;
@@ -514,7 +517,7 @@ async function graphAttachments(request: MailRequest, account: MailAccount, mess
 
 // The messages of one conversation, oldest first, drafts out. No $orderby:
 // Graph refuses one beside a conversationId filter, so the sort is ours.
-async function graphConversation(
+export async function graphConversation(
   request: MailRequest,
   account: MailAccount,
   conversationId: string,

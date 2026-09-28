@@ -11,6 +11,8 @@ import { staleTripStepIds } from "@/lib/tasks/trip-rollup";
 import { lapsedLine, sweepLapsed } from "@/lib/tasks/lapse";
 import { ticketBriefLine } from "@/lib/trips/ticket";
 import { cabBriefLine } from "@/lib/trips/cab";
+import { keepBrief } from "@/lib/brief/store";
+import { briefStoreFor } from "@/lib/brief/store-db";
 import { loadTripSteps } from "@/lib/tasks/trip-steps";
 import { setTaskStatus } from "@/lib/tasks/write";
 import type { MonthExpense } from "@/lib/trips/month";
@@ -266,6 +268,21 @@ export async function GET(req: Request): Promise<Response> {
       appBaseUrl,
       housekeeping,
     });
+
+    // B22: keep what he was told this morning, the last 30 days, for
+    // lifeos_get_last_brief. Kept whether or not the send below works, and a
+    // failure to keep it never stops the send.
+    try {
+      await keepBrief(briefStoreFor(supabase, userId), { brief_date: istDate, subject, body_text: text });
+    } catch (e) {
+      await supabase.from("audit_log").insert({
+        user_id: userId,
+        actor: "assistant",
+        action: "brief_store_failed",
+        entity: "cron",
+        meta: { ist_date: istDate, message: e instanceof Error ? e.message : "store failed" } as Json,
+      });
+    }
 
     if (!briefAccount || briefAccount.status !== "connected" || briefAccount.connect_mode !== "direct") {
       await supabase.from("audit_log").insert({

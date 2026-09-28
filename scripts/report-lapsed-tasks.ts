@@ -21,68 +21,19 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { pathToFileURL } from "node:url";
-import { civilKey, civilToday, formatDateIST } from "../lib/datetime.ts";
+import { civilKey, civilToday } from "../lib/datetime.ts";
+import { buildLapsedReport, type LapsedRow } from "../lib/tasks/reports.ts";
 
-export interface LapsedRow {
-  id: string;
-  title: string;
-  notes: string | null;
-  status: string;
-  source: string;
-  due_ts: string | null;
-  lapses_on: string | null;
-}
-
-export const OVERDUE_DAYS = 3;
-
-// ponytail: a phrase list, not a classifier. It only chooses what goes on a
-// list he reads; nothing acts on it. Add a phrase when a window slips past.
-const WINDOW =
-  /\b(early[- ]?bird|e-?vot(e|ing)|rsvp|register by|registration (closes|ends)|last date (to|for) regist\w*|before \d{1,2}(:\d{2})?\s*(am|pm)|webinar|workshop|seminar|conference|faculty day|session day)\b/i;
-
-export function looksLikeWindow(title: string, notes: string | null): boolean {
-  return WINDOW.test(title) || WINDOW.test(notes ?? "");
-}
-
-function istKey(iso: string): string {
-  return new Date(Date.parse(iso) + 330 * 60000).toISOString().slice(0, 10);
-}
-
-function shiftKey(key: string, days: number): string {
-  const [y, m, d] = key.split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
-}
-
-// Pure, so the offline test can check it with fixtures.
-export function lapsedCandidates(rows: LapsedRow[], todayKey: string): LapsedRow[] {
-  const cutoff = shiftKey(todayKey, -OVERDUE_DAYS);
-  return rows.filter(
-    (r) =>
-      ["inbox", "todo", "doing"].includes(r.status) &&
-      r.source === "email" &&
-      !r.lapses_on &&
-      !!r.due_ts &&
-      istKey(r.due_ts) < cutoff &&
-      looksLikeWindow(r.title, r.notes)
-  );
-}
-
-export function buildLapsedReport(rows: LapsedRow[], todayKey: string): string {
-  const hits = lapsedCandidates(rows, todayKey);
-  const lines = [
-    `Life OS: open mail tasks that look like closed windows, ${formatDateIST(`${todayKey}T04:00:00Z`)}`,
-    "Nothing has been changed. Review each one and decide.",
-    "",
-    `Open email tasks due more than ${OVERDUE_DAYS} days ago that read like a window: ${hits.length}`,
-  ];
-  for (const r of hits) {
-    lines.push(`   - ${r.title} | due ${formatDateIST(r.due_ts!)} | id ${r.id}`);
-  }
-  if (hits.length) {
-    lines.push("   If the window has closed, mark it Dropped in Tasks, which can be undone.");
-  }
-  return lines.join("\n");
-}
+// The pure part lives in lib/tasks/reports.ts since B22, shared with the
+// connector tool lifeos_report_lapsed_tasks. Re-exported so the tests that
+// import it from here still do.
+export {
+  OVERDUE_DAYS,
+  buildLapsedReport,
+  lapsedCandidates,
+  looksLikeWindow,
+  type LapsedRow,
+} from "../lib/tasks/reports.ts";
 
 async function main(): Promise<void> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL;

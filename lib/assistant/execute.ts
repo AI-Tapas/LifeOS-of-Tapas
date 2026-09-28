@@ -28,15 +28,27 @@ import {
 } from "@/lib/tasks/write";
 import { undoLapse } from "@/lib/tasks/lapse";
 import {
+  addTripChecklist,
   addTripExpense,
   addTripLeg,
   createTrip,
   deleteTrip,
   deleteTripExpense,
+  syncTripHotelStep,
   updateTrip,
+  updateTripExpense,
+  type HotelSyncChanges,
 } from "@/lib/trips/write";
 import { findNearDuplicate } from "@/lib/tasks/near-duplicate";
-import { pickWorkStream } from "@/lib/tasks/stream";
+import { checkStreamEdit, pickWorkStream } from "@/lib/tasks/stream";
+import {
+  TASK_UNDO_COLUMNS,
+  resolveTaskExtras,
+  taskUndoPatch,
+  type ProjectRef,
+} from "@/lib/tasks/tool-fields";
+import { editLeg, removeLeg } from "@/lib/trips/legs";
+import { expensePatch, expenseUndo, type ExpenseRow } from "@/lib/trips/expense-edit";
 import {
   applyTicketLeg,
   undoTicketLeg,
@@ -207,6 +219,18 @@ async function strictWorkStream(supabase: Db, name: string | null): Promise<stri
   const pick = pickWorkStream(streams ?? [], name);
   if (!pick.ok) throw new Error(pick.message);
   return pick.id;
+}
+
+// B22: his projects, read only when a project_id was sent, so an unknown id
+// is refused by name (lib/tasks/tool-fields.ts) rather than by the foreign key.
+async function projectsIfNamed(
+  supabase: Db,
+  userId: string,
+  input: Record<string, unknown>
+): Promise<ProjectRef[]> {
+  if (typeof input.project_id !== "string" || !input.project_id.trim()) return [];
+  const { data } = await supabase.from("projects").select("id, name").eq("user_id", userId);
+  return data ?? [];
 }
 
 async function resolveWorkStream(
@@ -590,6 +614,9 @@ const performers: Record<string, Performer> = {
       );
     }
     const workStreamId = await strictWorkStream(supabase, s(input.work_stream));
+    // B22: project and repeat rule, checked before anything is written.
+    const extras = resolveTaskExtras(input, await projectsIfNamed(supabase, _userId, input));
+    if (!extras.ok) throw new Error(extras.message);
     const due = s(input.due_date);
     const notBefore = s(input.not_before);
     const priority = s(input.priority) as TaskInput["priority"] | null;
@@ -618,6 +645,8 @@ const performers: Record<string, Performer> = {
         ? { reminder_mode: input.reminder_mode }
         : {}),
       is_billable: input.billable === true,
+      ...(extras.patch.project_id ? { project_id: extras.patch.project_id } : {}),
+      ...(extras.patch.recurring_rule ? { recurring_rule: extras.patch.recurring_rule } : {}),
       source: "assistant",
     }, "assistant");
     if (!r.ok) throw new Error(r.message);
@@ -633,15 +662,17 @@ const performers: Record<string, Performer> = {
   async update_task(supabase, _userId, input) {
     const taskId = s(input.task_id);
     if (!taskId) throw new Error("task_id is required.");
+    // B22: every column this tool can change is in the snapshot, billable,
+    // project and repeat rule included, so undo restores all of them.
     const { data: prev } = await supabase
       .from("tasks")
-      .select(
-        "title, notes, status, priority, priority_source, priority_reason, due_ts, not_before, lapses_on, work_stream_id, remind_offsets, reminder_mode, trip_id"
-      )
+      .select(TASK_UNDO_COLUMNS)
       .eq("id", taskId)
       .single();
     if (!prev) throw new Error("Task not found.");
-    const patch: Partial<TaskInput> = {};
+    const extras = resolveTaskExtras(input, await projectsIfNamed(supabase, _userId, input));
+    if (!extras.ok) throw new Error(extras.message);
+    const patch: Partial<TaskInput> = { ...extras.patch };
     // B20: a stream by name, refused with the real list when unknown.
     if (s(input.work_stream)) {
       patch.work_stream_id = await strictWorkStream(supabase, s(input.work_stream));
@@ -1176,11 +1207,19 @@ const performers: Record<string, Performer> = {
     if (!tripId) throw new Error("trip_id is required.");
     const { data: prev } = await supabase
       .from("trips")
-      .select("title, status, start_date, end_date, bills_to, notes, hotel_arrangement, session_label, session_date")
+      .select("title, status, start_date, end_date, bills_to, notes, hotel_arrangement, session_label, session_date, cities")
       .eq("id", tripId)
       .single();
     if (!prev) throw new Error("Trip not found.");
     const r = await updateTrip(supabase, userId, tripId, {
+      // B22: the whole list is replaced, and undo puts the old list back.
+      ...(Array.isArray(input.cities)
+        ? {
+            cities: (input.cities as unknown[])
+              .filter((c): c is string => typeof c === "string" && !!c.trim())
+              .map((c) => c.trim()),
+          }
+        : {}),
       ...(s(input.title) ? { title: s(input.title)! } : {}),
       ...(s(input.status)
         ? { status: s(input.status) as Database["public"]["Enums"]["trip_status"] }
@@ -1324,6 +1363,167 @@ const performers: Record<string, Performer> = {
         thread_id: draft.thread_id,
         reply_all: draft.reply_all,
       },
+    };
+  },
+
+  // --- B22: edits of records that already exist ----------------------------
+  // Each one keeps the old values on its executed row, and undo puts them
+  // back. There is no delete tool for a trip, an expense or a project.
+
+  async update_trip_expense(supabase, userId, input) {
+    const expenseId = s(input.expense_id);
+    if (!expenseId) throw new Error("expense_id is required.");
+    const { data: prev } = await supabase
+      .from("trip_expenses")
+      .select("category, amount, date, billable, receipt_ref")
+      .eq("id", expenseId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (!prev) throw new Error("Expense not found.");
+    const p = expensePatch(input);
+    if (!p.ok) throw new Error(p.message);
+    // The same write the trip screen's expense drawer uses.
+    const r = await updateTripExpense(supabase, userId, expenseId, p.value);
+    if (!r.ok) throw new Error(r.message);
+    const before: ExpenseRow = { ...prev, amount: Number(prev.amount) };
+    return {
+      summary: `Expense line updated (${Object.keys(p.value).join(", ")}).`,
+      undo: { expense_id: expenseId, prev: expenseUndo(before, p.value) },
+    };
+  },
+
+  async update_project(supabase, userId, input) {
+    const projectId = s(input.project_id);
+    if (!projectId) throw new Error("project_id is required.");
+    const { data: prev } = await supabase
+      .from("projects")
+      .select("name, work_stream_id, status, notes")
+      .eq("id", projectId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (!prev) throw new Error("Project not found.");
+    const status = s(input.status);
+    if (status && !["active", "on_hold", "done", "dropped"].includes(status)) {
+      throw new Error("status must be active, on_hold, done or dropped.");
+    }
+    const patch = {
+      ...(s(input.name) ? { name: s(input.name)! } : {}),
+      ...(s(input.work_stream)
+        ? { work_stream_id: await strictWorkStream(supabase, s(input.work_stream)) }
+        : {}),
+      ...(status ? { status: status as Database["public"]["Enums"]["project_status"] } : {}),
+      ...(typeof input.note === "string" ? { notes: s(input.note) } : {}),
+    };
+    if (!Object.keys(patch).length) {
+      throw new Error("Nothing to change: give a name, work_stream, status or note.");
+    }
+    const { error } = await supabase.from("projects").update(patch).eq("id", projectId);
+    if (error) throw new Error(error.message);
+    return {
+      summary: `Project updated: ${patch.name ?? prev.name}.`,
+      undo: { project_id: projectId, prev },
+    };
+  },
+
+  async update_work_stream(supabase, userId, input) {
+    const name = s(input.name);
+    if (!name) throw new Error("name is required: the work stream's name as it exists.");
+    const { data: streams } = await supabase
+      .from("work_streams")
+      .select("id, name, hourly_rate, scan_hint")
+      .eq("user_id", userId);
+    const pick = pickWorkStream(streams ?? [], name);
+    if (!pick.ok) throw new Error(pick.message);
+    const row = (streams ?? []).find((w) => w.id === pick.id)!;
+    // The same check Settings uses: a hint is one line, 200 characters at
+    // most, and an empty one clears it; a rate is a number, zero or more.
+    const edit = checkStreamEdit(
+      typeof input.hourly_rate === "number" ? input.hourly_rate : undefined,
+      typeof input.scan_hint === "string" ? input.scan_hint : undefined
+    );
+    if (!edit.ok) throw new Error(edit.message);
+    if (!Object.keys(edit.patch).length) {
+      throw new Error("Nothing to change: give a scan_hint or an hourly_rate.");
+    }
+    const { error } = await supabase.from("work_streams").update(edit.patch).eq("id", row.id);
+    if (error) throw new Error(error.message);
+    const prev: Record<string, unknown> = {};
+    if ("hourly_rate" in edit.patch) prev.hourly_rate = row.hourly_rate;
+    if ("scan_hint" in edit.patch) prev.scan_hint = row.scan_hint;
+    return {
+      summary: `Work stream ${row.name} updated.`,
+      undo: { work_stream_id: row.id, prev },
+    };
+  },
+
+  async add_trip_checklist(supabase, userId, input) {
+    const tripId = s(input.trip_id);
+    if (!tripId) throw new Error("trip_id is required.");
+    // The one seeding path: a step the trip already carries is never added
+    // twice (lib/trips/write.ts seedTripChecklist).
+    const r = await addTripChecklist(supabase, userId, tripId);
+    if (!r.ok) throw new Error(r.message);
+    return {
+      summary: `${r.ids.length} checklist ${r.ids.length === 1 ? "step" : "steps"} added to the trip.`,
+      undo: { trip_id: tripId, task_ids: r.ids },
+    };
+  },
+
+  async sync_trip_hotel_step(supabase, userId, input) {
+    const tripId = s(input.trip_id);
+    if (!tripId) throw new Error("trip_id is required.");
+    const r = await syncTripHotelStep(supabase, userId, tripId);
+    const c = r.changes;
+    const changed = c.created.length + c.updated.length + c.dropped.length;
+    // A refusal that changed nothing is an error; one that still corrected
+    // the onward note is recorded, so that change can be undone too.
+    if (!r.ok && !changed) throw new Error(r.message);
+    return {
+      summary: r.ok
+        ? r.note
+        : `${r.message} ${changed} other ${changed === 1 ? "step was" : "steps were"} still brought in line; undo reverses that.`,
+      undo: { trip_id: tripId, changes: c },
+    };
+  },
+
+  async update_trip_leg(supabase, userId, input) {
+    const tripId = s(input.trip_id);
+    if (!tripId) throw new Error("trip_id is required.");
+    const { data: trip } = await supabase
+      .from("trips")
+      .select("legs")
+      .eq("id", tripId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (!trip) throw new Error("Trip not found.");
+    const r = editLeg(trip.legs, input.leg_index, input);
+    if (!r.ok) throw new Error(r.message);
+    const w = await updateTrip(supabase, userId, tripId, { legs: r.legs });
+    if (!w.ok) throw new Error(w.message);
+    return {
+      summary: `Leg updated: ${r.leg!.from} to ${r.leg!.to} on ${formatDateIST(`${r.leg!.date}T00:00:00+05:30`)}.`,
+      // The raw column as it was, not a re-parsed copy: undo is exact.
+      undo: { trip_id: tripId, raw_legs: trip.legs },
+    };
+  },
+
+  async remove_trip_leg(supabase, userId, input) {
+    const tripId = s(input.trip_id);
+    if (!tripId) throw new Error("trip_id is required.");
+    const { data: trip } = await supabase
+      .from("trips")
+      .select("legs")
+      .eq("id", tripId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (!trip) throw new Error("Trip not found.");
+    const r = removeLeg(trip.legs, input.leg_index);
+    if (!r.ok) throw new Error(r.message);
+    const w = await updateTrip(supabase, userId, tripId, { legs: r.legs });
+    if (!w.ok) throw new Error(w.message);
+    return {
+      summary: `Leg removed: ${r.leg!.from} to ${r.leg!.to} on ${formatDateIST(`${r.leg!.date}T00:00:00+05:30`)}. Undo puts it back.`,
+      undo: { trip_id: tripId, raw_legs: trip.legs },
     };
   },
 };
@@ -1749,6 +1949,14 @@ const UNDOABLE = new Set([
   "add_trip_expense",
   // B20: the morning sweep's drop of closed windows.
   "lapse_tasks",
+  // B22.
+  "update_trip_expense",
+  "update_project",
+  "update_work_stream",
+  "add_trip_checklist",
+  "sync_trip_hotel_step",
+  "update_trip_leg",
+  "remove_trip_leg",
   "save_reply_draft",
 ]);
 
@@ -1830,32 +2038,11 @@ async function performUndo(
       const prev = (undo.prev ?? {}) as Record<string, unknown>;
       // "undo" puts the snapshot back exactly as it was, priority provenance
       // included, and is still refused if he has rated the task by hand since.
-      const r = await updateTask(supabase, userId, String(undo.task_id), {
-        title: prev.title as string | undefined,
-        notes: (prev.notes as string | null | undefined) ?? null,
-        status: prev.status as TaskInput["status"],
-        priority: prev.priority as TaskInput["priority"],
-        priority_source: prev.priority_source as TaskInput["priority_source"],
-        priority_reason: (prev.priority_reason as string | null | undefined) ?? null,
-        due_ts: (prev.due_ts as string | null | undefined) ?? null,
-        // A snapshot taken before B19 has no not_before key at all; leave the
-        // column alone then rather than clearing a date set since.
-        ...("not_before" in prev
-          ? { not_before: (prev.not_before as string | null) ?? null }
-          : {}),
-        // B20, same rule: a snapshot without the key leaves the column alone.
-        ...("lapses_on" in prev
-          ? { lapses_on: (prev.lapses_on as string | null) ?? null }
-          : {}),
-        ...(typeof prev.work_stream_id === "string"
-          ? { work_stream_id: prev.work_stream_id }
-          : {}),
-        remind_offsets: prev.remind_offsets as number[] | undefined,
-        reminder_mode: isReminderMode(prev.reminder_mode)
-          ? prev.reminder_mode
-          : undefined,
-        trip_id: (prev.trip_id as string | null | undefined) ?? null,
-      }, "undo");
+      // A snapshot taken before a column existed (B19 not_before, B20
+      // lapses_on, B22 billable, project, repeat rule) leaves that column
+      // alone rather than clearing a value set since: taskUndoPatch, pure in
+      // lib/tasks/tool-fields.ts and proved in scripts/b22.test.ts.
+      const r = await updateTask(supabase, userId, String(undo.task_id), taskUndoPatch(prev), "undo");
       if (!r.ok) throw new Error(r.message);
       return;
     }
@@ -2017,6 +2204,20 @@ async function performUndo(
         end_date: (prev.end_date as string | null) ?? null,
         bills_to: prev.bills_to as Database["public"]["Enums"]["trip_bills_to"],
         notes: (prev.notes as string | null) ?? null,
+        // B22. The snapshot always carried these; undo now puts them back
+        // too. A snapshot without the key leaves the column alone.
+        ...("cities" in prev
+          ? { cities: Array.isArray(prev.cities) ? (prev.cities as string[]) : [] }
+          : {}),
+        ...("hotel_arrangement" in prev
+          ? { hotel_arrangement: (prev.hotel_arrangement as HotelArrangement | null) ?? null }
+          : {}),
+        ...("session_label" in prev
+          ? { session_label: (prev.session_label as string | null) ?? null }
+          : {}),
+        ...("session_date" in prev
+          ? { session_date: (prev.session_date as string | null) ?? null }
+          : {}),
       });
       if (!r.ok) throw new Error(r.message);
       return;
@@ -2080,6 +2281,74 @@ async function performUndo(
         { id: account.id, email: account.email, slot: account.slot, provider: account.provider },
         { draft_id: String(undo.draft_id ?? ""), version: String(undo.version ?? "") }
       );
+      return;
+    }
+    // --- B22 ---------------------------------------------------------------
+    case "update_trip_expense": {
+      const r = await updateTripExpense(
+        supabase,
+        userId,
+        String(undo.expense_id),
+        (undo.prev ?? {}) as Partial<ExpenseRow>
+      );
+      if (!r.ok) throw new Error(r.message);
+      return;
+    }
+    case "update_project": {
+      const prev = (undo.prev ?? {}) as Record<string, unknown>;
+      const { error } = await supabase
+        .from("projects")
+        .update({
+          name: prev.name as string,
+          work_stream_id: prev.work_stream_id as string,
+          status: prev.status as Database["public"]["Enums"]["project_status"],
+          notes: (prev.notes as string | null) ?? null,
+        })
+        .eq("id", String(undo.project_id));
+      if (error) throw new Error(error.message);
+      return;
+    }
+    case "update_work_stream": {
+      const prev = (undo.prev ?? {}) as { hourly_rate?: number | null; scan_hint?: string | null };
+      const { error } = await supabase
+        .from("work_streams")
+        .update(prev)
+        .eq("id", String(undo.work_stream_id));
+      if (error) throw new Error(error.message);
+      return;
+    }
+    case "add_trip_checklist": {
+      // Only the steps this action added, and nothing else on the trip.
+      const ids = Array.isArray(undo.task_ids)
+        ? (undo.task_ids as unknown[]).filter((v): v is string => typeof v === "string")
+        : [];
+      for (const taskId of ids) await deleteTask(supabase, userId, taskId);
+      return;
+    }
+    case "sync_trip_hotel_step": {
+      const c = (undo.changes ?? { created: [], updated: [], dropped: [] }) as HotelSyncChanges;
+      for (const id of c.created ?? []) await deleteTask(supabase, userId, id);
+      for (const u of c.updated ?? []) {
+        const r = await updateTask(supabase, userId, u.id, { title: u.prev.title, notes: u.prev.notes, due_ts: u.prev.due_ts }, "undo");
+        if (!r.ok) throw new Error(r.message);
+      }
+      for (const d of c.dropped ?? []) {
+        // A step he has moved since is left where he put it.
+        const { data } = await supabase.from("tasks").select("status").eq("id", d.id).maybeSingle();
+        if (data?.status === "dropped") {
+          await setTaskStatus(supabase, userId, d.id, d.prev_status as NonNullable<TaskInput["status"]>);
+        }
+      }
+      return;
+    }
+    case "update_trip_leg":
+    case "remove_trip_leg": {
+      // The raw jsonb exactly as it was read, written straight back, so the
+      // restore is byte for byte.
+      const r = await updateTrip(supabase, userId, String(undo.trip_id), {
+        legs: (undo.raw_legs ?? []) as TripLeg[],
+      });
+      if (!r.ok) throw new Error(r.message);
       return;
     }
     default:

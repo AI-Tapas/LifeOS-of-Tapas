@@ -21,6 +21,8 @@ const TABLES = [
   // M7c: the chat transcript is his own words about his own work, in the same
   // sensitivity class as assistant_persona. It was missing from this list.
   "assistant_chat_turns",
+  // B22: the stored morning brief.
+  "briefs",
 ];
 
 function localEnv() {

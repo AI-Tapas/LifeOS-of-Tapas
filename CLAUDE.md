@@ -1139,7 +1139,10 @@ stream name that never overwrite a hint already written. Health gets none.
   (`isTicketSender`, `isCabReceiptSender`, joined in `mayReadMailContent`,
   which readTicketMail checks itself), approved by Tapas by name on
   27 September 2026. No other sender, ever. Adding a sender to either list is
-  a decision for Tapas, not a diff.
+  a decision for Tapas, not a diff. That rule is for the SCAN. Since B22 there
+  is one more reader, outside the scan (lifeos_read_mail_attachment, see the
+  B22 section):
+  "any attachment, one at a time, only when Tapas or his agent asks for that named attachment, approved 28 September 2026".
 - Repeats: the scan fetches Gmail threadId and Graph conversationId, and
   `dropKnownMail` drops, before the model, mail whose thread has an open task
   or one from the last 45 days, and mail whose sha256(sender, normalised
@@ -1214,3 +1217,82 @@ the expense row is the existing trip_expenses shape.
   The app still builds no invoice.
 - Tests: `npm run test:b21` (16 offline, synthetic receipts, one real unpdf
   extraction).
+
+## Connector completeness (B22)
+
+Migration `20260928000100_b22_brief_store.sql` (the `briefs` table). NOT
+applied anywhere when it was written; apply it before (or with) the deploy of
+this code, since the brief cron writes to it. Additive only.
+
+- The problem: a 28 September 2026 audit found app capabilities the MCP
+  connector (and so the AI workforce in `Agents/`) could not reach. Every tool
+  below is on both connectors (`/api/mcp`, `/api/mcp/http`) with the
+  `lifeos_` prefix, and on the in-app chat.
+- New write tools, all in the registry (lib/assistant/tools.ts), autonomous,
+  disclosure app_data, a B10 target each where they take an id, and an undo
+  each: `update_trip_expense` (receipt_ref, billable, amount, date, category;
+  trip_expenses has NO description column, so there is none to change),
+  `update_project` (name, work_stream, status, note), `update_work_stream`
+  (scan_hint, hourly_rate, by stream name; the same check as Settings,
+  `checkStreamEdit` in lib/tasks/stream.ts, 200-character hint),
+  `add_trip_checklist` and `sync_trip_hotel_step` (the trip screen's two
+  buttons, moved into lib/trips/write.ts `addTripChecklist` and
+  `syncTripHotelStep`; the B16 no-duplicate rule is seedTripChecklist's),
+  `update_trip_leg` and `remove_trip_leg` (lib/trips/legs.ts; leg_index is
+  the position in lifeos_list_trips, which now prints it, counted from 0; undo
+  writes back the raw jsonb exactly as it was read). Removing a leg edits the
+  trip. There is still NO delete tool for a trip, an expense or a project.
+- Extended: create_task and update_task take `project_id` (checked against
+  his projects, lib/tasks/tool-fields.ts `resolveTaskExtras`) and
+  `recurring_rule`; update_task also `billable`. The update snapshot is
+  `TASK_UNDO_COLUMNS` and the restore `taskUndoPatch`, both in tool-fields.ts.
+  update_trip takes `cities`, and its undo now also restores cities, the hotel
+  arrangement and the session fields its snapshot always carried.
+  lifeos_list_tasks returns billable, project, lapses_on, recurring_rule,
+  reminder_mode, created_at and completed_at, and its search matches the note
+  too. get_context prints the stream and created date on every task row,
+  scanned-email rows included, still inside the fence (lib/assistant/
+  context-tasks.ts); the 30-row cap stays on the query.
+- New read tools (mcp-api.ts): `lifeos_get_month_pack` (monthPackFromRows in
+  lib/trips/month.ts, the same mapping the Month pack screen uses; still no
+  invoice, no total), `lifeos_list_trip_expenses`, `lifeos_get_last_brief`,
+  `lifeos_list_scan_runs` (lib/assistant/scan-runs.ts, counts and ids only
+  from the cron_scan, 3 AM mail_scan and tasks_lapsed audit rows, never
+  notes, rejection reasons or mail text), `lifeos_list_work_streams`,
+  `lifeos_search` (lib/assistant/search.ts: tasks, notes, people, trips, every
+  word must appear, 25 results, 120-character excerpt, email-sourced excerpts
+  fenced), `lifeos_report_lapsed_tasks` and `lifeos_report_premature_tasks`
+  (the two scripts' logic moved to lib/tasks/reports.ts; the scripts
+  re-export it), and `lifeos_read_mail_attachment`. The m4 naming rule for
+  read tools now also accepts `lifeos_search` and `lifeos_report_`.
+- The in-app chat is offered the B22 reads (`IN_APP_READ_TOOLS`,
+  `inAppReadTools` in mcp-api.ts; tools.ts `LlmTool` is what a model is shown
+  of a tool). The chat route sends those names to runReadTool with its own
+  cookie actor, so RLS applies, and everything else to executeToolCall as
+  before. They are not registry tools, have no bucket and change nothing.
+- The brief store: the cron keeps the composed text (`keepBrief`,
+  lib/brief/store.ts and store-db.ts) in `briefs`, one row per IST day, and
+  deletes rows older than 30 days in the same run. A table, not an audit row:
+  audit_log is append-only and cannot be trimmed, and the brief carries task
+  titles, some from scanned mail. RLS owner-only, anon revoked; the cron and
+  the connectors reach it as service_role and scope by user_id. A failure to
+  keep it never stops the send.
+- Attachment text, on request only (lib/assistant/attachment.ts): ONE named
+  PDF or Word .docx attachment of a thread in taxstrategia, ca_tapasnr or
+  altechon (checkMailSlot refuses icai), 5 MB at most (refused before
+  download on the provider's size and again on the real length), 20,000
+  characters at most, fenced as untrusted. PDF through the B20 unpdf reader
+  (`pdfText` now takes a cap). DOCX through lib/assistant/docx-text.ts: the
+  zip central directory read by hand and `word/document.xml` inflated with
+  Node's built-in zlib, no new dependency, output capped against zip bombs.
+  The audit row (`mail_attachment_read`) is written before the text is handed
+  over and carries account, thread_id and attachment_name only; if it cannot
+  be written nothing is handed over. It rides the existing mail_body class
+  (the union still has five members). The nightly scan is unchanged and never
+  reaches this module; scripts/b22.test.ts fails if scan.ts names it.
+- Approved the same day: ICAI mail asking a branch to coordinate faculty or
+  travel arrangements for an AICA batch is never a task.
+  `matchesNeverExtract` returns `BRANCH_COORDINATION` when "coordinat",
+  "faculty" or "travel", and "batch" all appear, and SCAN_SYSTEM says so.
+- Tests: `npm run test:b22` (28 offline, synthetic data, a real unpdf
+  extraction and a real hand-built .docx).

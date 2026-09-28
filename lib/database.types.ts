@@ -288,6 +288,33 @@ export type Database = {
         }
         Relationships: []
       }
+      briefs: {
+        Row: {
+          body_text: string
+          brief_date: string
+          created_at: string
+          id: string
+          subject: string
+          user_id: string
+        }
+        Insert: {
+          body_text?: string
+          brief_date: string
+          created_at?: string
+          id?: string
+          subject?: string
+          user_id?: string
+        }
+        Update: {
+          body_text?: string
+          brief_date?: string
+          created_at?: string
+          id?: string
+          subject?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       calendars: {
         Row: {
           account_id: string

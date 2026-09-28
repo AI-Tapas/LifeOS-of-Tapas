@@ -11,7 +11,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { llmConfig, type LlmConfig, type LlmOverride } from "./config";
 import type { SystemBlock } from "./prompt";
-import { anthropicTools, type ToolDef } from "./tools";
+import { anthropicTools, type LlmTool } from "./tools";
 import {
   toAnthropicMessages,
   toOpenAIMessages,
@@ -33,7 +33,7 @@ export interface LlmTurn {
 export interface LlmTurnRequest {
   blocks: SystemBlock[];
   conv: ConvMessage[];
-  tools: ToolDef[];
+  tools: LlmTool[];
   maxTokens?: number;
   onText?: (delta: string) => void;
   // Per-activity model choice from Settings; falls back to the environment.

@@ -27,3 +27,35 @@ export function pickWorkStream(streams: StreamRow[], name: string | null): Strea
     message: `There is no work stream called "${name!.trim()}". Use one of: ${names.join(", ")}.`,
   };
 }
+
+// B22. One work stream's rate and mail scan hint, checked the same way for
+// Settings (setWorkStreamRateAction) and for update_work_stream. undefined
+// means unchanged. A hint is one line of plain text, at most 200 characters
+// (the column's own check); an empty hint clears it. A rate is rupees an hour,
+// zero or more; null clears it, which only Settings can ask for.
+export const SCAN_HINT_MAX = 200;
+
+export type StreamEdit =
+  | { ok: true; patch: { hourly_rate?: number | null; scan_hint?: string | null } }
+  | { ok: false; message: string };
+
+export function checkStreamEdit(
+  rate: number | null | undefined,
+  scanHint: string | null | undefined
+): StreamEdit {
+  if (rate !== undefined && rate !== null && (!Number.isFinite(rate) || rate < 0)) {
+    return { ok: false, message: "A rate must be a number." };
+  }
+  const hint =
+    scanHint === undefined ? undefined : (scanHint ?? "").replace(/\s+/g, " ").trim() || null;
+  if (hint && hint.length > SCAN_HINT_MAX) {
+    return { ok: false, message: `Keep the mail scan hint to ${SCAN_HINT_MAX} characters.` };
+  }
+  return {
+    ok: true,
+    patch: {
+      ...(rate !== undefined ? { hourly_rate: rate } : {}),
+      ...(hint !== undefined ? { scan_hint: hint } : {}),
+    },
+  };
+}

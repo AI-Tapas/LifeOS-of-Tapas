@@ -11,7 +11,7 @@ import {
   formatDateTimeIST,
   formatWeekdayIST,
 } from "@/lib/datetime";
-import { fenceUntrusted } from "./prompt";
+import { taskContextLines } from "./context-tasks";
 import { streamRateLine, type StreamRate } from "@/lib/money/rates";
 import {
   RECOVERY_ADVICE,
@@ -46,7 +46,7 @@ export async function buildAppContext(supabase: Db): Promise<string> {
       supabase
         .from("tasks")
         .select(
-          "id, title, status, priority, priority_source, priority_reason, due_ts, not_before, source, work_stream_id, work_streams(name)"
+          "id, title, status, priority, priority_source, priority_reason, due_ts, not_before, source, created_at, work_stream_id, work_streams(name)"
         )
         .in("status", ["inbox", "todo", "doing"])
         .order("due_ts", { ascending: true, nullsFirst: false })
@@ -103,73 +103,18 @@ export async function buildAppContext(supabase: Db): Promise<string> {
         .join("; ") || "none")
   );
 
-  // B19. A task that cannot start before a later date is not on today's
-  // list, so it is kept out of "Open tasks" and named apart with its start
-  // date: the model still has its id (to update it, or to avoid adding it
-  // twice) but is told plainly that it is neither current nor urgent.
-  // Mail-derived rows all stay inside the untrusted fence, waiting or not.
-  const todayKey = civilKey(today);
-  const isWaiting = (t: { not_before: string | null }) =>
-    !!t.not_before && t.not_before > todayKey;
-  const startsLabel = (t: { not_before: string | null }) =>
-    formatDateIST(`${t.not_before}T04:00:00Z`);
-  const trusted = (tasks ?? []).filter((t) => t.source !== "email" && !isWaiting(t));
-  const waiting = (tasks ?? []).filter((t) => t.source !== "email" && isWaiting(t));
-  const fromMail = (tasks ?? []).filter((t) => t.source === "email");
-
-  // "set by" is not decoration: a priority marked Tapas is his own judgment
-  // and may never be changed, whatever the assistant now thinks. The reason
-  // column is there so a rating it gave earlier can be revisited honestly.
-  const rating = (t: {
-    priority: string;
-    priority_source: string;
-    priority_reason: string | null;
-  }) =>
-    `${t.priority} | ${
-      t.priority_source === "manual" ? "Tapas, do not change" : "assistant"
-    }${t.priority_reason ? ` | ${t.priority_reason}` : ""}`;
-
+  // B19 and B22. Waiting tasks are named apart, mail-derived rows stay inside
+  // the untrusted fence, and every row names its stream and created date.
+  // The rendering is pure in context-tasks.ts; the 30-row cap is the query's.
   lines.push(
-    "",
-    "Open tasks (id | title | stream | priority | set by | why | due | status):"
+    ...taskContextLines(
+      (tasks ?? []).map((t) => ({
+        ...t,
+        stream: (t.work_streams as { name: string } | null)?.name ?? "?",
+      })),
+      civilKey(today)
+    )
   );
-  if (!trusted.length) lines.push("  none");
-  for (const t of trusted) {
-    const stream = (t.work_streams as { name: string } | null)?.name ?? "?";
-    lines.push(
-      `  ${t.id} | ${t.title} | ${stream} | ${rating(t)} | ${
-        t.due_ts ? formatDateIST(t.due_ts) : "no due date"
-      } | ${t.status}`
-    );
-  }
-
-  if (waiting.length) {
-    lines.push(
-      "",
-      "Waiting for their start date (cannot start yet, never urgent before then; not for today) (id | title | starts | due):"
-    );
-    for (const t of waiting) {
-      lines.push(
-        `  ${t.id} | ${t.title} | ${startsLabel(t)} | ${
-          t.due_ts ? formatDateIST(t.due_ts) : "no due date"
-        }`
-      );
-    }
-  }
-
-  if (fromMail.length) {
-    const body = fromMail
-      .map(
-        (t) =>
-          `${t.id} | ${t.title} | ${rating(t)} | ${
-            t.due_ts ? formatDateIST(t.due_ts) : "no due date"
-          } | ${t.status}${
-            isWaiting(t) ? ` | waiting, cannot start before ${startsLabel(t)}` : ""
-          }`
-      )
-      .join("\n");
-    lines.push("", fenceUntrusted("tasks created from scanned email", body));
-  }
 
   lines.push("", "Events in the next 7 days:");
   if (!events?.length) lines.push("  none synced");

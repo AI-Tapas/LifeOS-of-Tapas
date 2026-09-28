@@ -12,6 +12,8 @@ import { buildAppContext, loadActivePersona } from "@/lib/assistant/context";
 import { loadLlmOverride } from "@/lib/assistant/settings";
 import { TOOLS } from "@/lib/assistant/tools";
 import { executeToolCall } from "@/lib/assistant/execute";
+import { cookieActor } from "@/lib/assistant/actor";
+import { IN_APP_READ_TOOLS, inAppReadTools, runReadTool } from "@/lib/assistant/mcp-api";
 import type { ConvMessage } from "@/lib/assistant/wire";
 
 export const runtime = "nodejs";
@@ -81,7 +83,8 @@ export async function POST(req: Request): Promise<Response> {
           const result = await runLlmTurn({
             blocks,
             conv,
-            tools: TOOLS,
+            // B22: the registry plus the B22 reads, which change nothing.
+            tools: [...TOOLS, ...inAppReadTools()],
             override,
             onText: (d) => emit({ t: "text", d }),
           });
@@ -108,12 +111,19 @@ export async function POST(req: Request): Promise<Response> {
             let reply: string;
             let isError = false;
             try {
-              const outcome = await executeToolCall(call.name, call.input);
+              // B22: a read runs as this signed-in owner (RLS applies) and
+              // hands back data; everything else goes through the executor,
+              // whose buckets decide, exactly as before.
+              const isRead = (IN_APP_READ_TOOLS as readonly string[]).includes(call.name);
+              const outcome = isRead
+                ? { reply: JSON.stringify(await runReadTool(call.name, call.input, await cookieActor())), queued: false }
+                : await executeToolCall(call.name, call.input);
               reply = outcome.reply;
               emit({
                 t: "tool",
                 name: call.name,
-                summary: outcome.reply,
+                // A read's data goes to the model, not onto the chip.
+                summary: isRead ? `Read with ${call.name}.` : outcome.reply,
                 queued: outcome.queued ?? false,
               });
             } catch (e) {
