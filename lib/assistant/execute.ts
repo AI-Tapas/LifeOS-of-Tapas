@@ -1437,13 +1437,14 @@ const performers: Record<string, Performer> = {
     const row = (streams ?? []).find((w) => w.id === pick.id)!;
     // The same check Settings uses: a hint is one line, 200 characters at
     // most, and an empty one clears it; a rate is a number, zero or more.
+    // ponytail: the rate is never set by a model (M7b rule); Settings only.
     const edit = checkStreamEdit(
-      typeof input.hourly_rate === "number" ? input.hourly_rate : undefined,
+      undefined,
       typeof input.scan_hint === "string" ? input.scan_hint : undefined
     );
     if (!edit.ok) throw new Error(edit.message);
     if (!Object.keys(edit.patch).length) {
-      throw new Error("Nothing to change: give a scan_hint or an hourly_rate.");
+      throw new Error("Nothing to change: give a scan_hint.");
     }
     const { error } = await supabase.from("work_streams").update(edit.patch).eq("id", row.id);
     if (error) throw new Error(error.message);

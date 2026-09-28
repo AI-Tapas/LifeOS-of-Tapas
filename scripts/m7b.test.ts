@@ -573,10 +573,6 @@ test("no tool quotes, invoices or tracks time on the back of the rate", () => {
       (t.input_schema as { properties?: Record<string, unknown> }).properties ?? {}
     );
     for (const p of props) {
-      // B22, approved by Tapas on 28 September 2026: update_work_stream may
-      // set a stream's rate, the one number Settings holds, with an undo. It
-      // quotes, invoices and tracks nothing, and it is the only exception.
-      if (t.name === "update_work_stream" && p === "hourly_rate") continue;
       assert.doesNotMatch(
         p,
         /^(hourly_rate|rate_per_hour|hours|quote)/i,

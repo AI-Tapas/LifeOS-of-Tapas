@@ -812,13 +812,12 @@ export const TOOLS: ToolDef[] = [
     bucket: "autonomous",
     disclosure: "app_data",
     description:
-      "Change a work stream's mail scan hint (one line, at most 200 characters, saying what mail belongs in it) or its hourly rate in rupees. The same rules as Settings. Undo restores the old values.",
+      "Change a work stream's mail scan hint (one line, at most 200 characters, saying what mail belongs in it). The same rule as Settings. The hourly rate is Tapas's to set in Settings only. Undo restores the old hint.",
     input_schema: schema({
       name: str("The work stream's name exactly as it exists, from lifeos_list_work_streams."),
       scan_hint: strOrNull(
         "One line of plain text, at most 200 characters, telling the nightly mail scan what belongs in this stream. An empty string clears it. Omit to keep."
       ),
-      hourly_rate: numOrNull("Rate per hour in rupees. Omit to keep."),
     }),
   },
   {
