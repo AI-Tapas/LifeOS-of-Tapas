@@ -21,6 +21,7 @@ import {
   type TripRollup,
 } from "@/lib/tasks/trip-rollup";
 import type { PrioritySource } from "@/lib/tasks/priority";
+import { NEEDS_YOU_HREF, needsYouCount, needsYouLine } from "@/lib/tasks/agent-display";
 import {
   reviewHorizonKey,
   reviewLine,
@@ -103,7 +104,7 @@ export default async function DashboardPage() {
       supabase
         .from("tasks")
         .select(
-          "id, title, status, priority, priority_source, priority_reason, due_ts, not_before, work_stream_id, trip_id"
+          "id, title, status, priority, priority_source, priority_reason, due_ts, not_before, work_stream_id, trip_id, agent_status"
         )
         .in("status", ["inbox", "todo", "doing"]),
       // Trip checklist steps with their trip. Travel admin does not stand in
@@ -182,6 +183,8 @@ export default async function DashboardPage() {
     // B19: work that cannot start yet is counted, never listed or urgent.
     waiting_count: bandsRaw.waiting.length,
   };
+  // B26: agent results waiting on him, over every open task (trip steps too).
+  const agentLine = needsYouLine(needsYouCount((tasks ?? []) as Row[]));
   const inboxCount = open.filter((t) => t.status === "inbox").length;
   const narrative = narrativeLine(bands);
 
@@ -290,6 +293,16 @@ export default async function DashboardPage() {
             for your approval.
           </span>
           <span className="shrink-0 text-sm font-medium text-waiting">Review</span>
+        </Link>
+      )}
+
+      {agentLine && (
+        <Link
+          href={NEEDS_YOU_HREF}
+          className="press mt-3 flex items-center gap-2.5 rounded-2xl border border-border bg-surface p-3.5"
+        >
+          <span className="flex-1 text-[13.5px] text-foreground">{agentLine}</span>
+          <span className="shrink-0 text-sm font-medium text-accent">Tasks</span>
         </Link>
       )}
 

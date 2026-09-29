@@ -18,6 +18,7 @@ import { syncTaskReminder, removeTaskReminder } from "@/lib/reminders/writer";
 import type { ReminderMode } from "@/lib/reminders/core";
 import { nextOccurrence, isValidRecurringRule } from "@/lib/tasks/recurring";
 import { startDateProblem } from "@/lib/tasks/triage";
+import { INSTRUCTION_MAX, isBlank } from "@/lib/tasks/agent-instructions";
 import { runStatusTransition, type TransitionOutcome } from "@/lib/tasks/transitions";
 import {
   decidePriorityWrite,
@@ -74,6 +75,27 @@ export interface TaskInput {
   // Read on the "undo" origin only, to put a snapshot back exactly as it was.
   // No tool schema declares this field, so a model cannot reach it.
   priority_source?: PrioritySource;
+  // B26. Tapas's instruction to his agents. Read ONLY when origin is "app"
+  // (his own drawer); every other origin drops it here, and the database
+  // trigger guard_task_agent_instructions refuses anyone but his owner
+  // session anyway. No tool schema declares this field.
+  agent_instructions?: string | null;
+}
+
+// B26. The instruction as it will be stored: blank is null, otherwise the text
+// as typed with the ends trimmed. Undefined means "not part of this write":
+// only his own form (origin "app") can ever put it in one.
+function instructionFor(
+  origin: PriorityOrigin,
+  value: string | null | undefined
+): { ok: true; value: string | null | undefined } | { ok: false; message: string } {
+  if (origin !== "app" || value === undefined) return { ok: true, value: undefined };
+  if (isBlank(value)) return { ok: true, value: null };
+  const text = (value as string).trim();
+  if (text.length > INSTRUCTION_MAX) {
+    return { ok: false, message: `The instructions for agents are ${text.length} characters; the limit is ${INSTRUCTION_MAX}.` };
+  }
+  return { ok: true, value: text };
 }
 
 export type TaskResult =
@@ -112,6 +134,8 @@ export async function createTask(
   if (!isDateOrEmpty(input.lapses_on)) {
     return { ok: false, message: "The lapse date must be YYYY-MM-DD." };
   }
+  const instruction = instructionFor(origin, input.agent_instructions);
+  if (!instruction.ok) return { ok: false, message: instruction.message };
   const decision = decidePriorityWrite(origin, input, null);
   if (decision.kind === "refuse") return { ok: false, message: decision.message };
   const priorityFields =
@@ -140,6 +164,7 @@ export async function createTask(
       external_ref: input.external_ref ?? null,
       external_thread: input.external_thread ?? null,
       source_key: input.source_key ?? null,
+      ...(instruction.value ? { agent_instructions: instruction.value } : {}),
     })
     .select("id")
     .single();
@@ -169,6 +194,8 @@ export async function updateTask(
   if (!isDateOrEmpty(patch.lapses_on)) {
     return { ok: false, message: "The lapse date must be YYYY-MM-DD." };
   }
+  const instruction = instructionFor(origin, patch.agent_instructions);
+  if (!instruction.ok) return { ok: false, message: instruction.message };
   // A start date is judged against the due date the row will END UP with, so
   // when only one of the two is in the patch the other is read first. One
   // small read, only when either date is changing.
@@ -229,6 +256,7 @@ export async function updateTask(
       ...(patch.reminder_mode !== undefined
         ? { reminder_mode: patch.reminder_mode }
         : {}),
+      ...(instruction.value !== undefined ? { agent_instructions: instruction.value } : {}),
     })
     .eq("id", id);
   if (error) return { ok: false, message: error.message };
@@ -298,6 +326,10 @@ async function spawnNextOccurrence(
     )
     .eq("id", taskId)
     .single();
+  // B26. The column list above is fixed on purpose and names no agent_*
+  // column: the next occurrence starts with no instruction, no result and no
+  // status. An instruction is his order about THIS occurrence, and the
+  // database would refuse a service_role copy of it in any case.
   if (!t || !t.recurring_rule || !t.due_ts) return undefined;
   const next = nextOccurrence(t.recurring_rule, t.due_ts);
   if (!next) return undefined;

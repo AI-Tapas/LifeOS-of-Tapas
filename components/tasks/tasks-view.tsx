@@ -17,7 +17,9 @@ import {
   drawerFooterCls,
   inputCls,
 } from "@/components/ui";
-import { formatDateIST, formatTimeIST, istInstant, istDayKey } from "@/lib/datetime";
+import { formatDateIST, formatDateShortIST, formatTimeIST, istInstant, istDayKey } from "@/lib/datetime";
+import { agentMarker, agentStatusLine } from "@/lib/tasks/agent-display";
+import { INSTRUCTION_MAX } from "@/lib/tasks/agent-limits";
 import { triage, needsDeadline, isWaiting, waitingLine } from "@/lib/tasks/triage";
 import { unratedPrompt, type PrioritySource } from "@/lib/tasks/priority";
 import { rollUpTrips, type TripRollup, type TripStep } from "@/lib/tasks/trip-rollup";
@@ -61,6 +63,14 @@ export interface TaskRow {
   // dev-preview fixtures stay small; a row without it reads as 'calendar',
   // which is what every task did before M7a.
   reminder_mode?: "calendar" | "in_app";
+  // B26. Tapas's instruction to his agents and what they answered. All
+  // optional so the dev-preview fixtures stay small. agent_pending is worked
+  // out on the server (it needs the hash) and handed down as a boolean.
+  agent_instructions?: string | null;
+  agent_status?: string | null;
+  agent_result?: string | null;
+  agent_result_at?: string | null;
+  agent_pending?: boolean;
 }
 export interface ProjectRow {
   id: string;
@@ -107,6 +117,8 @@ interface TasksViewProps {
   // single task, so a note referencing one links here and the drawer opens.
   // An id that matches nothing simply opens nothing.
   openTaskId?: string;
+  // B26. Arrived from the Home line: only tasks agents have asked him about.
+  agentFilter?: boolean;
 }
 
 export default function TasksView({
@@ -126,8 +138,9 @@ function TasksBody({
   projects,
   workStreams,
   openTaskId,
+  agentFilter,
 }: TasksViewProps) {
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>(agentFilter ? "board" : "overview");
   const [editing, setEditing] = useState<TaskRow | "new" | null>(
     () => tasks.find((t) => t.id === openTaskId) ?? null
   );
@@ -169,6 +182,15 @@ function TasksBody({
       </div>
 
       <p className="mt-2 text-xs text-secondary">{TAB_HINTS[tab]}</p>
+
+      {agentFilter && (
+        <p className="mt-2 rounded-lg border border-border bg-surface p-2 text-xs text-secondary">
+          Showing only the tasks where agents need you.{" "}
+          <Link href="/tasks" className="font-medium text-accent">
+            Show all
+          </Link>
+        </p>
+      )}
 
       {notice && (
         <p className="mt-3 rounded-lg border border-today/30 bg-today-soft p-2 text-xs text-today">
@@ -305,6 +327,11 @@ function TaskItem({
           <span className={"truncate text-sm " + (done ? "line-through text-neutral-400" : "")}>
             {task.title}
           </span>
+          {agentMarker(task) && (
+            <span className="shrink-0 rounded-full bg-waiting-soft px-2 py-0.5 text-[10px] font-semibold text-waiting">
+              {agentMarker(task)}
+            </span>
+          )}
           <span className="ml-auto pl-1">
             <DueBadge
               dueTs={task.due_ts}
@@ -958,6 +985,8 @@ interface FormFields {
   onCalendar: boolean;
   // YYYY-MM-DD from the date input, or "" for "can start now".
   notBefore: string;
+  // B26. Blank means no instruction.
+  agentInstructions: string;
 }
 
 function taskToFields(t: TaskRow | null, workStreams: WorkStreamRow[]): FormFields {
@@ -984,6 +1013,7 @@ function taskToFields(t: TaskRow | null, workStreams: WorkStreamRow[]): FormFiel
     // which is what every task did before M7a.
     onCalendar: (t?.reminder_mode ?? "calendar") === "calendar",
     notBefore: t?.not_before ?? "",
+    agentInstructions: t?.agent_instructions ?? "",
   };
 }
 
@@ -1032,6 +1062,9 @@ function TaskForm({
       remind_offsets: offsets.length ? offsets : [7, 3, 1, 0],
       reminder_mode: f.onCalendar ? "calendar" : "in_app",
       not_before: f.notBefore || null,
+      // B26. Blank becomes null. Resending the text he opened the drawer
+      // with changes nothing in the database (the guard compares the text).
+      agent_instructions: f.agentInstructions.trim() ? f.agentInstructions : null,
     };
   }
 
@@ -1273,6 +1306,37 @@ function TaskForm({
           />
         </Field>
 
+        <Field label="Instructions for agents">
+          <textarea
+            value={f.agentInstructions}
+            onChange={(e) => setF({ ...f, agentInstructions: e.target.value.slice(0, INSTRUCTION_MAX) })}
+            maxLength={INSTRUCTION_MAX}
+            className={inputCls}
+            rows={3}
+            placeholder="What should your agents do on this task? They pick it up on the next sweep."
+          />
+        </Field>
+        <p className="-mt-1 text-right text-[11px] text-secondary">
+          {f.agentInstructions.length} / {INSTRUCTION_MAX}
+        </p>
+        {task && (agentStatusLine(task, resultWhen(task)) || task.agent_result) && (
+          <div className="rounded-lg border border-border bg-surface p-2.5">
+            <p className="text-xs font-semibold text-foreground">
+              {agentStatusLine(task, resultWhen(task)) ?? "Last result"}
+            </p>
+            {task.agent_result && (
+              <>
+                <p className="mt-1 whitespace-pre-wrap text-xs text-secondary">{task.agent_result}</p>
+                {task.agent_result_at && (
+                  <p className="mt-1 text-[11px] text-muted">
+                    Written {formatDateShortIST(task.agent_result_at)}, {formatTimeIST(task.agent_result_at)}
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
         {err && <p className="text-sm text-overdue">{err}</p>}
         <div className={drawerFooterCls + " flex gap-2"}>
           <button
@@ -1299,6 +1363,13 @@ function TaskForm({
       </div>
     </Drawer>
   );
+}
+
+// "29 Sept, 12:40 pm", the time an agent result was written.
+function resultWhen(t: TaskRow): string | null {
+  return t.agent_result_at
+    ? `${formatDateShortIST(t.agent_result_at)}, ${formatTimeIST(t.agent_result_at)}`
+    : null;
 }
 
 function hmFromIso(iso: string): string {

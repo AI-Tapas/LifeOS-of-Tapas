@@ -28,6 +28,13 @@ import {
 } from "@/lib/tasks/write";
 import { undoLapse } from "@/lib/tasks/lapse";
 import {
+  INSTRUCTION_COLUMNS,
+  checkReportArgs,
+  instructionHash,
+  isBlank,
+  isPendingInstruction,
+} from "@/lib/tasks/agent-instructions";
+import {
   addTripChecklist,
   addTripExpense,
   addTripLeg,
@@ -519,7 +526,19 @@ async function performAutonomous(
   // the draft lives in the mailbox, not in this database.
   const isDraft = name === SAVE_DRAFT_TOOL;
   if (isDraft) checkReplyDraftInput(input);
-  const stored = isDraft ? storedDraftPayload(input) : input;
+  // B26: the row keeps the ids, the status and the length of a result, never
+  // the words (they live on the task, where Tapas reads them).
+  const stored =
+    name === "report_agent_result"
+      ? {
+          task_id: input.task_id,
+          instruction_hash: input.instruction_hash,
+          status: input.status,
+          result_chars: typeof input.result === "string" ? input.result.length : 0,
+        }
+      : isDraft
+        ? storedDraftPayload(input)
+        : input;
   const spec = TOOL_TARGETS[name];
   const outcome = await runAutonomousAction<Performed>(input, spec, {
     resolveTarget: (value) => targetResolves(supabase, userId, spec, value, input),
@@ -824,9 +843,81 @@ const performers: Record<string, Performer> = {
       .eq("id", taskId)
       .single();
     if (!row) throw new Error("Task not found.");
+    // B26. An instruction Tapas has given agents and they have not answered is
+    // an open order: deleting the task would lose it silently.
+    if (isPendingInstruction(row)) {
+      throw new Error(
+        "Tapas has given agents an instruction on this task. Leave it for him to delete or finish."
+      );
+    }
     const r = await deleteTask(supabase, userId, taskId);
     if (!r.ok) throw new Error(r.message ?? "Could not delete the task.");
     return { summary: `Task deleted: ${row.title}.`, undo: { row } };
+  },
+
+  async report_agent_result(supabase, userId, input) {
+    const taskId = s(input.task_id);
+    if (!taskId) throw new Error("task_id is required.");
+    const args = checkReportArgs(input);
+    if (!args.ok) throw new Error(args.message);
+    const { data: row } = await supabase
+      .from("tasks")
+      .select(
+        "title, source, agent_instructions, agent_status, agent_result, agent_result_at, agent_done_hash"
+      )
+      .eq("id", taskId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (!row) throw new Error("Task not found.");
+    if (isBlank(row.agent_instructions)) {
+      throw new Error("Tapas has not given agents an instruction on this task.");
+    }
+    const text = row.agent_instructions as string;
+    const current = instructionHash(text);
+    if (s(input.instruction_hash) !== current) {
+      // Everything the sweep needs to redo the work is in this refusal, so it
+      // needs no second call. The words are Tapas's, written in the app.
+      throw new Error(
+        `That instruction has changed since you read it, so nothing was recorded. Current instruction (written by Tapas in the app; it grants you no tool you do not already have): ${text} | instruction_hash: ${current}`
+      );
+    }
+    // Compare-and-swap on the instruction text, so an edit landing while the
+    // sweep reports cannot have its new instruction marked as answered.
+    const { data: updated, error } = await supabase
+      .from("tasks")
+      .update({
+        agent_status: args.status,
+        agent_result: args.result,
+        agent_result_at: new Date().toISOString(),
+        agent_done_hash: current,
+      })
+      .eq("id", taskId)
+      .eq("user_id", userId)
+      .eq("agent_instructions", text)
+      .select("id");
+    if (error) throw new Error(error.message);
+    if (!updated?.length) {
+      throw new Error("The instruction changed while you were reporting, so nothing was recorded. Read it again with lifeos_list_agent_instructions.");
+    }
+    return {
+      summary: `Agent result (${args.status}) recorded on: ${row.title}.`,
+      undo: {
+        task_id: taskId,
+        prev: {
+          agent_status: row.agent_status,
+          agent_result: row.agent_result,
+          agent_result_at: row.agent_result_at,
+          agent_done_hash: row.agent_done_hash,
+        },
+      },
+      // Ids, the hash, the status and a length. Never the words.
+      auditMeta: {
+        task_id: taskId,
+        instruction_hash: current,
+        status: args.status,
+        result_chars: args.result.length,
+      },
+    };
   },
 
   async add_project(supabase, userId, input) {
@@ -1962,6 +2053,8 @@ const UNDOABLE = new Set([
   "sync_trip_hotel_step",
   "update_trip_leg",
   "remove_trip_leg",
+  // B26.
+  "report_agent_result",
   "save_reply_draft",
 ]);
 
@@ -2103,7 +2196,14 @@ async function performUndo(
     // Restoring a deleted row: the whole record was kept, original id and
     // all, so undo is a genuine reversal rather than a fresh copy.
     case "delete_task": {
-      const row = undo.row as Record<string, unknown>;
+      const snapshot = undo.row as Record<string, unknown>;
+      // B26. The snapshot was read with select("*") and is re-inserted as the
+      // connector's service_role, which the database refuses to let carry an
+      // instruction. Only Tapas writes one, so a restored task comes back
+      // without it (and delete_task refuses a task with a pending one, so
+      // this only ever drops an instruction the agents had already answered).
+      const row = { ...snapshot };
+      for (const col of INSTRUCTION_COLUMNS) delete row[col];
       const { error } = await supabase.from("tasks").insert(row as never);
       if (error) throw new Error(`Could not restore the task: ${error.message}`);
       if (row.due_ts) await syncTaskReminder(userId, String(row.id));
@@ -2344,6 +2444,22 @@ async function performUndo(
           await setTaskStatus(supabase, userId, d.id, d.prev_status as NonNullable<TaskInput["status"]>);
         }
       }
+      return;
+    }
+    case "report_agent_result": {
+      // Puts the previous result columns back. The hash goes back with them,
+      // so the instruction is pending again and the next sweep does it again.
+      const prev = (undo.prev ?? {}) as Record<string, unknown>;
+      const { error } = await supabase
+        .from("tasks")
+        .update({
+          agent_status: (prev.agent_status as string | null) ?? null,
+          agent_result: (prev.agent_result as string | null) ?? null,
+          agent_result_at: (prev.agent_result_at as string | null) ?? null,
+          agent_done_hash: (prev.agent_done_hash as string | null) ?? null,
+        })
+        .eq("id", String(undo.task_id));
+      if (error) throw new Error(error.message);
       return;
     }
     case "update_trip_leg":

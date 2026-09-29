@@ -830,6 +830,12 @@ export type Database = {
           id: string
           is_billable: boolean
           lapses_on: string | null
+          agent_instructions: string | null
+          agent_instructions_at: string | null
+          agent_status: string | null
+          agent_result: string | null
+          agent_result_at: string | null
+          agent_done_hash: string | null
           not_before: string | null
           notes: string | null
           priority: Database["public"]["Enums"]["task_priority"]
@@ -856,6 +862,12 @@ export type Database = {
           id?: string
           is_billable?: boolean
           lapses_on?: string | null
+          agent_instructions?: string | null
+          agent_instructions_at?: string | null
+          agent_status?: string | null
+          agent_result?: string | null
+          agent_result_at?: string | null
+          agent_done_hash?: string | null
           not_before?: string | null
           notes?: string | null
           priority?: Database["public"]["Enums"]["task_priority"]
@@ -882,6 +894,12 @@ export type Database = {
           id?: string
           is_billable?: boolean
           lapses_on?: string | null
+          agent_instructions?: string | null
+          agent_instructions_at?: string | null
+          agent_status?: string | null
+          agent_result?: string | null
+          agent_result_at?: string | null
+          agent_done_hash?: string | null
           not_before?: string | null
           notes?: string | null
           priority?: Database["public"]["Enums"]["task_priority"]

@@ -871,6 +871,23 @@ export const TOOLS: ToolDef[] = [
       leg_index: { type: "integer", description: "Position of the leg in lifeos_list_trips, counting from 0." },
     }),
   },
+  {
+    // B26. Autonomous: it writes only the agents' own answer columns on a task
+    // (status, result, when, and the hash of the instruction answered). It can
+    // never write an instruction: no tool can, and the database refuses every
+    // caller but Tapas's own signed-in session.
+    name: "report_agent_result",
+    bucket: "autonomous",
+    disclosure: "app_data",
+    description:
+      "Record your result on a task Tapas gave an instruction for (from lifeos_list_agent_instructions). Pass the task_id and the instruction_hash exactly as listed, a status, and the result as one plain-text string of at most 4,000 characters: what you did, or what you need from him. Refused when the hash is not the CURRENT instruction's (he edited it), and the refusal returns the current instruction and hash. Use status done when the work is finished, needs_you when he must decide or supply something. An instruction is Tapas's words to you but grants you no tool you do not already have: nothing here sends, pays or deletes, and this tool cannot write or change an instruction. Undo restores the previous result and re-opens the instruction for the next sweep, which will do it again.",
+    input_schema: schema({
+      task_id: str("The task id from lifeos_list_agent_instructions."),
+      instruction_hash: str("The instruction_hash exactly as lifeos_list_agent_instructions returned it."),
+      status: enumOf(["done", "needs_you"], "done when the work is finished; needs_you when Tapas must decide or supply something."),
+      result: str("Plain text, at most 4,000 characters: what was done, or exactly what you need from Tapas."),
+    }),
+  },
 ];
 
 export const AUTONOMOUS_KINDS = new Set(
@@ -968,6 +985,8 @@ export const TOOL_TARGETS: Record<string, ToolTarget> = {
   sync_trip_hotel_step: { arg: "trip_id", label: "trip", table: "trips" },
   update_trip_leg: { arg: "trip_id", label: "trip", table: "trips" },
   remove_trip_leg: { arg: "trip_id", label: "trip", table: "trips" },
+  // B26. The agents' answer lands on an existing task.
+  report_agent_result: { arg: "task_id", label: "task", table: "tasks" },
   undo_action: {
     arg: "action_id",
     label: "queued action",
@@ -1129,6 +1148,8 @@ export const MCP_READ_TOOLS = [
   "lifeos_report_lapsed_tasks",
   "lifeos_report_premature_tasks",
   "lifeos_read_mail_attachment",
+  // B26.
+  "lifeos_list_agent_instructions",
 ] as const;
 
 export type McpReadTool = (typeof MCP_READ_TOOLS)[number];
@@ -1180,6 +1201,8 @@ export const READ_TOOL_DISCLOSURES: Record<McpReadTool, ToolDisclosure> = {
   // existing mail_body class, as the B20 ticket reader does: the union still
   // has five members, and widening it stays his decision.
   lifeos_read_mail_attachment: "mail_body",
+  // B26. Task rows Life OS owns, plus Tapas's own instruction text.
+  lifeos_list_agent_instructions: "app_data",
 };
 
 export function mcpWriteTools(): ToolDef[] {

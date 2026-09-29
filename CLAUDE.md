@@ -264,8 +264,9 @@ and email-verification rules live in lib/accounts.ts.
   open task, naming the existing id, since 13 September 2026: a project chat
   that plans his week twice was adding the same rows twice. Since B19 a NEAR
   duplicate is refused too (see the B19 section).
-- Tool surface (32 registry tools, shared by the in-app assistant and both
-  connectors, which serve the 31 that are not stubs): create/update/delete
+- Tool surface (33 registry tools since B26, shared by the in-app assistant and both
+  connectors, which serve the 32 that are not stubs; the connectors also serve
+  24 read tools, counted from MCP_READ_TOOLS): create/update/delete
   for tasks, notes, people, obligations and
   finance items; add_project only, with no update or delete for a project;
   create, update and log for trips; solo calendar events including edit and delete
@@ -1345,3 +1346,103 @@ from 21 September (the AI key was refused, 401) and nobody noticed for 8 days.
 - Tests: `npm run test:b24` (18 offline). It runs the real scan and the real
   cron route against in-memory stand-ins (scripts/b24-loader.mjs maps the "@/"
   alias and swaps the network modules for scripts/b24-stubs.ts).
+
+## Instructions for agents on each task (B26)
+
+Migration `20260929000100_b26_task_agent_instructions.sql`. NOT applied anywhere
+when it was written; apply it before (or with) the deploy of this code, since
+the Tasks page, Home and both connectors select its columns. Nullable
+additions only, nothing backfilled, RLS unchanged.
+
+- The goal (Agents MASTER_PLAN step 13): Tapas gives his AI workforce an
+  instruction on the task itself, in Life OS, instead of replying in Slack
+  threads. The daytime sweeps read the pending instructions through the
+  connector, work inside their guardrails and write a result and a status back.
+  Slack `#tasks` stays as the phone alert.
+- Columns on `tasks`: `agent_instructions` (at most 2,000 characters, check
+  constraint), `agent_instructions_at`, `agent_status` (`done` or `needs_you`,
+  null means no result yet), `agent_result` (at most 4,000),
+  `agent_result_at`, `agent_done_hash` (sha256 of the instruction text the last
+  result answered). Column comments in the migration say who writes each.
+- THE GUARD, and the reason for it: an instruction is an ORDER to an agent, so
+  only Tapas may write one. The mail scan writes tasks from untrusted email and
+  the connector is reachable by outside models; if either could write an
+  instruction, an email could plant orders. It is enforced by the database,
+  not by leaving a parameter out of a tool schema, because the connectors reach
+  the database as `service_role`, which bypasses RLS. The trigger
+  `guard_task_agent_instructions` (before insert or update on tasks) raises
+  unless the caller is the OWNER SESSION: `auth.role() = 'authenticated'` and
+  `auth.jwt() ->> 'role' = 'authenticated'` and `auth.uid() = new.user_id`. It
+  refuses (a) an INSERT carrying a non-null instruction or stamp and (b) an
+  UPDATE that changes the instruction or its stamp. "Changed" is `is distinct
+  from` on the trimmed text with blank as null, so an ordinary drawer save that
+  resends the same text changes nothing (the trigger even restores the stored
+  text and stamp). For the owner it stamps `agent_instructions_at = now()` and
+  clears `agent_status` when the instruction truly changes; `agent_result`
+  stays visible until replaced. The owner's saves run through `requireUser`
+  (cookie client); the connectors, crons and scan run as `service_role`; MCP
+  OAuth tokens are app-issued, never Supabase JWTs; a direct database session
+  has no JWT, so it is refused too. Why not a column-level `revoke`: Postgres
+  keeps the table-level UPDATE grant beside column grants, and that grant still
+  allows every column, so revoking one column changes nothing (revoking the
+  table grant would break every other task write from the connectors).
+- Belt above the belt: `createTask` and `updateTask` (lib/tasks/write.ts) read
+  `agent_instructions` only when the origin is `"app"` (his own drawer, through
+  `updateTaskAction`). Every other origin drops it. No tool schema declares it,
+  including the scan's `propose_task`; scripts/b26.test.ts walks every schema.
+- Pending is DERIVED, never stored: `isPendingInstruction`
+  (lib/tasks/agent-instructions.ts): non-blank instruction, task not done or
+  dropped, and `sha256(instruction)` (the existing `hashPayload`) differs from
+  `agent_done_hash`. The server always computes the hash; agents only echo it.
+  The Tasks page computes it server-side and hands the browser a boolean
+  (`agent_pending`), because hashing needs node:crypto. The display rules are
+  in the import-free lib/tasks/agent-display.ts.
+- What Tapas sees: the task drawer has "Instructions for agents" (2,000
+  characters, counter; blank saves as null) and below it, read-only, the status
+  in plain words ("Waiting for the next sweep", "Done 29 Sept, 12:40 pm",
+  "Needs you"), the result and when it was written. The shared `TaskRow`
+  (Board, Inbox, Projects) carries one badge: "Agent" while pending, "Needs
+  you" when the agents asked for him. Home shows "2 agent results need you",
+  linking to `/tasks?agent=needs_you` (the Tasks page then lists only those);
+  nothing when zero.
+- Two connector tools, both on `/api/mcp` and `/api/mcp/http`, disclosure
+  `app_data`, no new class:
+  - `lifeos_list_agent_instructions` (read, no parameters): pending
+    instructions, oldest first, at most 10: task id, title, stream, project,
+    note, due date, task status, `instruction` (labelled as written by Tapas in
+    the app), `instruction_hash`, `instruction_at`. The title and note keep the
+    `untrusted` flag for `source=email` rows. Every call writes an audit row
+    (`agent_instructions_read`: count and task ids only) BEFORE anything is
+    handed over, and the insert is checked (the B15 pattern).
+  - `report_agent_result(task_id, instruction_hash, status, result)`
+    (autonomous, `TOOL_TARGETS` entry on tasks): `status` done or needs_you,
+    `result` plain text at most 4,000 characters. Refused when the hash is not
+    the CURRENT instruction's; the refusal returns the current instruction and
+    hash so the sweep needs no second call. A task done or dropped meanwhile is
+    still accepted. It writes the four result columns with a compare-and-swap on
+    the instruction text. Undo restores the previous result columns (hash
+    included), which RE-OPENS the instruction: the next sweep does it again.
+    Registered as undoable in execute.ts and in the History tab.
+  - The tool descriptions say an instruction grants an agent no tool it does
+    not already have. Nothing here sends, pays or deletes.
+- No instruction or result text in `audit_log` meta, logs or the
+  `assistant_actions` payload: ids, the hash, status and lengths only (the row
+  keeps `result_chars`; the words live on the task).
+- Paths that copy task rows: the `delete_task` undo snapshot is read with
+  `select("*")` and re-inserted as service_role, so the re-insert strips
+  `agent_instructions` and `agent_instructions_at` (or the guard would refuse it
+  and the task would be lost); `delete_task` also refuses a task with a pending
+  instruction. `TASK_UNDO_COLUMNS` and `taskUndoPatch` never include either
+  column. The recurring spawn's fixed column list names no agent column, so a
+  next occurrence starts with no instruction, result or status.
+- What agents may and may not write: they may write `agent_status`,
+  `agent_result`, `agent_result_at` and `agent_done_hash`, only through
+  `report_agent_result`. They may never write `agent_instructions` or
+  `agent_instructions_at`, through any tool, parameter or copy path.
+- Deferred, not built: a claim step, a "Clear result" button, a 7 AM brief
+  line, agent status in `lifeos_list_tasks` and `get_context`.
+- Tests: `npm run test:b26` (24 offline; the real executor and read tool run
+  against an in-memory database, scripts/b26-loader.mjs and b26-stubs.ts). The
+  live proof of the trigger is the last test in scripts/rls.test.mjs, for the
+  local stack (`supabase start`, migration applied, `npm run test:rls`); never
+  run `test:rls:cloud` for it.

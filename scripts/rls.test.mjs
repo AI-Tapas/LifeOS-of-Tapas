@@ -176,3 +176,94 @@ test("anon role cannot write any table", async () => {
     assert.ok(error, `anon must not insert into ${table}`);
   }
 });
+
+// B26: only the owner's own signed-in session may write an agent instruction.
+// service_role (connectors, crons, the scan) bypasses RLS, so this is proved
+// against the guard_task_agent_instructions trigger, not against a policy.
+// Needs the local stack with the B26 migration applied.
+test("B26: agent instructions are writable by the owner session only", async () => {
+  await admin.auth.admin.createUser({ email: ALLOWED_EMAIL, email_confirm: true });
+  const { data: link, error: linkError } = await admin.auth.admin.generateLink({
+    type: "magiclink",
+    email: ALLOWED_EMAIL,
+  });
+  assert.ifError(linkError);
+  const owner = createClient(url, anonKey, { auth: { persistSession: false } });
+  const { data: session, error: verifyError } = await owner.auth.verifyOtp({
+    type: "magiclink",
+    token_hash: link.properties.hashed_token,
+  });
+  assert.ifError(verifyError);
+  const ownerId = session.user.id;
+  const { data: streams } = await owner.from("work_streams").select("id").limit(1);
+  const stream = streams[0].id;
+
+  // service_role cannot plant an instruction on insert.
+  const planted = await admin
+    .from("tasks")
+    .insert({ user_id: ownerId, title: "B26 probe planted", work_stream_id: stream, agent_instructions: "do a thing" })
+    .select("id");
+  assert.ok(planted.error, "service_role must not insert an instruction");
+
+  // A plain task from service_role is fine, and carries no instruction.
+  const plain = await admin
+    .from("tasks")
+    .insert({ user_id: ownerId, title: "B26 probe plain", work_stream_id: stream })
+    .select("id")
+    .single();
+  assert.ifError(plain.error);
+
+  // service_role cannot change the instruction or its stamp on update.
+  const svcText = await admin.from("tasks").update({ agent_instructions: "planted" }).eq("id", plain.data.id).select("id");
+  assert.ok(svcText.error, "service_role must not set an instruction");
+  const svcStamp = await admin
+    .from("tasks")
+    .update({ agent_instructions_at: new Date().toISOString() })
+    .eq("id", plain.data.id)
+    .select("id");
+  assert.ok(svcStamp.error, "service_role must not set the instruction stamp");
+
+  // The owner can write one; the trigger stamps it.
+  const set = await owner
+    .from("tasks")
+    .update({ agent_instructions: "  Draft a reply to the client.  " })
+    .eq("id", plain.data.id)
+    .select("agent_instructions, agent_instructions_at, agent_status")
+    .single();
+  assert.ifError(set.error);
+  assert.equal(set.data.agent_instructions, "Draft a reply to the client.");
+  assert.ok(set.data.agent_instructions_at, "the trigger stamps the instruction time");
+
+  // service_role records a result (allowed: not an instruction column).
+  const rep = await admin
+    .from("tasks")
+    .update({ agent_status: "done", agent_result: "Drafted.", agent_result_at: new Date().toISOString() })
+    .eq("id", plain.data.id)
+    .select("agent_status")
+    .single();
+  assert.ifError(rep.error);
+  assert.equal(rep.data.agent_status, "done");
+
+  // An owner save that resends the same text leaves the status alone.
+  const same = await owner
+    .from("tasks")
+    .update({ title: "B26 probe renamed", agent_instructions: "Draft a reply to the client." })
+    .eq("id", plain.data.id)
+    .select("agent_status, agent_instructions_at")
+    .single();
+  assert.ifError(same.error);
+  assert.equal(same.data.agent_status, "done");
+  assert.equal(same.data.agent_instructions_at, set.data.agent_instructions_at);
+
+  // A truly new instruction clears the status.
+  const changed = await owner
+    .from("tasks")
+    .update({ agent_instructions: "Draft a reply and copy the partner." })
+    .eq("id", plain.data.id)
+    .select("agent_status")
+    .single();
+  assert.ifError(changed.error);
+  assert.equal(changed.data.agent_status, null);
+
+  await admin.from("tasks").delete().eq("id", plain.data.id); // cleanup
+});
