@@ -1,13 +1,19 @@
-// Sends the morning brief: ca_tapasnr to itself, HTML with a plain-text
-// alternative. Deliberately separate from the approval-gated sendEmail in
+// Sends the morning brief from ca_tapasnr to Tapas's fixed report address
+// (REPORT_ADDRESS), HTML with a plain-text alternative. B23, 29 September 2026:
+// the brief no longer lands in the ca_tapasnr inbox; a copy stays in its Sent
+// items, which Tapas chose to keep. Deliberately separate from the approval-gated sendEmail in
 // lib/assistant/execute.ts, which is the only path that can send to anyone
 // else and requires an already-approved assistant_actions row. This one
-// never takes a recipient: it always sends the connected account's own
-// address to itself, so there is no injection surface and nothing here
+// never takes a recipient: it always sends to the one constant below, so
+// there is no injection surface and nothing here
 // weakens the confirmation boundary for mail to other people.
 
 import { randomUUID } from "node:crypto";
 import { withResourceAuth } from "@/lib/oauth/tokens";
+
+// Tapas's report inbox (not his domain; a record only). A constant, never a
+// parameter, so no model or input can redirect the brief.
+export const REPORT_ADDRESS = "tapas.r@mail.ca.in";
 
 export async function sendBriefEmail(
   accountId: string,
@@ -24,7 +30,7 @@ export async function sendBriefEmail(
   // needs non-ASCII in the subject line.
   const mime = [
     `From: ${email}`,
-    `To: ${email}`,
+    `To: ${REPORT_ADDRESS}`,
     `Subject: ${subject}`,
     // Stamps the brief as the app's own output. The 3 AM mail scan reads this
     // very inbox, and without the stamp it treated the brief as ordinary mail

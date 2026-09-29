@@ -583,3 +583,14 @@ test("bills, alerts, bounces and codes are noise; a person's mail is not", () =>
   ];
   for (const m of real) assert.ok(!isNoiseMail(m), m.subject);
 });
+
+// B23: the brief goes to the fixed report address, never back to the sender
+// and never to a caller-chosen recipient.
+test("B23: the brief is addressed to REPORT_ADDRESS only", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync("lib/brief/send.ts", "utf8");
+  assert.match(src, /export const REPORT_ADDRESS = "tapas\.r@mail\.ca\.in";/);
+  assert.match(src, /`To: \$\{REPORT_ADDRESS\}`/);
+  assert.doesNotMatch(src, /`To: \$\{email\}`/);
+  assert.doesNotMatch(src, /sendBriefEmail\([^)]*(to|recipient)/);
+});

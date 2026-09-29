@@ -186,8 +186,9 @@ and email-verification rules live in lib/accounts.ts.
   13 September 2026: the list filled with notices); deduped on external_ref. Tasks land source=email, and context rendering wraps
   source=email rows in the same untrusted framing.
 - Scan feedback loop (found live 31 Aug 2026, fixed; do not regress): the
-  7 AM brief is sent from ca_tapasnr to itself, so it lands in the inbox the
-  3 AM scan reads. The scanner re-filed the tasks the brief was reporting,
+  7 AM brief was sent from ca_tapasnr to itself, so it landed in the inbox the
+  3 AM scan reads (since B23, 29 Sep 2026, it goes to REPORT_ADDRESS
+  tapas.r@mail.ca.in in lib/brief/send.ts; the belts below stay). The scanner re-filed the tasks the brief was reporting,
   one fresh copy per day, because each morning is a new message id and the
   external_ref dedup only catches the same message twice. lib/assistant/
   scan-filters.ts holds both belts, pure and tested in scripts/m5.test.ts:
