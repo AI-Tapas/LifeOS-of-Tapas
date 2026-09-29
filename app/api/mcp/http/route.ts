@@ -26,7 +26,9 @@ import {
 } from "@/lib/assistant/mcp-api";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// B24: scan_mail (the mail catch-up, up to 150 mails for one account) runs
+// through this route and can take minutes; 300 matches the scan cron.
+export const maxDuration = 300;
 
 const PROTOCOL_VERSION = "2025-06-18";
 
