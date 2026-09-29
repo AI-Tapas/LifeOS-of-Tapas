@@ -736,11 +736,10 @@ test("every B22 tool is on both connectors with the lifeos_ prefix, and in the i
     assert.equal(api.match(new RegExp(`^  ${name}:`, "gm"))?.length, 2, `${name} needs a schema and a description`);
     assert.ok(api.includes(`if (name === "${name}")`) || name === "lifeos_read_mail_attachment", `${name} has a handler`);
   }
-  const inApp = api.slice(api.indexOf("export const IN_APP_READ_TOOLS"), api.indexOf("export function inAppReadTools"));
-  for (const name of reads) assert.ok(inApp.includes(`"${name}"`), `${name} reaches the in-app chat`);
-  const chat = src("app/api/assistant/chat/route.ts");
-  assert.match(chat, /tools: \[\.\.\.TOOLS, \.\.\.inAppReadTools\(\)\]/);
-  assert.match(chat, /runReadTool\(call\.name, call\.input, await cookieActor\(\)\)/);
+  // B24: the in-app chat is gone, so these reads reach Claude through the
+  // connector only, and nothing offers them to an in-app model any more.
+  assert.ok(!api.includes("IN_APP_READ_TOOLS"));
+  assert.ok(!api.includes("inAppReadTools"));
 });
 
 test("the read schemas keep one concrete type per parameter", () => {

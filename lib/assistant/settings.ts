@@ -7,18 +7,16 @@ import type { LlmOverride } from "./config";
 import type { Database } from "@/lib/database.types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-export type LlmRole = "chat" | "scan";
-
+// B24: only the nightly mail scan uses the app's own AI key. The chat_provider
+// and chat_model columns are still in the table, unread, and can be dropped
+// in a later migration.
 export async function loadLlmOverride(
-  supabase: SupabaseClient<Database>,
-  role: LlmRole
+  supabase: SupabaseClient<Database>
 ): Promise<LlmOverride | undefined> {
   const { data } = await supabase
     .from("assistant_settings")
-    .select("chat_provider, chat_model, scan_provider, scan_model")
+    .select("scan_provider, scan_model")
     .maybeSingle();
   if (!data) return undefined;
-  return role === "chat"
-    ? { provider: data.chat_provider, model: data.chat_model }
-    : { provider: data.scan_provider, model: data.scan_model };
+  return { provider: data.scan_provider, model: data.scan_model };
 }

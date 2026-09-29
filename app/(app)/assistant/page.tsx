@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/ui";
-import AssistantChat from "@/components/assistant/chat";
 import {
   PendingCard,
   HistoryRow,
@@ -12,14 +11,12 @@ import {
   type RecipientFlag,
 } from "@/components/assistant/queue";
 import { formatDateTimeIST, formatDateIST } from "@/lib/datetime";
-import { loadChatTurns } from "@/lib/assistant/chat-store";
 
 export const dynamic = "force-dynamic";
 
 type Search = Record<string, string | string[] | undefined>;
 
 const TABS = [
-  { key: "chat", label: "Chat" },
   { key: "queue", label: "Queue" },
   { key: "history", label: "History" },
   { key: "audit", label: "Audit" },
@@ -59,12 +56,8 @@ export default async function AssistantPage({
 }) {
   const sp = await searchParams;
   const rawTab = Array.isArray(sp.tab) ? sp.tab[0] : sp.tab;
-  const tab = TABS.some((t) => t.key === rawTab) ? (rawTab as string) : "chat";
-  // ?ask= is a flag, not free text: it selects one of a fixed set of openers
-  // and nothing from the URL is ever put in the box verbatim. The line is
-  // typed into the input, not sent, so he opens the conversation himself.
-  const rawAsk = Array.isArray(sp.ask) ? sp.ask[0] : sp.ask;
-  const prefill = rawAsk === "priorities" ? "Review my task priorities" : undefined;
+  // B24: the queue is the front page now that the chat is gone.
+  const tab = TABS.some((t) => t.key === rawTab) ? (rawTab as string) : "queue";
 
   const supabase = await createClient();
   const [
@@ -74,7 +67,6 @@ export default async function AssistantPage({
     { data: accounts },
     { data: people },
     { data: sentBefore },
-    chatTurns,
   ] = await Promise.all([
       supabase
         .from("assistant_actions")
@@ -100,10 +92,6 @@ export default async function AssistantPage({
         .eq("kind", "send_email")
         .eq("status", "executed")
         .limit(200),
-      // B6: the newest turns only, and only when the chat tab is the one being
-      // rendered. A thread that has run for a year must not be read in full on
-      // every visit to the Queue.
-      tab === "chat" ? loadChatTurns(supabase) : Promise.resolve([]),
     ]);
 
   // Ground-truth recipient flags (A5/A6): unverified person records and
@@ -225,7 +213,7 @@ export default async function AssistantPage({
         {TABS.map((t) => (
           <Link
             key={t.key}
-            href={t.key === "chat" ? "/assistant" : `/assistant?tab=${t.key}`}
+            href={t.key === "queue" ? "/assistant" : `/assistant?tab=${t.key}`}
             aria-current={tab === t.key ? "page" : undefined}
             className={
               "flex min-h-11 flex-1 items-center justify-center rounded-lg text-center text-sm font-medium " +
@@ -250,10 +238,6 @@ export default async function AssistantPage({
           </Link>
         ))}
       </div>
-
-      {tab === "chat" && (
-        <AssistantChat prefill={prefill} initialTurns={chatTurns} />
-      )}
 
       {tab === "queue" && (
         <div className="space-y-3">

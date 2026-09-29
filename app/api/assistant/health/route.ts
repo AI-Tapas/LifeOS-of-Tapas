@@ -13,8 +13,9 @@ export const runtime = "nodejs";
 // provider from holding the function open.
 export const maxDuration = 60;
 
-// GET /api/assistant/health                      tests the saved chat model
-// GET /api/assistant/health?role=scan            tests the saved scan model
+// B24: the app's AI key serves the nightly mail scan only, so this tests the
+// scan model.
+// GET /api/assistant/health                      tests the saved scan model
 // GET /api/assistant/health?provider=x&model=y   tests an unsaved choice, so
 //   the Settings screen can verify a selection before it is saved
 export async function GET(req: Request): Promise<Response> {
@@ -25,7 +26,6 @@ export async function GET(req: Request): Promise<Response> {
   if (!user) return new Response("not signed in", { status: 401 });
 
   const params = new URL(req.url).searchParams;
-  const role = params.get("role") === "scan" ? "scan" : "chat";
   const provider = params.get("provider");
   const model = params.get("model");
   // An explicit provider in the query wins, so Test reflects the dropdown
@@ -34,7 +34,7 @@ export async function GET(req: Request): Promise<Response> {
   const override =
     provider !== null || model !== null
       ? { provider: provider || null, model: model || null }
-      : await loadLlmOverride(supabase, role);
+      : await loadLlmOverride(supabase);
   const result = await pingLlm(override);
   // Which build is actually serving, and whether its tool schemas are the
   // fixed ones. Anthropic refuses a tool set with more than 16 union-typed

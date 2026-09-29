@@ -1,7 +1,8 @@
 "use client";
 
-// Settings > Assistant models. Chooses which provider and model each activity
-// uses: the interactive chat, and the mail scan. Only names are stored; API
+// Settings > Mail scan model. Chooses which provider and model the nightly
+// mail scan uses (B24: the in-app chat is gone, so this is the only AI use in
+// the app; conversation happens in Claude through the connector). Only names are stored; API
 // keys stay in the server environment and are never shown here. The Test
 // button calls the health endpoint for that activity.
 
@@ -22,11 +23,6 @@ export interface ModelChoice {
 
 const ROLES = [
   {
-    key: "chat" as const,
-    label: "Assistant chat",
-    hint: "You wait for this one, so speed matters.",
-  },
-  {
     key: "scan" as const,
     label: "Mail scan",
     hint: "Runs in the background, so a slower model is fine.",
@@ -36,17 +32,13 @@ const ROLES = [
 export default function ModelsPanel({
   options,
   envProvider,
-  chat,
   scan,
 }: {
   options: ProviderOption[];
   envProvider: string;
-  chat: ModelChoice;
   scan: ModelChoice;
 }) {
   const [values, setValues] = useState({
-    chat_provider: chat.provider ?? "",
-    chat_model: chat.model ?? "",
     scan_provider: scan.provider ?? "",
     scan_model: scan.model ?? "",
   });
@@ -59,7 +51,7 @@ export default function ModelsPanel({
 
   // Tests the choice currently on screen, saved or not, so the dropdown and
   // the result always agree.
-  async function test(role: "chat" | "scan") {
+  async function test(role: "scan") {
     setTested((t) => ({ ...t, [role]: "Testing..." }));
     const query = new URLSearchParams({
       role,
@@ -94,9 +86,10 @@ export default function ModelsPanel({
   return (
     <div className="rounded-2xl border border-border bg-surface p-4 shadow-[var(--shadow-card)]">
       <p className="text-sm text-secondary">
-        Which model does what. Leave a row on Server default to follow the
-        deployment setting, currently {envProvider}. Saved choices apply to the
-        next message; keys live on the server and are never shown here.
+        Which model reads your mail overnight. Leave it on Server default to
+        follow the deployment setting, currently {envProvider}. A saved choice
+        applies from the next scan; keys live on the server and are never shown
+        here.
       </p>
 
       {ROLES.map((role) => {
@@ -176,7 +169,7 @@ export default function ModelsPanel({
               const r = await saveAssistantModelsAction(values);
               setMessage(
                 r.ok
-                  ? "Saved. Test above to confirm, then use the Assistant."
+                  ? "Saved. Test above to confirm; the next scan will use it."
                   : r.message ?? "Could not save."
               );
               setTested({});

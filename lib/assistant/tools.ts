@@ -70,9 +70,7 @@ export interface ToolDef {
 }
 
 // What a model is shown of a tool: its name, description and schema. The
-// bucket and the class stay on this side. Since B22 the in-app chat is also
-// shown the B22 connector reads (mcp-api.ts inAppReadTools), which are not
-// registry tools and have no bucket: they change nothing.
+// bucket and the class stay on this side.
 export type LlmTool = Pick<ToolDef, "name" | "description" | "input_schema">;
 
 // Schema helpers. Optionality is expressed the plain JSON Schema way: the
@@ -620,8 +618,11 @@ export const TOOLS: ToolDef[] = [
     bucket: "autonomous",
     disclosure: "mail_body",
     description:
-      "Read recent inbox metadata across the connected accounts and propose tasks from anything needing action. Never stores message bodies.",
-    input_schema: schema({}),
+      "Read recent inbox metadata across the connected accounts and propose tasks from anything needing action. Never stores message bodies. Optional days (a whole number from 1 to 14, default 3) and account (one account slot name, for example icai) run a one-off catch-up: a wider window lifts the message and task caps for that call only, and every duplicate rule still applies. For a catch-up, scan one account per call so the call stays short.",
+    input_schema: schema({
+      days: numOrNull("Look-back window in whole days, 1 to 14. Omit for the nightly 3."),
+      account: strOrNull("One account slot name to scan (taxstrategia, ca_tapasnr, altechon or icai). Omit for every connected account."),
+    }),
   },
   {
     name: "undo_action",

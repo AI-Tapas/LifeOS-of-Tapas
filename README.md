@@ -287,26 +287,33 @@ connected and disconnects it.
 
 ## Assistant (Milestone 4)
 
-The Assistant tab is a chat over the app's own data with a fixed tool set.
+Since 29 September 2026 (B24) the app has no chat of its own. Conversation
+happens in Claude (phone app, Superman routines) through the connector above,
+and the app's own AI key is used only by the nightly mail scan (task triage,
+ticket PDFs, cab receipts). The Assistant tab now opens on the approval Queue,
+with History and Audit beside it. The tool set is the same one the connector
+serves.
 Private actions (tasks, reminders, notes, people, obligations, solo calendar
 events, email drafts) run immediately, show up under History and can be
 undone. Anything that would reach another person (sending an email, inviting
 people to an event) always lands in the Queue tab and goes out only after a
 deliberate two-tap approval there. Email drafts live in the app database
-only, never in Gmail or Outlook. "Scan mail now" reads recent inbox metadata
-(never bodies or attachments) and proposes tasks into the Tasks inbox,
-capped at 20 per account per day.
+only, never in Gmail or Outlook. The mail scan reads recent inbox metadata
+(never bodies or attachments, apart from the allowlisted ticket and cab
+senders) and proposes tasks into the Tasks inbox, capped at 5 per account per
+day. It runs at 3 AM IST; if it fails, is cut off or does not run, the 7 AM
+brief says so at the top. A one-off catch-up over 1 to 14 days is the
+`scan_mail` tool with `days` and `account`, run from Claude.
 
 ### LLM configuration
 
 Server-side env vars (Vercel: plain vars, never NEXT_PUBLIC_):
 
 - `LLM_API_KEY` (or `ANTHROPIC_API_KEY`): the API key. Required.
-Settings > Assistant models lets you pick a provider and model separately
-for the chat and for the mail scan (a fast paid model for the chat you wait
-on, a slower free one for the background scan, for instance). Each row has a
-Test button that pings that model and reports the latency. Leaving a row on
-"Server default" follows `LLM_PROVIDER`.
+Settings > Mail scan model lets you pick the provider and model the nightly
+scan uses. The Test button pings that model and reports the latency. Leaving
+it on "Server default" follows `LLM_PROVIDER`. (The old chat model choice is
+gone; its database columns are unread and can be dropped later.)
 
 Keys for several providers can be stored at once. `LLM_PROVIDER` decides
 which one is live, so switching model is a one-variable edit and no key is

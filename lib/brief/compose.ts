@@ -113,6 +113,10 @@ export interface ComposeBriefInput {
   // dropped." and "1 ticket email did not match a trip." Not tasks. Optional
   // so older fixtures stay valid.
   housekeeping?: string[];
+  // B24: set when last night's mail scan failed, was cut off or did not run
+  // (lib/brief/scan-health.ts). Shown at the very top; null or absent when
+  // the scan was healthy, and then nothing extra is printed.
+  scanWarning?: string | null;
 }
 
 export interface ComposedBrief {
@@ -232,6 +236,7 @@ export function composeBrief(input: ComposeBriefInput): ComposedBrief {
     recoveryNote,
     waitingNote,
     housekeeping: input.housekeeping ?? [],
+    scanWarning: input.scanWarning ?? null,
     nowIso,
     appBaseUrl,
   });
@@ -249,6 +254,7 @@ export function composeBrief(input: ComposeBriefInput): ComposedBrief {
     recoveryNote,
     waitingNote,
     housekeeping: input.housekeeping ?? [],
+    scanWarning: input.scanWarning ?? null,
     nowIso,
     appBaseUrl,
   });
@@ -288,6 +294,7 @@ interface RenderInput {
   recoveryNote: string | null;
   waitingNote: string | null;
   housekeeping: string[];
+  scanWarning: string | null;
   nowIso: string;
   appBaseUrl: string;
 }
@@ -471,6 +478,16 @@ function renderHtml(r: RenderInput): string {
     </td></tr>`
     : "";
 
+  // B24: the mail scan alarm, above everything else in the email.
+  const scanWarningBlock = r.scanWarning
+    ? `
+    <tr><td style="padding:16px 32px 0 32px;">
+      <div style="border-radius:10px;background-color:${COLORS.overdueBg};padding:12px 14px;">
+        <p style="margin:0;font-size:14px;font-weight:bold;color:${COLORS.overdueText};font-family:${FONT};">${esc(r.scanWarning)}</p>
+      </div>
+    </td></tr>`
+    : "";
+
   const housekeepingBlock = r.housekeeping.length
     ? `
     <tr><td style="padding:16px 32px 0 32px;">
@@ -492,7 +509,8 @@ function renderHtml(r: RenderInput): string {
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:${COLORS.canvas};padding:24px 12px;">
   <tr><td align="center">
     <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background-color:${COLORS.card};border:1px solid ${COLORS.cardBorder};border-radius:12px;">
-      <tr><td style="padding:28px 32px 0 32px;">
+      ${scanWarningBlock}
+      <tr><td style="padding:${r.scanWarning ? "16px" : "28px"} 32px 0 32px;">
         <p style="margin:0;font-size:12px;letter-spacing:0.04em;color:${COLORS.clay};font-family:${FONT};text-transform:uppercase;">${esc(r.dateHeading)}</p>
         <h1 style="margin:6px 0 0 0;font-size:21px;color:${COLORS.heading};font-family:${FONT};">Good morning, Tapas.</h1>
         <p style="margin:10px 0 0 0;font-size:15px;color:${COLORS.heading};font-family:${FONT};">${esc(r.narrative)}</p>
@@ -524,7 +542,8 @@ function renderHtml(r: RenderInput): string {
 }
 
 function renderText(r: RenderInput): string {
-  const lines: string[] = [r.dateHeading, "", r.narrative, ""];
+  const lines: string[] = r.scanWarning ? [r.scanWarning, ""] : [];
+  lines.push(r.dateHeading, "", r.narrative, "");
 
   if (r.accountsNeedingReconnect.length) {
     lines.push(

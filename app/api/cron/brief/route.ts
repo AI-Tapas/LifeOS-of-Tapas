@@ -11,6 +11,7 @@ import { staleTripStepIds } from "@/lib/tasks/trip-rollup";
 import { lapsedLine, sweepLapsed } from "@/lib/tasks/lapse";
 import { ticketBriefLine } from "@/lib/trips/ticket";
 import { cabBriefLine } from "@/lib/trips/cab";
+import { SCAN_HEALTH_ACTIONS, scanHealthWarning } from "@/lib/brief/scan-health";
 import { keepBrief } from "@/lib/brief/store";
 import { briefStoreFor } from "@/lib/brief/store-db";
 import { loadTripSteps } from "@/lib/tasks/trip-steps";
@@ -180,6 +181,16 @@ export async function GET(req: Request): Promise<Response> {
         unreadable.push({ from: String(x.from ?? ""), to: String(x.to ?? "") });
       }
     }
+    // B24: did last night's scan run and finish? Read the last 36 hours of the
+    // scan's own start, success and failure rows; the sentence names a short
+    // reason and never any mail text. A failure to read never blocks the brief.
+    const { data: healthRows } = await supabase
+      .from("audit_log")
+      .select("action, ts, meta")
+      .eq("user_id", userId)
+      .in("action", SCAN_HEALTH_ACTIONS)
+      .gte("ts", new Date(Date.now() - 36 * 3600 * 1000).toISOString());
+    const scanWarning = healthRows ? scanHealthWarning(healthRows, istDate) : null;
     const housekeeping = [
       lapsedLine(lapsedIds.size),
       ticketBriefLine(noTrip, unreadable),
@@ -267,6 +278,7 @@ export async function GET(req: Request): Promise<Response> {
       accountsNeedingReconnect,
       appBaseUrl,
       housekeeping,
+      scanWarning,
     });
 
     // B22: keep what he was told this morning, the last 30 days, for

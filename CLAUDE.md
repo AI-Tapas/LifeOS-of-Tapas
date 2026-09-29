@@ -177,7 +177,8 @@ and email-verification rules live in lib/accounts.ts.
   smuggled attendee keys, and it calls createEvent with confirmed=false so
   the M3 attendee gate is a third belt. Invite events execute only through
   the approved queue with confirmed=true.
-- Mail-to-task (on demand, Assistant tab button): per-account isolated model
+- Mail-to-task (the 3 AM cron, and the scan_mail tool from a connector; the
+  in-app Assistant tab button went with the chat in B24): per-account isolated model
   context whose only tool is propose_task. Gmail metadata format + snippet,
   Graph bodyPreview; bodies and attachments never fetched or stored. Mail
   text enters context inside fenceUntrusted (fixed data-not-instructions
@@ -231,21 +232,18 @@ and email-verification rules live in lib/accounts.ts.
   scripts/m4.test.ts walks every schema, fails on any union, and records the
   parameter census. GET /api/assistant/health reports the live commit and
   that census.
-- Per-activity model choice: Settings > Assistant models writes provider
-  and model names into assistant_settings (chat_* and scan_* columns);
-  loadLlmOverride feeds them to runLlmTurn, so the chat and the mail scan
-  can run on different providers. Only names are stored: keys stay in the
+- Model choice (B24: mail scan only): Settings > Mail scan model writes
+  provider and model names into assistant_settings (scan_* columns; the chat_*
+  columns are left in the table, unread, removable in a later migration);
+  loadLlmOverride feeds them to runLlmTurn. Only names are stored: keys stay in the
   server environment. When Settings picks a provider other than
   LLM_PROVIDER, the generic LLM_BASE_URL / LLM_API_FORMAT overrides are
   ignored for that call, since they describe the env provider.
-- GET /api/assistant/health (owner session) pings the configured provider;
-  ?role=scan tests the scan model instead of the chat one. Settings has a
-  Test button per activity.
-- The chat transcript was kept in localStorage on the device (key
-  life_os_assistant_chat_v1, last 40 turns), cleared by the New chat
-  button. SUPERSEDED by M7c/B6: it is the assistant_chat_turns table now,
-  owner session only, and the old key is imported once and then removed. See
-  the M7c section.
+- GET /api/assistant/health (owner session) pings the scan model (B24: the
+  chat role is gone). Settings has a Test button.
+- The in-app chat, and with it the chat transcript (localStorage, then the
+  assistant_chat_turns table in M7c/B6), was REMOVED in B24, 29 September 2026.
+  The table stays in the database, unread; see the B24 section.
 - MCP connector: POST /api/mcp (bearer LIFEOS_MCP_TOKEN, timing-safe compare,
   exempted from the cookie gate in proxy.ts because it authenticates itself)
   serves a manifest plus read and write ops. Write ops route through the same
@@ -534,9 +532,9 @@ What the app does instead:
   columns.
 - "Unrated by anyone" is priority 'medium' with no reason: he moved nothing
   off the default and the assistant has said nothing. The Tasks overview adds
-  one line when that is 60% or more of at least five open tasks, linking to
-  /assistant?ask=priorities, which types (never sends) "Review my task
-  priorities" into the chat box. No batch UI and no scheduled re-prioritising:
+  one line when that is 60% or more of at least five open tasks, pointing
+  him to Claude ("Review my task priorities"; the in-app link went with the
+  chat in B24). No batch UI and no scheduled re-prioritising:
   a chat pass is a conversation he can argue with, which is the point.
 - Tests: npm run test:b3 (20 offline).
 
@@ -1228,7 +1226,7 @@ this code, since the brief cron writes to it. Additive only.
 - The problem: a 28 September 2026 audit found app capabilities the MCP
   connector (and so the AI workforce in `Agents/`) could not reach. Every tool
   below is on both connectors (`/api/mcp`, `/api/mcp/http`) with the
-  `lifeos_` prefix, and on the in-app chat.
+  `lifeos_` prefix (the in-app chat this once also covered was removed in B24).
 - New write tools, all in the registry (lib/assistant/tools.ts), autonomous,
   disclosure app_data, a B10 target each where they take an id, and an undo
   each: `update_trip_expense` (receipt_ref, billable, amount, date, category;
@@ -1266,7 +1264,7 @@ this code, since the brief cron writes to it. Additive only.
   (the two scripts' logic moved to lib/tasks/reports.ts; the scripts
   re-export it), and `lifeos_read_mail_attachment`. The m4 naming rule for
   read tools now also accepts `lifeos_search` and `lifeos_report_`.
-- The in-app chat is offered the B22 reads (`IN_APP_READ_TOOLS`,
+- (Removed in B24, with the chat.) The in-app chat was offered the B22 reads (`IN_APP_READ_TOOLS`,
   `inAppReadTools` in mcp-api.ts; tools.ts `LlmTool` is what a model is shown
   of a tool). The chat route sends those names to runReadTool with its own
   cookie actor, so RLS applies, and everything else to executeToolCall as
@@ -1297,3 +1295,53 @@ this code, since the brief cron writes to it. Additive only.
   "faculty" or "travel", and "batch" all appear, and SCAN_SYSTEM says so.
 - Tests: `npm run test:b22` (28 offline, synthetic data, a real unpdf
   extraction and a real hand-built .docx).
+
+## Scan alarm, catch-up and no in-app chat (B24)
+
+No migration. Decided 29 September 2026 after the 3 AM scan failed every night
+from 21 September (the AI key was refused, 401) and nobody noticed for 8 days.
+
+- THE AI KEY IS FOR THE NIGHTLY SCAN ONLY (task triage, ticket PDFs, cab
+  receipts). Thinking and chatting happen in Claude (phone app, Superman
+  routines) through the connector. The in-app chat is gone: the chat route,
+  chat.tsx, chat-store.ts, chat-history.ts, the chat server actions, the
+  Settings chat model choice, the health route's chat role and the
+  /assistant?ask=priorities link. `/assistant` opens on the Queue (History and
+  Audit stay). `scanMailAction`, `runLlmTurn`, wire.ts, config.ts and the tool
+  registry stay. Left in the database, unread, removable in a later migration:
+  `assistant_settings.chat_provider`, `assistant_settings.chat_model` and the
+  `assistant_chat_turns` table (owner-only, service_role revoked). Also
+  removable later: `buildAppContext` and `buildSystemBlocks` no longer feed
+  any chat prompt (the house-rules tool and tests still use parts of them).
+- Scan health line: `scanHealthWarning` (lib/brief/scan-health.ts, pure) reads
+  the last 36 hours of `cron_scan_started`, `cron_scan` and `cron_scan_failed`
+  audit rows for today's IST date. No finish row: "Mail scan did not run last
+  night" (or "was cut off before finishing" when a start row exists). Failed:
+  "Mail scan failed last night: the AI key was refused. Check the key in
+  Vercel." (reason_code auth). A start after the last finish counts as cut
+  off; a good manual re-run after a failure clears it. It is the first line of
+  the brief (HTML, text and the stored B22 copy) and nothing is printed when
+  healthy. `lifeos_list_scan_runs` shows `started_never_finished`.
+- Failure handling: every model pass goes through `modelTurn` in scan.ts. The
+  first auth or provider error becomes a `ScanModelError` (code auth or
+  provider, a fixed short phrase such as "AI key refused (401)", never the
+  provider's body) and, since nothing catches it, no later pass or account is
+  tried. The cron records `cron_scan_failed` with `reason_code`. The
+  already-ran guard reads `cron_scan` rows only, so a failed or started-only
+  run never blocks a same-day manual re-run.
+- The scan route writes `cron_scan_started` first and has `maxDuration = 300`
+  (was 60; a Vercel timeout leaves no row, so the start row is how "cut off"
+  is told from "never ran").
+- Catch-up: `scan_mail` takes optional `days` (whole number, 1 to 14, default
+  3) and `account` (a slot name). Parsed by `parseScanArgs` in
+  lib/assistant/scan-args.ts, which also holds the limits: above 3 days the
+  message cap is days x 15 (at most 150) and the per-account task cap is
+  5 x days, for that run only. The cron passes nothing (3 days, 15 messages,
+  5 tasks, all accounts). Every dedupe rule is unchanged. Run it once per
+  mailbox from a fresh Claude chat so each call stays under the connector's 60
+  second limit.
+- A mail whose `lapses_on` is before today creates no task (`windowAlreadyClosed`,
+  checked in taskPass).
+- Tests: `npm run test:b24` (18 offline). It runs the real scan and the real
+  cron route against in-memory stand-ins (scripts/b24-loader.mjs maps the "@/"
+  alias and swaps the network modules for scripts/b24-stubs.ts).

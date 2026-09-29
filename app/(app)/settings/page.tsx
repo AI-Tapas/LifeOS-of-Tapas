@@ -122,7 +122,7 @@ export default async function SettingsPage({
         .order("version", { ascending: false }),
       supabase
         .from("assistant_settings")
-        .select("chat_provider, chat_model, scan_provider, scan_model")
+        .select("scan_provider, scan_model")
         .maybeSingle(),
       supabase
         .from("mcp_clients")
@@ -217,15 +217,11 @@ export default async function SettingsPage({
         <WorkStreamsPanel streams={(streams ?? []) as WorkStreamView[]} />
       </div>
 
-      <h2 className="mt-8 text-base font-semibold tracking-tight">Assistant models</h2>
+      <h2 className="mt-8 text-base font-semibold tracking-tight">Mail scan model</h2>
       <div className="mt-2">
         <ModelsPanel
           options={providerOptions()}
           envProvider={process.env.LLM_PROVIDER || "anthropic"}
-          chat={{
-            provider: modelSettings?.chat_provider ?? null,
-            model: modelSettings?.chat_model ?? null,
-          }}
           scan={{
             provider: modelSettings?.scan_provider ?? null,
             model: modelSettings?.scan_model ?? null,

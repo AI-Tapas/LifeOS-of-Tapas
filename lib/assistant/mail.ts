@@ -10,6 +10,7 @@
 
 import { withResourceAuth } from "@/lib/oauth/tokens";
 import type { MailRequest } from "@/lib/assistant/mailbox";
+import { NIGHTLY_DAYS, PER_ACCOUNT_MESSAGES } from "@/lib/assistant/scan-args";
 
 // B18: the authorised request the pure mailbox module (inbox, thread, reply
 // draft) is handed. Same withResourceAuth path as every other resource call,
@@ -44,16 +45,25 @@ export interface MailMeta {
   threadId?: string;
 }
 
-const LOOKBACK_DAYS = 3;
-const PER_ACCOUNT = 15;
+// B24: the nightly scan reads 3 days and 15 messages a mailbox. A hand-run
+// catch-up passes a wider window through the limits argument (built by
+// scanLimits in scan-args.ts); the defaults here are the nightly numbers.
+export interface MailWindow {
+  days: number;
+  messages: number;
+}
+const NIGHTLY_WINDOW: MailWindow = { days: NIGHTLY_DAYS, messages: PER_ACCOUNT_MESSAGES };
 
-export async function listRecentGmail(accountId: string): Promise<MailMeta[]> {
+export async function listRecentGmail(
+  accountId: string,
+  window: MailWindow = NIGHTLY_WINDOW
+): Promise<MailMeta[]> {
   const listRes = await withResourceAuth(accountId, (token) =>
     fetch(
       "https://gmail.googleapis.com/gmail/v1/users/me/messages?" +
         new URLSearchParams({
-          q: `newer_than:${LOOKBACK_DAYS}d in:inbox`,
-          maxResults: String(PER_ACCOUNT),
+          q: `newer_than:${window.days}d in:inbox`,
+          maxResults: String(window.messages),
         }),
       { headers: { authorization: `Bearer ${token}` } }
     )
@@ -97,13 +107,16 @@ export async function listRecentGmail(accountId: string): Promise<MailMeta[]> {
   return out;
 }
 
-export async function listRecentGraph(accountId: string): Promise<MailMeta[]> {
-  const since = new Date(Date.now() - LOOKBACK_DAYS * 86400000).toISOString();
+export async function listRecentGraph(
+  accountId: string,
+  window: MailWindow = NIGHTLY_WINDOW
+): Promise<MailMeta[]> {
+  const since = new Date(Date.now() - window.days * 86400000).toISOString();
   const res = await withResourceAuth(accountId, (token) =>
     fetch(
       "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?" +
         new URLSearchParams({
-          $top: String(PER_ACCOUNT),
+          $top: String(window.messages),
           $orderby: "receivedDateTime desc",
           $select: "id,conversationId,subject,from,receivedDateTime,bodyPreview",
           $filter: `receivedDateTime ge ${since}`,

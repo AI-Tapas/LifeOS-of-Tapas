@@ -464,13 +464,11 @@ function OverviewTab({
         <p className="mt-3 rounded-xl border border-brand/30 bg-brand-soft p-3 text-xs text-secondary">
           {unrated.count} of {unrated.total} open tasks have no priority set by
           anyone, so this ranking is running on due dates alone.{" "}
-          <Link
-            href="/assistant?ask=priorities"
-            className="font-medium text-brand-deep underline-offset-2 hover:underline"
-          >
-            Go through them with the assistant
-          </Link>
-          . It proposes one and says why; you can argue with every one.
+          <span className="font-medium text-brand-deep">
+            Ask Claude to go through them
+          </span>{" "}
+          (in your Life OS project, say &ldquo;Review my task priorities&rdquo;). It
+          proposes one and says why; you can argue with every one.
         </p>
       )}
 

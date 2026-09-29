@@ -17,6 +17,8 @@ export interface ScanRun {
   date: string; // IST calendar date
   ran: boolean;
   failed: boolean;
+  // B24: a cron_scan_started row with no finish row (cut off, e.g. a timeout).
+  started_never_finished: boolean;
   audit_id: string | null;
   emails_read: number;
   tasks_created: number;
@@ -30,7 +32,7 @@ export interface ScanRun {
   accounts: { account_id: string | null; slot: string | null; emails_read: number }[];
 }
 
-export const SCAN_RUN_ACTIONS = ["cron_scan", "cron_scan_failed", "mail_scan", "tasks_lapsed"];
+export const SCAN_RUN_ACTIONS = ["cron_scan_started", "cron_scan", "cron_scan_failed", "mail_scan", "tasks_lapsed"];
 
 export function clampScanDays(v: unknown): number {
   const n = Number(v);
@@ -54,6 +56,7 @@ export function scanRuns(rows: AuditRow[]): ScanRun[] {
         date,
         ran: false,
         failed: false,
+        started_never_finished: false,
         audit_id: null,
         emails_read: 0,
         tasks_created: 0,
@@ -73,7 +76,10 @@ export function scanRuns(rows: AuditRow[]): ScanRun[] {
   for (const row of rows) {
     const meta = (row.meta && typeof row.meta === "object" ? row.meta : {}) as Record<string, unknown>;
     const date = typeof meta.ist_date === "string" ? meta.ist_date : istDay(row.ts);
-    if (row.action === "cron_scan") {
+    if (row.action === "cron_scan_started") {
+      // Provisional: cleared below once any finish row for the day exists.
+      day(date).started_never_finished = true;
+    } else if (row.action === "cron_scan") {
       const r = day(date);
       r.ran = true;
       r.audit_id = row.id;
@@ -105,5 +111,6 @@ export function scanRuns(rows: AuditRow[]): ScanRun[] {
       r.lapsed_task_ids.push(...ids);
     }
   }
+  for (const r of byDay.values()) if (r.ran || r.failed) r.started_never_finished = false;
   return [...byDay.values()].sort((a, b) => b.date.localeCompare(a.date));
 }

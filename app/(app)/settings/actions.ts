@@ -292,12 +292,11 @@ export async function activatePersonaVersionAction(
 }
 
 // ---------------------------------------------------------------------------
-// M4: which model runs which activity. Names only; API keys stay in the
+// M4: which model runs which activity (B24: the mail scan only; the chat
+// columns are left untouched). Names only; API keys stay in the
 // server environment and are never written to, or read from, the database.
 // ---------------------------------------------------------------------------
 export async function saveAssistantModelsAction(input: {
-  chat_provider: string;
-  chat_model: string;
   scan_provider: string;
   scan_model: string;
 }): Promise<{ ok: boolean; message?: string }> {
@@ -307,7 +306,7 @@ export async function saveAssistantModelsAction(input: {
     const t = v.trim();
     return t ? t : null;
   };
-  for (const p of [input.chat_provider, input.scan_provider]) {
+  for (const p of [input.scan_provider]) {
     if (p.trim() && !known.has(p.trim())) {
       return { ok: false, message: `Unknown provider: ${p}` };
     }
@@ -315,8 +314,6 @@ export async function saveAssistantModelsAction(input: {
   const { error } = await supabase.from("assistant_settings").upsert(
     {
       user_id: user.id,
-      chat_provider: clean(input.chat_provider),
-      chat_model: clean(input.chat_model),
       scan_provider: clean(input.scan_provider),
       scan_model: clean(input.scan_model),
       updated_at: new Date().toISOString(),
@@ -330,7 +327,6 @@ export async function saveAssistantModelsAction(input: {
     action: "assistant_models_changed",
     entity: "assistant_settings",
     meta: {
-      chat: clean(input.chat_provider),
       scan: clean(input.scan_provider),
     },
   });

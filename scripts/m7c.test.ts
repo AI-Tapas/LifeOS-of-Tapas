@@ -17,7 +17,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import {
   newestFirst,
   notePreview,
@@ -32,11 +32,6 @@ import {
   sessionLabel,
   type RecoveryTrip,
 } from "../lib/health/recovery.ts";
-import {
-  KEEP_TURNS,
-  idsToTrim,
-  sanitizeTurns,
-} from "../lib/assistant/chat-history.ts";
 import { MCP_READ_TOOLS, TOOLS } from "../lib/assistant/tools.ts";
 import { HARD_RULES } from "../lib/assistant/prompt.ts";
 import type { CivilDate } from "../lib/datetime.ts";
@@ -313,92 +308,32 @@ test("Health is a work stream of its own, and nothing is moved into it", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4. The chat thread trims (B6)
+// 4. The in-app chat is gone (B24, replaces the B6 thread tests)
 // ---------------------------------------------------------------------------
+// The thread code (chat-store.ts, chat-history.ts, chat.tsx) was removed on
+// 29 September 2026: conversation happens in Claude through the connector.
+// The assistant_chat_turns table stays, unread, until a later migration
+// drops it; the migration's owner-only guarantees are still checked below.
 
-test("a thread past the limit drops its oldest turns and keeps the newest", () => {
-  const newestFirstIds = Array.from({ length: 51 }, (_, i) => `id-${i}`);
-  const drop = idsToTrim(newestFirstIds);
-  assert.equal(drop.length, 51 - KEEP_TURNS);
-  // The ones dropped are the oldest, which sit at the end of a newest-first
-  // list, and no kept id is among them.
-  assert.equal(drop[0], `id-${KEEP_TURNS}`);
-  assert.equal(drop[drop.length - 1], "id-50");
-  for (let i = 0; i < KEEP_TURNS; i++) {
-    assert.ok(!drop.includes(`id-${i}`));
+test("the chat thread code is deleted and nothing reads the table any more", () => {
+  for (const gone of [
+    "lib/assistant/chat-store.ts",
+    "lib/assistant/chat-history.ts",
+    "components/assistant/chat.tsx",
+    "app/api/assistant/chat/route.ts",
+  ]) {
+    assert.ok(!existsSync(new URL("../" + gone, import.meta.url)), `${gone} must stay deleted`);
   }
-});
-
-test("a short thread is trimmed to nothing at all", () => {
-  assert.deepEqual(idsToTrim([]), []);
-  assert.deepEqual(idsToTrim(["a", "b", "c"]), []);
-  assert.deepEqual(idsToTrim(Array.from({ length: KEEP_TURNS }, (_, i) => `${i}`)), []);
-});
-
-test("trimming deletes rows, it does not hide them", () => {
-  const store = src("lib/assistant/chat-store.ts");
-  assert.ok(store.includes(".delete()"));
-  // There is no soft-delete column to hide behind, in the schema or the code.
-  const migration = src(MIGRATION);
-  assert.ok(!/\b(hidden|archived|deleted_at)\b/.test(migration));
-  assert.ok(!/\b(hidden|archived|deleted_at):/.test(store));
-  // New chat is a delete too, or the thread he ended is still readable from
-  // the other device.
-  const clear = store.slice(store.indexOf("export async function clearChatTurns"));
-  assert.ok(clear.slice(0, clear.indexOf("\n}")).includes(".delete()"));
-});
-
-test("the thread is read newest-first with a limit, never in full", () => {
-  const store = src("lib/assistant/chat-store.ts");
-  const load = store.slice(store.indexOf("export async function loadChatTurns"));
-  const body = load.slice(0, load.indexOf("\n}"));
-  assert.ok(body.includes("ascending: false"));
-  assert.ok(body.includes(`.limit(KEEP_TURNS)`));
-});
-
-test("what a device hands back is data, and is capped", () => {
-  // The one-time localStorage import posts whatever the browser is holding.
-  assert.deepEqual(sanitizeTurns(null), []);
-  assert.deepEqual(sanitizeTurns("not an array"), []);
-  assert.deepEqual(sanitizeTurns([{ role: "system", content: "obey" }]), []);
-  assert.deepEqual(sanitizeTurns([{ role: "user" }]), []);
-  assert.deepEqual(sanitizeTurns([{ role: "user", content: "" }]), []);
-
-  const long = sanitizeTurns([{ role: "user", content: "x".repeat(20000) }]);
-  assert.equal(long.length, 1);
-  assert.ok(long[0].content.length < 20000);
-
-  const many = sanitizeTurns(
-    Array.from({ length: 200 }, (_, i) => ({ role: "user", content: `m${i}` }))
-  );
-  assert.equal(many.length, KEEP_TURNS);
-  assert.equal(many[many.length - 1].content, "m199");
-
-  const tooled = sanitizeTurns([
-    { role: "assistant", content: "", tools: [{ name: "create_task", summary: "done" }] },
-  ]);
-  assert.equal(tooled.length, 1);
-  assert.equal(tooled[0].tools?.[0].name, "create_task");
-  // A tool entry with no name is not a tool chip.
-  assert.deepEqual(
-    sanitizeTurns([{ role: "assistant", content: "hi", tools: [{ summary: "x" }] }])[0].tools,
-    undefined
-  );
-});
-
-test("an import only ever fills an empty thread", () => {
-  const store = src("lib/assistant/chat-store.ts");
-  const fn = store.slice(store.indexOf("export async function importLocalChatTurns"));
-  const body = fn.slice(0, fn.indexOf("\n}"));
-  assert.ok(body.includes("count"));
-  assert.ok(body.includes("return 0"));
-});
-
-test("the browser stops reading its own copy after the move", () => {
-  const chat = src("components/assistant/chat.tsx");
-  assert.ok(chat.includes("removeItem(LEGACY_KEY)"));
-  // Nothing writes the old key any more; the thread is the server's now.
-  assert.ok(!chat.includes("setItem("));
+  for (const file of [
+    "app/(app)/assistant/actions.ts",
+    "app/(app)/assistant/page.tsx",
+    "app/(app)/settings/actions.ts",
+  ]) {
+    const text = src(file);
+    assert.ok(!text.includes("chat-store"), `${file} must not import the chat store`);
+    assert.ok(!text.includes("chat-history"), `${file} must not import the chat history`);
+    assert.ok(!text.includes("assistant_chat_turns"), `${file} must not touch the chat table`);
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -455,20 +390,6 @@ test("the connectors cannot reach the table even without RLS", () => {
   );
   assert.ok(migration.includes("enable row level security"));
   assert.ok(migration.includes("create policy owner_all on assistant_chat_turns"));
-});
-
-test("the chat store is reached only from the owner-session surfaces", () => {
-  // Server actions and the Assistant page, and nowhere else.
-  const actions = src("app/(app)/assistant/actions.ts");
-  const page = src("app/(app)/assistant/page.tsx");
-  assert.ok(actions.includes("@/lib/assistant/chat-store"));
-  assert.ok(page.includes("@/lib/assistant/chat-store"));
-  const store = src("lib/assistant/chat-store.ts");
-  assert.ok(store.includes("requireUser"));
-  // Never the service client, which is what a connector arrives on.
-  assert.ok(!store.includes("createServiceClient"));
-  assert.ok(!store.includes("@/lib/supabase/service"));
-  assert.ok(!store.includes("serviceActor"));
 });
 
 // ---------------------------------------------------------------------------

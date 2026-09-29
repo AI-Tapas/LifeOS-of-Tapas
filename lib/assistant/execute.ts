@@ -86,6 +86,7 @@ import {
   threadExists,
 } from "./mailbox";
 import { mailRequest } from "@/lib/assistant/mail";
+import { parseScanArgs } from "@/lib/assistant/scan-args";
 import {
   removeFinanceReminder,
   removeObligationReminder,
@@ -1135,9 +1136,12 @@ const performers: Record<string, Performer> = {
     return { summary: `Event deleted: ${ev.title}.`, undo: null };
   },
 
-  async scan_mail(_supabase, _userId, _input, owner) {
+  async scan_mail(_supabase, _userId, input, owner) {
+    // B24: optional catch-up window and account, checked before anything runs.
+    const args = parseScanArgs(input);
+    if (!args.ok) throw new Error(args.message);
     const { runMailScan } = await import("@/lib/assistant/scan");
-    const summary = await runMailScan(owner);
+    const summary = await runMailScan(owner, args.options);
     return {
       summary:
         `Mail scan: ${summary.scanned} emails read, ${summary.created} task` +

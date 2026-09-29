@@ -21,7 +21,7 @@
 // performer; a ride outside every trip is personal and only counted.
 
 import { cookieActor, type Actor } from "@/lib/assistant/actor";
-import { runLlmTurn } from "@/lib/assistant/llm";
+import { runLlmTurn, type LlmTurn, type LlmTurnRequest } from "@/lib/assistant/llm";
 import type { LlmOverride } from "@/lib/assistant/config";
 import { CAB_TOOL, SCAN_TOOL, TICKET_TOOL, disclosureOf } from "@/lib/assistant/tools";
 import {
@@ -65,13 +65,19 @@ import {
   type NoTripLeg,
 } from "@/lib/trips/ticket";
 import { createTask } from "@/lib/tasks/write";
-import { istInstant } from "@/lib/datetime";
+import {
+  classifyModelError,
+  scanLimits,
+  windowAlreadyClosed,
+  type ScanLimits,
+  type ScanOptions,
+} from "@/lib/assistant/scan-args";
+import { civilKey, civilToday, istInstant } from "@/lib/datetime";
 import type { Json } from "@/lib/database.types";
 
-// A6: proposals are capped per account per day so a mailbox flood cannot
-// bury the task list. Five, not twenty: at twenty the list filled with
-// bills and notices faster than he could read it.
-const DAILY_CAP = 5;
+// A6: proposals are capped per account per day (DAILY_TASK_CAP in
+// scan-args.ts, five). B24: a hand-run catch-up over more than 3 days lifts
+// that cap for that run only, through ScanLimits.task_cap.
 
 // B20: how far back the repeat checks look. A thread with work created in
 // the last 45 days (the isAlreadyOpen memory) is not read again; the same
@@ -106,18 +112,36 @@ type ScanAccount = { id: string; slot: string; provider: string; email: string }
 // the app and for the MCP connector, which has no cookie and arrives with the
 // service actor instead. Writing tasks through lib/tasks/write rather than the
 // "use server" action keeps this off the server-action path entirely.
-export async function runMailScan(actor?: Actor): Promise<ScanSummary> {
+// B24: the model turn, with one rule for a dead key. Every model pass goes
+// through here; the first auth or provider error becomes a ScanModelError
+// with a short fixed reason, and because nothing between here and the cron
+// wrapper catches it, no later pass (and no later account) is attempted.
+// The dead key is therefore tried once a night, not once per pass.
+async function modelTurn(req: LlmTurnRequest): Promise<LlmTurn> {
+  try {
+    return await runLlmTurn(req);
+  } catch (e) {
+    throw classifyModelError(e);
+  }
+}
+
+// options is B24's catch-up: the nightly cron passes none (3 days, 15
+// messages a mailbox, 5 tasks an account, every account).
+export async function runMailScan(actor?: Actor, options: ScanOptions = {}): Promise<ScanSummary> {
   const owner = actor ?? (await cookieActor());
   const { supabase } = owner;
+  const limits = scanLimits(options.days);
 
-  const { data: accounts } = await supabase
+  let accountQuery = supabase
     .from("accounts")
     .select("id, slot, provider, status, connect_mode, email")
     .eq("status", "connected")
     .eq("connect_mode", "direct");
+  if (options.account) accountQuery = accountQuery.eq("slot", options.account);
+  const { data: accounts } = await accountQuery;
 
   const summary: ScanSummary = { scanned: 0, created: 0, skipped: 0, legs: 0, cabs: 0, notes: [] };
-  const override = await loadLlmOverride(supabase, "scan");
+  const override = await loadLlmOverride(supabase);
   // Trip legs have their own cap per run, across accounts, and do not count
   // against the daily task cap.
   let legBudget = TICKET_LEG_CAP;
@@ -136,8 +160,8 @@ export async function runMailScan(actor?: Actor): Promise<ScanSummary> {
     try {
       mails =
         account.provider === "google"
-          ? await listRecentGmail(account.id)
-          : await listRecentGraph(account.id);
+          ? await listRecentGmail(account.id, limits)
+          : await listRecentGraph(account.id, limits);
     } catch (e) {
       summary.notes.push(
         `${account.slot}: ${e instanceof Error ? e.message : "mail fetch failed"}`
@@ -208,7 +232,8 @@ export async function runMailScan(actor?: Actor): Promise<ScanSummary> {
       acc,
       mails.filter((m) => !mayReadMailContent(m.from)),
       refOf,
-      override
+      override,
+      limits
     );
     summary.created += tasks.created;
     summary.skipped += tasks.skipped;
@@ -352,7 +377,7 @@ async function ticketPass(
     .neq("status", "cancelled")
     .not("start_date", "is", null);
 
-  const turn = await runLlmTurn({
+  const turn = await modelTurn({
     blocks: [{ text: TICKET_SYSTEM, stable: true }],
     conv: [{ kind: "text", role: "user", text: buildTicketUserMessage(ticketMails) }],
     tools: [TICKET_TOOL],
@@ -478,7 +503,7 @@ async function cabPass(
     .neq("status", "cancelled")
     .not("start_date", "is", null);
 
-  const turn = await runLlmTurn({
+  const turn = await modelTurn({
     blocks: [{ text: CAB_SYSTEM, stable: true }],
     conv: [{ kind: "text", role: "user", text: buildCabUserMessage(receiptMails) }],
     tools: [CAB_TOOL],
@@ -538,7 +563,8 @@ async function taskPass(
   account: ScanAccount,
   mailsIn: MailMeta[],
   refOf: (id: string) => string,
-  override: LlmOverride | undefined
+  override: LlmOverride | undefined,
+  limits: ScanLimits
 ): Promise<{
   proposed: number;
   created: number;
@@ -626,9 +652,9 @@ async function taskPass(
     .eq("source", "email")
     .like("external_ref", `%:${account.slot}:%`)
     .gte("created_at", dayStartIst);
-  const budget = Math.max(0, DAILY_CAP - (count ?? 0));
+  const budget = Math.max(0, limits.task_cap - (count ?? 0));
   if (!budget) {
-    out.notes.push(`${account.slot}: daily cap of ${DAILY_CAP} reached`);
+    out.notes.push(`${account.slot}: daily cap of ${limits.task_cap} reached`);
     return out;
   }
 
@@ -663,7 +689,7 @@ async function taskPass(
     .map((r) => r.title);
 
   // Isolated scanner context: one tool, no persona, mail fenced as data.
-  const turn = await runLlmTurn({
+  const turn = await modelTurn({
     blocks: [{ text: SCAN_SYSTEM, stable: true }],
     conv: [
       {
@@ -715,6 +741,7 @@ async function taskPass(
     return id;
   };
 
+  const todayKey = civilKey(civilToday());
   for (const p of accepted) {
     // B20: standing boilerplate (a footer's "submit your boarding pass") is
     // never a task. The audit row records the phrase, never the mail.
@@ -722,6 +749,13 @@ async function taskPass(
     if (phrase) {
       out.skipped += 1;
       out.neverExtract.push(phrase);
+      continue;
+    }
+    // B24: a window that closed before today is not worth a task; the 7 AM
+    // sweep would only drop it later.
+    if (windowAlreadyClosed(p.lapses_on, todayKey)) {
+      out.skipped += 1;
+      out.notes.push(`${account.slot}: skipped one email whose window had already closed`);
       continue;
     }
     if (isAlreadyOpen(p.title, openTitles)) {
