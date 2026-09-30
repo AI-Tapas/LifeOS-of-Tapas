@@ -1086,6 +1086,22 @@ code, because every ranked surface now selects the column.
   year and near-duplicate pairs for him to review. It writes nothing, and
   b19.test.ts fails if an insert, update, upsert, delete or rpc appears in it.
 - Tests: `npm run test:b19` (20 offline).
+- B27 (30 September 2026, no migration): finding the email behind a task, and
+  searching. `lifeos_read_mail_thread` now takes EITHER `account` plus
+  `thread_id` OR one `message_ref` (a task's `external_ref`, like
+  `gmail:ca_tapasnr:<message id>` or `graph:altechon:<id>`); both or neither is
+  refused, and an icai ref is refused by name. The thread is found from the
+  message id (Gmail `users.messages.get` with `fields=threadId`, Graph
+  `conversationId`) in lib/assistant/task-mail.ts, pure and dependency
+  injected like mailbox.ts, through the same `mailRequest` path. The audit row
+  is unchanged. `lifeos_list_inbox` gained optional `query` (a string, at most
+  200 characters): Gmail `q` over ALL mail, archived included, and Graph
+  `$search` over the whole mailbox (Graph refuses `$filter` and `$orderby`
+  beside `$search`, so `since` and `unread_only` are applied after the
+  search). With a query and no `since` all time is searched, because the
+  default three days would hide exactly the older mail a search is for; the
+  reply's `since` is then null. The query text is never audited. `max`, the
+  fields, the untrusted marking and the audit row are as before.
 
 ## Mail scanner quality (B20)
 
@@ -1296,6 +1312,21 @@ this code, since the brief cron writes to it. Additive only.
   "faculty" or "travel", and "batch" all appear, and SCAN_SYSTEM says so.
 - Tests: `npm run test:b22` (28 offline, synthetic data, a real unpdf
   extraction and a real hand-built .docx).
+- B27 (no migration): long attachments and tracked changes. `offset` (whole
+  number, default 0) lets an agent read a long file in parts: each call still
+  returns at most 20,000 characters, plus `offset`, `total_chars`,
+  `next_offset` (null at the end), and `has_tracked_changes`. One file is read
+  for 400,000 characters at most whatever the offset; `beyond_read_limit` says
+  when there was more. An offset past the end is refused. The audit row
+  (`mail_attachment_read`) now also records the offset, never text.
+  lib/assistant/docx-text.ts `docxRead` keeps what `docxText` dropped: an
+  insertion reads `[inserted by <author>: ...]`, a deletion (`w:delText`)
+  `[deleted by <author>: ...]` (moves count as insert and delete), the author
+  is left out when the file has none, a comment anchor reads `[comment <id>]`,
+  and the comments of `word/comments.xml` follow the body under "Comments:" as
+  `[comment by <author>: ...]`. `has_tracked_changes` is true when the file
+  holds any insertion, deletion or move, comments alone do not count. Still no
+  new dependency: the same hand-read zip and Node zlib.
 
 ## Scan alarm, catch-up and no in-app chat (B24)
 
@@ -1446,3 +1477,20 @@ additions only, nothing backfilled, RLS unchanged.
   live proof of the trigger is the last test in scripts/rls.test.mjs, for the
   local stack (`supabase start`, migration applied, `npm run test:rls`); never
   run `test:rls:cloud` for it.
+- B27 (no migration): every task read now says where its email is. For a task
+  with `source='email'`, `lifeos_list_agent_instructions` and
+  `lifeos_list_tasks` return `mail_account` (the slot from `external_ref`) and
+  `mail_thread_id` (`external_thread`); an agent passes both to
+  `lifeos_read_mail_thread`, or passes the task's `external_ref` as
+  `message_ref`. A row with no stored `external_thread` (older than B20) is
+  looked up once through the mailbox (`taskMailFields` in
+  lib/assistant/task-mail.ts) and the answer written back to
+  `tasks.external_thread` only while that column is empty, so it is resolved
+  once. That column is not an agent column, so the B26 guard is not involved.
+  At most 10 lookups per call; a provider failure leaves `mail_thread_id` null
+  and never fails the list. The icai slot is never resolved and shows null
+  fields. Not done: the same fields in the `get_context` task rows (that text is
+  built without a mailbox call, and resolving there was not cheap).
+- Tests: `npm run test:b27` (15 offline; the real read tools run against the
+  b26 in-memory database and a mocked mailbox, scripts/b27-loader.mjs and
+  b27-stubs.ts).

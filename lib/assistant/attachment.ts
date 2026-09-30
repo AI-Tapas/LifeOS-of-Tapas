@@ -11,10 +11,12 @@
 //   - PDF (unpdf, the B20 reader) and Word .docx (docx-text.ts, Node's own
 //     zlib) only. At most ATTACHMENT_MAX_BYTES, refused before download when
 //     the provider states the size and again on the real length. At most
-//     ATTACHMENT_TEXT_CAP characters come back. One attachment per call.
+//     ATTACHMENT_TEXT_CAP characters come back per call. One attachment per
+//     call. B27: a longer file is read in parts with `offset`; the reply says
+//     total_chars and next_offset (null at the end).
 //   - The text is untrusted data and goes out inside the fence.
 //   - The audit row names the account, the thread id and the attachment name,
-//     never a byte of the text. It is written before the text is handed over,
+//     (and, since B27, the offset), never a byte of the text. It is written before the text is handed over,
 //     and if it cannot be written nothing is handed over (the B15 pattern).
 //   - Nothing is stored anywhere else.
 //
@@ -38,6 +40,8 @@ import { fenceUntrusted } from "./prompt.ts";
 export const READ_ATTACHMENT_TOOL = "lifeos_read_mail_attachment";
 export const ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
 export const ATTACHMENT_TEXT_CAP = 20000;
+// B27: the most text read out of one file in all, whatever the offset.
+export const ATTACHMENT_TOTAL_CAP = 400000;
 
 const GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me";
 const GRAPH = "https://graph.microsoft.com/v1.0/me";
@@ -46,9 +50,22 @@ const PDF_MIME = "application/pdf";
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 export type TextFn = (bytes: Uint8Array, cap: number) => Promise<string>;
+// The Word reader may also say whether the file carries tracked changes.
+export type DocxFn = (
+  bytes: Uint8Array,
+  cap: number
+) => Promise<string | { text: string; has_tracked_changes: boolean }>;
 export interface Extractors {
   pdf: TextFn;
-  docx: TextFn;
+  docx: DocxFn;
+}
+
+export function checkOffset(v: unknown): number {
+  if (v === undefined || v === null) return 0;
+  if (typeof v !== "number" || !Number.isInteger(v) || v < 0) {
+    throw new Error("offset must be a whole number, 0 or more (the next_offset of the previous call).");
+  }
+  return v;
 }
 
 interface Candidate {
@@ -156,8 +173,14 @@ export interface AttachmentText {
   attachment_name: string;
   kind: "pdf" | "docx";
   size: number;
+  offset: number;
   chars: number;
+  total_chars: number;
+  next_offset: number | null;
+  // True when the file has more text than one file is read for at all.
+  beyond_read_limit: boolean;
   truncated: boolean;
+  has_tracked_changes: boolean;
   text: string;
   untrusted: true;
 }
@@ -170,6 +193,7 @@ export async function readMailAttachment(
 ): Promise<AttachmentText> {
   checkMailSlot(account.slot);
   const threadId = requireThreadId(input.thread_id);
+  const offset = checkOffset(input.offset);
   const wanted = typeof input.attachment === "string" ? input.attachment.trim() : "";
   if (!wanted) {
     throw new Error(
@@ -195,19 +219,31 @@ export async function readMailAttachment(
   if (hit.size > ATTACHMENT_MAX_BYTES) throw tooBig(hit.name);
   const bytes = await hit.fetchBytes();
   if (bytes.length > ATTACHMENT_MAX_BYTES) throw tooBig(hit.name);
-  const raw = (await extract[kind](bytes, ATTACHMENT_TEXT_CAP + 1)).trim();
-  const truncated = raw.length > ATTACHMENT_TEXT_CAP;
-  const text = raw.slice(0, ATTACHMENT_TEXT_CAP);
+  const got = await extract[kind](bytes, ATTACHMENT_TOTAL_CAP + 1);
+  const whole = typeof got === "string" ? { text: got, has_tracked_changes: false } : got;
+  const raw = whole.text.trim();
+  const beyond = raw.length > ATTACHMENT_TOTAL_CAP;
+  const whole_text = raw.slice(0, ATTACHMENT_TOTAL_CAP);
+  if (offset > 0 && offset >= whole_text.length) {
+    throw new Error(`offset ${offset} is past the end: the text is ${whole_text.length} characters.`);
+  }
+  const text = whole_text.slice(offset, offset + ATTACHMENT_TEXT_CAP);
+  const next = offset + text.length < whole_text.length ? offset + text.length : null;
   return {
     account: account.slot,
     thread_id: threadId,
     attachment_name: hit.name,
     kind,
     size: bytes.length,
+    offset,
     chars: text.length,
-    truncated,
+    total_chars: whole_text.length,
+    next_offset: next,
+    beyond_read_limit: beyond,
+    truncated: next !== null,
+    has_tracked_changes: whole.has_tracked_changes,
     text: fenceUntrusted(
-      `text of the attachment ${hit.name} in the ${account.slot} mailbox`,
+      `text of the attachment ${hit.name} in the ${account.slot} mailbox${offset ? ` from character ${offset}` : ""}`,
       text || "(No text could be read. It may be a scanned image, which is not read.)"
     ),
     untrusted: true,
@@ -224,13 +260,13 @@ export interface AttachmentAuditRow {
   action: "mail_attachment_read";
   entity: string;
   entity_id: string;
-  meta: { account: string; thread_id: string; attachment_name: string };
+  meta: { account: string; thread_id: string; attachment_name: string; offset: number };
 }
 
 export function attachmentAuditRow(
   userId: string,
   account: MailAccount,
-  read: Pick<AttachmentText, "thread_id" | "attachment_name">
+  read: Pick<AttachmentText, "thread_id" | "attachment_name" | "offset">
 ): AttachmentAuditRow {
   return {
     user_id: userId,
@@ -238,7 +274,12 @@ export function attachmentAuditRow(
     action: "mail_attachment_read",
     entity: account.slot,
     entity_id: account.id,
-    meta: { account: account.slot, thread_id: read.thread_id, attachment_name: read.attachment_name },
+    meta: {
+      account: account.slot,
+      thread_id: read.thread_id,
+      attachment_name: read.attachment_name,
+      offset: read.offset,
+    },
   };
 }
 

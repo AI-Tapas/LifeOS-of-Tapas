@@ -11,7 +11,7 @@
 // Limits: the inflated XML is capped (INFLATE_CAP) so a zip bomb cannot eat
 // memory, only stored and deflated entries are read, and anything that does
 // not parse returns "" rather than throwing. No macros, no embedded objects,
-// no headers or footers: body text only.
+// no headers or footers: body text, tracked changes and comments only.
 
 import { inflateRawSync } from "node:zlib";
 
@@ -70,28 +70,91 @@ function decodeEntities(s: string): string {
     .replace(/&amp;/g, "&");
 }
 
+// One run of inline XML to text: tabs and breaks, then every tag goes.
+function inlineText(xml: string): string {
+  return xml
+    .replace(/<w:tab\/>/g, "\t")
+    .replace(/<w:(br|cr)\b[^>]*\/>/g, "\n")
+    .replace(/<\/w:p>/g, "\n")
+    .replace(/<[^>]+>/g, "");
+}
+
+function tidy(s: string): string {
+  return decodeEntities(s).replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function authorOf(attrs: string): string {
+  const m = /\bw:author="([^"]*)"/.exec(attrs);
+  return m && m[1].trim() ? m[1].trim() : "";
+}
+
+// B27. Tracked changes: an insertion reads [inserted by <author>: ...] and a
+// deletion [deleted by <author>: ...] (the author is left out when the file
+// has none), and a comment anchor reads [comment <id>]. Without this a
+// contract returned with track changes read as a clean document.
+const REVISION = /<w:(ins|del|moveTo|moveFrom)(\s[^>]*?)?(?<!\/)>([\s\S]*?)<\/w:\1>/g;
+const REVISION_MARK = /<w:(ins|del|moveTo|moveFrom)(\s[^>]*)?\/>/g;
+
+// word/document.xml to plain text, plus whether it carries tracked changes.
+export function documentXmlRead(xml: string): { text: string; has_tracked_changes: boolean } {
+  // Self-closing w:ins / w:del sit in a paragraph mark's properties: they say
+  // a change exists but carry no text.
+  let tracked = new RegExp(REVISION_MARK.source).test(xml);
+  const marked = xml
+    .replace(REVISION_MARK, "")
+    .replace(REVISION, (_all, kind: string, attrs: string | undefined, inner: string) => {
+      tracked = true;
+      const text = inlineText(inner).trim();
+      if (!text) return "";
+      const who = authorOf(attrs ?? "");
+      const label = kind === "ins" || kind === "moveTo" ? "inserted" : "deleted";
+      return `[${label}${who ? ` by ${who}` : ""}: ${text}]`;
+    })
+    .replace(/<w:commentReference\s+[^>]*?\bw:id="(\d+)"[^>]*\/>/g, "[comment $1]");
+  return { text: tidy(inlineText(marked)), has_tracked_changes: tracked };
+}
+
 // word/document.xml to plain text.
 export function documentXmlText(xml: string): string {
-  return decodeEntities(
-    xml
-      .replace(/<w:tab\/>/g, "\t")
-      .replace(/<w:(br|cr)\b[^>]*\/>/g, "\n")
-      .replace(/<\/w:p>/g, "\n")
-      .replace(/<[^>]+>/g, "")
-  )
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  return documentXmlRead(xml).text;
+}
+
+// word/comments.xml to one "[comment by <author>: ...]" line per comment,
+// numbered with the id the [comment <id>] marker in the text carries.
+export function commentsXmlText(xml: string): string {
+  const out: string[] = [];
+  for (const m of xml.matchAll(/<w:comment\b([^>]*?)>([\s\S]*?)<\/w:comment>/g)) {
+    const id = /\bw:id="(\d+)"/.exec(m[1])?.[1] ?? "";
+    const text = tidy(inlineText(m[2])).replace(/\s*\n\s*/g, " ");
+    if (!text) continue;
+    const who = authorOf(m[1]);
+    out.push(`${id ? `${id}. ` : ""}[comment${who ? ` by ${who}` : ""}: ${text}]`);
+  }
+  return out.join("\n");
+}
+
+export interface DocxRead {
+  text: string;
+  has_tracked_changes: boolean;
+}
+
+export async function docxRead(bytes: Uint8Array, cap: number): Promise<DocxRead> {
+  const none = { text: "", has_tracked_changes: false };
+  // A zip starts with a local file header; anything else is not read at all.
+  if (bytes.length < 4 || Buffer.from(bytes.subarray(0, 4)).readUInt32LE(0) !== LOCAL_SIG) return none;
+  try {
+    const xml = zipEntry(bytes, "word/document.xml");
+    if (!xml) return none;
+    const body = documentXmlRead(Buffer.from(xml).toString("utf8"));
+    const c = zipEntry(bytes, "word/comments.xml");
+    const comments = c ? commentsXmlText(Buffer.from(c).toString("utf8")) : "";
+    const text = comments ? `${body.text}\n\nComments:\n${comments}` : body.text;
+    return { text: text.slice(0, cap), has_tracked_changes: body.has_tracked_changes };
+  } catch {
+    return none;
+  }
 }
 
 export async function docxText(bytes: Uint8Array, cap: number): Promise<string> {
-  // A zip starts with a local file header; anything else is not read at all.
-  if (bytes.length < 4 || Buffer.from(bytes.subarray(0, 4)).readUInt32LE(0) !== LOCAL_SIG) return "";
-  try {
-    const xml = zipEntry(bytes, "word/document.xml");
-    if (!xml) return "";
-    return documentXmlText(Buffer.from(xml).toString("utf8")).slice(0, cap);
-  } catch {
-    return "";
-  }
+  return (await docxRead(bytes, cap)).text;
 }

@@ -35,6 +35,10 @@ class Query {
   order() { return this; }
   limit() { return this; }
   gte() { return this; }
+  gt() { return this; }
+  or() { return this; }
+  range() { return this; }
+  is(c: string, v: unknown) { this.filters.push((r) => (v === null ? r[c] == null : r[c] === v)); return this; }
   update(patch: Row) { this.patch = patch; return this; }
   insert(row: Row) { this.pendingInsert = row; return this; }
   delete() { this.patch = { __delete: true }; return this; }

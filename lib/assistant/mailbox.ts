@@ -151,6 +151,17 @@ export function clampMax(v: unknown): number {
   return Math.min(Math.max(Math.trunc(n), 1), MAX_CAP);
 }
 
+export const QUERY_MAX = 200;
+
+// B27: the optional search text of lifeos_list_inbox. Blank means no search.
+export function checkQuery(v: unknown): string {
+  if (v === undefined || v === null) return "";
+  if (typeof v !== "string") throw new Error("query must be a string.");
+  const q = v.trim();
+  if (q.length > QUERY_MAX) throw new Error(`query is at most ${QUERY_MAX} characters.`);
+  return q;
+}
+
 // ---------------------------------------------------------------------------
 // Provider errors
 // ---------------------------------------------------------------------------
@@ -567,14 +578,23 @@ export async function listInbox(
   account: MailAccount,
   input: Record<string, unknown>,
   now: Date = new Date()
-): Promise<{ account: string; since: string; count: number; items: InboxItem[] }> {
+): Promise<{ account: string; since: string | null; count: number; items: InboxItem[] }> {
+  const query = checkQuery(input.query);
+  // B27: a search with no explicit since looks at all time, not the default
+  // three days, or an older email could never be found.
+  const hasSince = input.since !== undefined && input.since !== null && input.since !== "";
+  const bounded = !query || hasSince;
   const since = sinceDate(input.since, now);
   const max = clampMax(input.max);
   const unreadOnly = input.unread_only === true;
   const items: InboxItem[] = [];
 
   if (account.provider === "google") {
-    const q = `in:inbox after:${Math.floor(since.getTime() / 1000)}` + (unreadOnly ? " is:unread" : "");
+    // With a query Gmail searches all mail (archived included), not only the inbox.
+    const q =
+      (query || "in:inbox") +
+      (bounded ? ` after:${Math.floor(since.getTime() / 1000)}` : "") +
+      (unreadOnly ? " is:unread" : "");
     const listRes = await request(
       `${GMAIL}/messages?` + new URLSearchParams({ q, maxResults: String(max) })
     );
@@ -614,21 +634,37 @@ export async function listInbox(
       });
     }
   } else {
+    const select =
+      "id,conversationId,from,toRecipients,ccRecipients,subject,receivedDateTime,bodyPreview,isRead,hasAttachments,isDraft,internetMessageHeaders";
     const filter =
       `receivedDateTime ge ${since.toISOString()}` + (unreadOnly ? " and isRead eq false" : "");
+    // Graph refuses $filter and $orderby beside $search, so a search reads
+    // the whole mailbox (not one folder) and since and unread_only are applied
+    // here afterwards.
     const res = await request(
-      `${GRAPH}/mailFolders/inbox/messages?` +
-        new URLSearchParams({
-          $top: String(max),
-          $orderby: "receivedDateTime desc",
-          $filter: filter,
-          $select:
-            "id,conversationId,from,toRecipients,ccRecipients,subject,receivedDateTime,bodyPreview,isRead,hasAttachments,internetMessageHeaders",
-        })
+      query
+        ? `${GRAPH}/messages?` +
+            new URLSearchParams({
+              $top: String(max),
+              $search: `"${query.replace(/"/g, " ")}"`,
+              $select: select,
+            })
+        : `${GRAPH}/mailFolders/inbox/messages?` +
+            new URLSearchParams({
+              $top: String(max),
+              $orderby: "receivedDateTime desc",
+              $filter: filter,
+              $select: select,
+            })
     );
     await ensureOk(res, account.slot, "Listing the inbox");
     const j = (await res.json()) as { value?: GraphMessage[] };
     for (const m of j.value ?? []) {
+      if (query) {
+        if (m.isDraft) continue;
+        if (hasSince && Date.parse(m.receivedDateTime ?? "") < since.getTime()) continue;
+        if (unreadOnly && m.isRead !== false) continue;
+      }
       const from = graphDisplay(m.from);
       const subject = m.subject ?? "";
       const appTag =
@@ -651,7 +687,7 @@ export async function listInbox(
       });
     }
   }
-  return { account: account.slot, since: since.toISOString(), count: items.length, items };
+  return { account: account.slot, since: bounded ? since.toISOString() : null, count: items.length, items };
 }
 
 // ---------------------------------------------------------------------------

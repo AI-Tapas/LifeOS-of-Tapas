@@ -603,7 +603,7 @@ test("read_mail_attachment is never reachable from the scan path", () => {
   assert.match(src("lib/assistant/mailbox.ts"), /if \(!mayReadMailContent\(mail\.from\)\) return out;/);
 });
 
-test("the attachment audit row has account, thread and file name, and no text", async () => {
+test("the attachment audit row has account, thread, file name and offset, and no text", async () => {
   const m = attachmentMock();
   const rows: AttachmentAuditRow[] = [];
   const read = await readMailAttachmentRecorded(m.request, GACC, { thread_id: "th1", attachment: "Notice.pdf" }, EXTRACT, {
@@ -614,11 +614,11 @@ test("the attachment audit row has account, thread and file name, and no text", 
     },
   });
   assert.equal(rows.length, 1);
-  assert.deepEqual(rows[0].meta, { account: "taxstrategia", thread_id: "th1", attachment_name: "Notice.pdf" });
+  assert.deepEqual(rows[0].meta, { account: "taxstrategia", thread_id: "th1", attachment_name: "Notice.pdf", offset: 0 });
   assert.equal(rows[0].action, "mail_attachment_read");
   assert.ok(!JSON.stringify(rows[0]).includes("Show cause"), "no text in the audit row");
   assert.ok(read.text.includes("Show cause"));
-  assert.deepEqual(Object.keys(attachmentAuditRow("u", GACC, read).meta), ["account", "thread_id", "attachment_name"]);
+  assert.deepEqual(Object.keys(attachmentAuditRow("u", GACC, read).meta), ["account", "thread_id", "attachment_name", "offset"]);
   // A read that cannot be recorded hands nothing over.
   await assert.rejects(
     readMailAttachmentRecorded(m.request, GACC, { thread_id: "th1", attachment: "Notice.pdf" }, EXTRACT, {
