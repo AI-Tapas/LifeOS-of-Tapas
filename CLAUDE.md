@@ -1781,3 +1781,76 @@ seeded as billable, RLS unchanged.
   The live proof of the trigger belongs in scripts/rls.test.mjs on the local
   stack; it was not run for this build (no database), and test:rls:cloud is
   never run for it.
+
+## Phone alerts and share-to-Life OS capture (B31)
+
+Two migrations, NOT applied anywhere when they were written; apply both, in
+order, before (or with) the deploy of this code, since Settings reads both
+tables and the capture route needs the enum value:
+`20261003000100_b31_capture_source.sql` (the enum value `task_source` =
+`capture`, alone, because Postgres refuses to use an enum value in the
+transaction that adds it) and `20261003000200_b31_push_and_capture.sql` (tables
+`push_subscriptions` and `capture_tokens`, RLS owner only, service_role granted).
+Dependency added: `web-push` (RFC 8291 encryption and VAPID signing; nothing
+hand-rolled). Type shim in lib/push/web-push.d.ts.
+
+- Why: Tapas is retiring Slack. `#tasks` buzzed his phone, `#inbox` took
+  captures. Slack stays until the agents switch over, outside this build.
+- Env vars, server only, never NEXT_PUBLIC_: `VAPID_PUBLIC_KEY`,
+  `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` (a mailto: address). Generate once with
+  `npx web-push generate-vapid-keys`. With any missing, the Settings panel says
+  alerts are not set up and nothing crashes (`vapidConfig` in lib/push/send.ts).
+  The public key reaches the page through GET /api/push/key (owner session).
+- Sending: `sendPush` (lib/push/send.ts) takes title, body and an in-app url,
+  shapes them (`shapePush`: one line, clipped, url must be an app path), skips
+  quiet hours (10 PM to 7 AM IST, nothing queued: the item is still in the app
+  and the brief), refuses past 20 alerts in a rolling 24 hours across every
+  source (counted from `push_sent` audit rows), sends to every device, deletes
+  a device on 404 or 410 and stamps `last_error_at` on other failures. The audit
+  row `push_sent` holds counts only, never the text. The pure rules are in
+  lib/push/core.ts. `sendPushQuietly` is for automatic sources: it never throws.
+- What raises an alert, and nothing else: `report_agent_result` with status
+  `needs_you` ("Needs you: <task title>", opens /tasks?task=<id>; the result
+  words never go on the lock screen); the 7 AM brief cron when the B24 scan
+  health warning exists; and the connector tool `lifeos_notify`.
+- `lifeos_notify` (registry name `notify`): autonomous, disclosure app_data, NOT
+  undoable (a sent alert cannot be recalled, and it is not in UNDOABLE). title
+  at most 60, body at most 140, optional task_id (must be one of his tasks, the
+  alert opens it). Newlines collapse to one line; a URL, web address, scheme or
+  anything credential-shaped is refused, and so are amounts, long digit runs
+  (PNR) and PAN (`checkNotifyText`). The queue row keeps lengths, not words.
+- Lock screen privacy: alert text shows on a locked phone. Never an amount, a
+  PNR, an email body or document text; the scan alarm names no client. Task
+  titles are allowed. iOS Settings > Notifications > Life OS > Show Previews >
+  "When Unlocked" hides them.
+- Service worker (public/sw.js): `push` always shows a notification (iOS drops
+  a subscription that gets a push and shows nothing); `notificationclick`
+  focuses or opens the url and only a same-origin path is allowed (`alertTarget`).
+  Install, activate and fetch are unchanged. iOS allows push only for a
+  Home Screen app (16.4 and later) and only after a permission request from a
+  tap, so the Settings button does the whole subscribe inside its click.
+- Capture: `POST /api/capture`, JSON `{ "text": "..." }`, header
+  `Authorization: Bearer <capture token>`. Exempt from the cookie gate in
+  proxy.ts. The whole handler is lib/capture/handle.ts (database passed in, so
+  it is tested offline); the route file is a wrapper. Up to 4,000 characters, 60
+  captures a day (429 after), a repeat within 10 minutes (B19 near-duplicate
+  rule on the whole text) returns the existing task id. Tokens: made in Settings
+  > Share to Life OS, shown once, only the sha256 hash stored, looked up by hash
+  and compared in constant time, revocable (the row is deleted), at most 10. A
+  token is accepted by this route and nowhere else, and no other token (the MCP
+  bearer, a cron secret) is accepted here.
+- A capture becomes a task: status inbox, title the first line cut to 120
+  characters, note the full text, source `capture`, in the first work stream
+  `pickWorkStream` chooses. Captured text is often someone else's WhatsApp
+  message, so it is UNTRUSTED exactly like source email: `isUntrustedSource`
+  (lib/tasks/untrusted.ts, pure, one list: email, capture) is what every fence
+  asks (context-tasks.ts, the untrusted flag in lifeos_list_tasks, the agent
+  instruction list and lifeos_search). Add any new untrusted source THERE.
+  Places that test `source === "email"` for other reasons (the scan's mail
+  thread lookup, the brief's "today's scan" line, the lapsed-task report) are
+  email-specific on purpose and unchanged.
+- Shortcut recipe for iPhone and iPad: docs/share-to-life-os.md.
+- Tests: `npm run test:b31` (offline; the real executor, sender and capture
+  handler against an in-memory database, web-push mocked, scripts/
+  b31-loader.mjs and b31-stubs.ts). The live proof of the tables' RLS is in
+  scripts/rls.test.mjs for the local stack; test:rls:cloud is never run for it.
