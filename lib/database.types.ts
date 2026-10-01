@@ -368,6 +368,33 @@ export type Database = {
           },
         ]
       }
+      capture_tokens: {
+        Row: {
+          created_at: string
+          id: string
+          label: string
+          last_used_at: string | null
+          token_hash: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          label: string
+          last_used_at?: string | null
+          token_hash: string
+          user_id?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          label?: string
+          last_used_at?: string | null
+          token_hash?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       events: {
         Row: {
           account_id: string | null
@@ -751,6 +778,42 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      push_subscriptions: {
+        Row: {
+          auth: string
+          created_at: string
+          device_label: string | null
+          endpoint: string
+          id: string
+          last_error_at: string | null
+          last_ok_at: string | null
+          p256dh: string
+          user_id: string
+        }
+        Insert: {
+          auth: string
+          created_at?: string
+          device_label?: string | null
+          endpoint: string
+          id?: string
+          last_error_at?: string | null
+          last_ok_at?: string | null
+          p256dh: string
+          user_id?: string
+        }
+        Update: {
+          auth?: string
+          created_at?: string
+          device_label?: string | null
+          endpoint?: string
+          id?: string
+          last_error_at?: string | null
+          last_ok_at?: string | null
+          p256dh?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       recurring_obligations: {
         Row: {
@@ -1233,7 +1296,7 @@ export type Database = {
       reminder_channel: "gcal" | "in_app"
       reminder_mode: "calendar" | "in_app"
       task_priority: "low" | "medium" | "high"
-      task_source: "manual" | "email" | "assistant"
+      task_source: "manual" | "email" | "assistant" | "capture"
       task_status: "inbox" | "todo" | "doing" | "done" | "dropped"
       trip_bills_to: "icai_monthly" | "chapter_aed" | "none" | "client"
       trip_expense_category: "transport" | "hotel" | "per_diem" | "other"
@@ -1431,7 +1494,7 @@ export const Constants = {
       project_status: ["active", "on_hold", "done", "dropped"],
       reminder_channel: ["gcal", "in_app"],
       task_priority: ["low", "medium", "high"],
-      task_source: ["manual", "email", "assistant"],
+      task_source: ["manual", "email", "assistant", "capture"],
       task_status: ["inbox", "todo", "doing", "done", "dropped"],
       trip_bills_to: ["icai_monthly", "chapter_aed", "none", "client"],
       trip_expense_category: ["transport", "hotel", "per_diem", "other"],

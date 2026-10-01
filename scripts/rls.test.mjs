@@ -23,6 +23,8 @@ const TABLES = [
   "assistant_chat_turns",
   // B22: the stored morning brief.
   "briefs",
+  // B31: device push endpoints and hashed share-to-Life OS tokens.
+  "push_subscriptions", "capture_tokens",
 ];
 
 function localEnv() {
