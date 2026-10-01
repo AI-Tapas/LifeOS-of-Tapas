@@ -1126,7 +1126,8 @@ export async function runReadTool(
         cities: t.cities,
         // B22: each leg carries its index, the leg_index update_trip_leg and
         // remove_trip_leg take.
-        legs: parseLegs(t.legs).map((l, index) => ({ index, ...l })),
+        // B29: time is HH:MM IST, or null when not known.
+        legs: parseLegs(t.legs).map((l, index) => ({ index, ...l, time: l.time ?? null })),
         work_stream: (t.work_streams as { name: string } | null)?.name ?? null,
         bills_to: t.bills_to,
         notes: t.notes,

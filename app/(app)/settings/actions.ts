@@ -8,6 +8,7 @@ import { TokenRevokedError } from "@/lib/oauth/core";
 import { providerOptions } from "@/lib/assistant/config";
 import { requireUser } from "@/lib/auth/require-user";
 import { sweepInAppReminderEvents } from "@/lib/reminders/writer";
+import { clearFamilyTravel, syncFamilyTravel } from "@/lib/family/sync";
 import { reportable, describeError, recordEvent } from "@/lib/errors";
 import { checkStreamEdit } from "@/lib/tasks/stream";
 
@@ -168,6 +169,73 @@ export async function setReminderHomeAction(calendarId: string): Promise<void> {
     .eq("id", calendarId);
   if (error) throw error;
   revalidatePath("/settings");
+}
+
+// B29: the family travel calendar. Owner session only, and on no tool surface.
+// Pass a calendar id to choose it, or null for "None", which removes every
+// event Life OS wrote there. The old calendar is cleared BEFORE the flag moves,
+// because the flag is how the calendar is found.
+export async function setFamilyTravelCalendarAction(
+  calendarId: string | null
+): Promise<{ ok: boolean; message: string }> {
+  const { supabase, user } = await requireUser("/settings");
+
+  let target: { id: string; account_id: string; is_reminder_home: boolean } | null = null;
+  if (calendarId) {
+    const { data } = await supabase
+      .from("calendars")
+      .select("id, account_id, is_reminder_home")
+      .eq("id", calendarId)
+      .maybeSingle();
+    if (!data) return { ok: false, message: "That calendar was not found." };
+    if (data.is_reminder_home) {
+      return { ok: false, message: "The reminder-home calendar cannot also be the family calendar." };
+    }
+    target = data;
+  }
+
+  // Remove what Life OS wrote on the current family calendar, if it is changing.
+  const { data: current } = await supabase
+    .from("calendars")
+    .select("id")
+    .eq("is_family_travel", true)
+    .maybeSingle();
+  let note = "";
+  if (current && current.id !== calendarId) {
+    const cleared = await clearFamilyTravel(user.id);
+    if (!cleared.ran) note = " The old calendar could not be reached, so its events were left in place.";
+    else if (cleared.failed) note = ` ${cleared.failed} old events could not be removed.`;
+  }
+
+  if (current && current.id !== calendarId) {
+    const { error } = await supabase
+      .from("calendars")
+      .update({ is_family_travel: false })
+      .eq("id", current.id);
+    if (error) return { ok: false, message: "Could not switch the family calendar off." };
+  }
+  if (!target) {
+    revalidatePath("/settings");
+    return { ok: true, message: `Family travel calendar is off.${note}` };
+  }
+  if (!current || current.id !== target.id) {
+    // The DB trigger rejects a calendar that is not on the ca_tapasnr account.
+    const { error } = await supabase
+      .from("calendars")
+      .update({ is_family_travel: true })
+      .eq("id", target.id);
+    if (error) {
+      return { ok: false, message: "Only a calendar on the ca.tapasnr account can be the family calendar." };
+    }
+  }
+  const synced = await syncFamilyTravel(user.id);
+  revalidatePath("/settings");
+  return {
+    ok: true,
+    message: synced.ran
+      ? `Family travel calendar set. ${synced.created} added, ${synced.updated} updated, ${synced.deleted} removed.${note}`
+      : `Family travel calendar set, but the first sync did not run (${synced.reason}). It retries on the next trip change and each morning.${note}`,
+  };
 }
 
 // M3: choose which calendars the unified view syncs. Defaults to true for a

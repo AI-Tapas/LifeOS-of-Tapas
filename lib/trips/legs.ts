@@ -7,7 +7,7 @@
 // edit, not a re-parsed copy, so undo writes back exactly what was there.
 // Pure, relative imports only, for scripts/b22.test.ts.
 
-import { TRANSPORT_MODES, parseLegs, type TransportMode, type TripLeg } from "./core.ts";
+import { TRANSPORT_MODES, checkLegTime, parseLegs, type TransportMode, type TripLeg } from "./core.ts";
 
 export type LegEdit =
   | { ok: true; legs: TripLeg[]; leg: TripLeg | null }
@@ -41,6 +41,9 @@ export function editLeg(raw: unknown, index: unknown, input: Record<string, unkn
     return { ok: false, message: `mode must be one of ${TRANSPORT_MODES.join(", ")}.` };
   }
   const ref = text(input.ref);
+  // B29: omit to keep. A time cannot be cleared by a tool; set a new one.
+  const time = checkLegTime(input.time);
+  if (!time.ok) return { ok: false, message: time.message };
   const leg: TripLeg = {
     ...legs[i],
     ...(text(input.from_city) ? { from: text(input.from_city)! } : {}),
@@ -48,6 +51,7 @@ export function editLeg(raw: unknown, index: unknown, input: Record<string, unkn
     ...(date ? { date } : {}),
     ...(mode ? { mode: mode as TransportMode } : {}),
     ...(ref ? { ref: ref.slice(0, 40) } : {}),
+    ...(time.time ? { time: time.time } : {}),
   };
   const next = legs.slice();
   next[i] = leg;

@@ -269,7 +269,8 @@ export default function TripDetail({
                     {leg.from || "?"} to {leg.to || "?"}
                   </p>
                   <p className="mt-0.5 text-xs text-secondary">
-                    {dayLabel(leg.date) || "no date"} · {MODE_LABELS[leg.mode]}
+                    {dayLabel(leg.date) || "no date"}
+                    {leg.time ? ` at ${leg.time}` : ""} · {MODE_LABELS[leg.mode]}
                   </p>
                 </div>
                 <span className="shrink-0 text-sm">
@@ -445,6 +446,7 @@ function LegForm({
   const [date, setDate] = useState(leg?.date ?? defaultDate);
   const [mode, setMode] = useState<TransportMode>(leg?.mode ?? "vande_bharat");
   const [cost, setCost] = useState(leg?.cost != null ? String(leg.cost) : "");
+  const [time, setTime] = useState(leg?.time ?? "");
   const [armed, setArmed] = useState(false);
 
   return (
@@ -473,6 +475,14 @@ function LegForm({
             type="date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
+            className={inputCls}
+          />
+        </Field>
+        <Field label="Departure time (IST, optional)">
+          <input
+            type="time"
+            value={time}
+            onChange={(e) => setTime(e.target.value)}
             className={inputCls}
           />
         </Field>
@@ -510,6 +520,9 @@ function LegForm({
                 date,
                 mode,
                 cost: cost ? Number(cost) : null,
+                // Kept as they were: the form has no field for the booking ref.
+                ...(leg?.ref ? { ref: leg.ref } : {}),
+                ...(time ? { time } : {}),
               })
             }
             disabled={pending}

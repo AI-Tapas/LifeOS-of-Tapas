@@ -50,6 +50,25 @@ export interface TripLeg {
   // B20: the PNR or booking id from a ticket email, at most 40 characters.
   // An optional jsonb key, so no migration: rows without it read as before.
   ref?: string | null;
+  // B29: departure time, "HH:MM" 24-hour IST. Optional jsonb key, no migration.
+  // Read defensively: a value that is not HH:MM is dropped by parseLegs.
+  time?: string | null;
+}
+
+// B29. One definition of a leg time for every writer (both tools, the ticket
+// proposal, the trip form) and the reader.
+const LEG_TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+export type LegTimeCheck = { ok: true; time: string | null } | { ok: false; message: string };
+
+// undefined, null or blank means "no time"; anything else must be HH:MM.
+export function checkLegTime(raw: unknown): LegTimeCheck {
+  if (raw === undefined || raw === null) return { ok: true, time: null };
+  if (typeof raw !== "string") return { ok: false, message: "time must be HH:MM, 24-hour IST." };
+  const t = raw.trim();
+  if (!t) return { ok: true, time: null };
+  if (!LEG_TIME_RE.test(t)) return { ok: false, message: "time must be HH:MM, 24-hour IST, for example 07:05 or 19:00." };
+  return { ok: true, time: t };
 }
 
 // legs is jsonb, so anything could be in there. Read it defensively and drop
@@ -74,6 +93,7 @@ export function parseLegs(raw: unknown): TripLeg[] {
       mode,
       cost: typeof r.cost === "number" ? r.cost : null,
       ...(typeof r.ref === "string" && r.ref ? { ref: r.ref.slice(0, 40) } : {}),
+      ...(typeof r.time === "string" && LEG_TIME_RE.test(r.time) ? { time: r.time } : {}),
     });
   }
   return out.sort((a, b) => a.date.localeCompare(b.date));

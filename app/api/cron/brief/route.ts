@@ -18,6 +18,7 @@ import { loadTripSteps } from "@/lib/tasks/trip-steps";
 import { setTaskStatus } from "@/lib/tasks/write";
 import type { MonthExpense } from "@/lib/trips/month";
 import type { Holding } from "@/lib/money/investments";
+import { syncFamilyTravel } from "@/lib/family/sync";
 import { cronAuthorized, alreadyRanToday } from "@/lib/cron/guard";
 import { addDays, civilKey, civilToday, istInstant } from "@/lib/datetime";
 import type { Json } from "@/lib/database.types";
@@ -44,6 +45,10 @@ export async function GET(req: Request): Promise<Response> {
   if (alreadyRanToday(recent ?? [], istDate)) {
     return Response.json({ skipped: true, reason: "already ran today" });
   }
+
+  // B29: the daily repair pass for the family travel calendar. It never throws
+  // and a failure here never stops the brief.
+  await syncFamilyTravel(userId);
 
   try {
     const today = civilToday();

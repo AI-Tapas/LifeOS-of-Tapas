@@ -108,7 +108,7 @@ function gcalUrl(calExtId: string, extEventId?: string): string {
   return extEventId ? `${base}/${encodeURIComponent(extEventId)}` : base;
 }
 
-async function gcalCreate(
+export async function gcalCreate(
   accountId: string,
   calExtId: string,
   payload: unknown
@@ -132,7 +132,7 @@ async function gcalCreate(
 
 // Patch an existing reminder event. Returns false if the event is gone (404/410)
 // so the caller can recreate it.
-async function gcalPatch(
+export async function gcalPatch(
   accountId: string,
   calExtId: string,
   extEventId: string,
@@ -153,7 +153,7 @@ async function gcalPatch(
   return true;
 }
 
-async function gcalDelete(
+export async function gcalDelete(
   accountId: string,
   calExtId: string,
   extEventId: string

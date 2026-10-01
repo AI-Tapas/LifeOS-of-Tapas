@@ -11,6 +11,7 @@ const STUBBED = new Set([
   "@/lib/oauth/tokens",
   "@/lib/events/write",
   "@/lib/reminders/writer",
+  "@/lib/family/sync",
   "@/lib/assistant/mail",
   "@/lib/assistant/context",
   "@/lib/brief/store-db",

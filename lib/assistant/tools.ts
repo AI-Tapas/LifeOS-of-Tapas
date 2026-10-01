@@ -756,6 +756,7 @@ export const TOOLS: ToolDef[] = [
       ),
       cost: numOrNull("Fare in rupees. Omit when it is not known yet."),
       reference: strOrNull("The PNR or booking id, at most 40 characters. Omit when there is none."),
+      time: strOrNull("Departure time as HH:MM, 24-hour IST, for example 07:05. Omit when it is not known."),
     }),
   },
   {
@@ -873,6 +874,7 @@ export const TOOLS: ToolDef[] = [
         "How he travels. Omit to keep."
       ),
       ref: strOrNull("The PNR or booking id, at most 40 characters. Omit to keep."),
+      time: strOrNull("Departure time as HH:MM, 24-hour IST, for example 07:05. Omit to keep."),
     }),
   },
   {
@@ -1273,6 +1275,9 @@ export const TICKET_TOOL: ToolDef = {
       "How he travels. Any other train is other."
     ),
     reference: strOrNull("The PNR or booking id, at most 40 characters. Omit when there is none."),
+    time: strOrNull(
+      "Departure time as HH:MM, 24-hour IST, only when the ticket states it clearly. Omit when it does not."
+    ),
   }),
 };
 

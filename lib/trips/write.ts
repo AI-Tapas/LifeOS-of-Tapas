@@ -17,6 +17,7 @@ import {
 import { parseLegs, stripHomeCity, type TripLeg } from "./core.ts";
 import { createTask, setTaskStatus, updateTask } from "@/lib/tasks/write";
 import { syncTripEvent, removeTripEvent } from "@/lib/reminders/writer";
+import { syncFamilyTravel } from "@/lib/family/sync";
 import { civilKey, civilToday, istInstant } from "@/lib/datetime";
 import type { Database, Json } from "@/lib/database.types";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -121,6 +122,8 @@ export async function createTrip(
   // calendar. One per trip, never one per step. A failure here (ca.tapasnr
   // revoked, say) must not fail the trip write: the next save re-syncs it.
   if (input.start_date) await syncTripEvent(userId, data.id);
+  // B29: the family travel calendar. Never throws, never blocks the write.
+  await syncFamilyTravel(userId);
 
   // An overseas chapter trip always gets its AED reminder, checklist asked
   // for or not: that invoice is raised once or twice a year and forgetting it
@@ -431,6 +434,15 @@ export async function updateTrip(
   // The calendar entry moves with the trip's dates, and goes when the start
   // date does. Cheap enough to re-sync on any save: it is one patch call.
   await syncTripEvent(userId, id);
+  // B29: only a change to what the family calendar shows needs a sync.
+  if (
+    patch.legs !== undefined ||
+    patch.status !== undefined ||
+    patch.cities !== undefined ||
+    patch.session_date !== undefined
+  ) {
+    await syncFamilyTravel(userId);
+  }
   return { ok: true, id };
 }
 
@@ -468,6 +480,9 @@ export async function deleteTrip(
   // on delete set null, so work he still owes becomes an ordinary task again.
   const { error } = await supabase.from("trips").delete().eq("id", id);
   if (error) return { ok: false, message: error.message };
+  // B29: the trip's family events lose their trip_id (set null) and the sync
+  // deletes them from the family calendar.
+  await syncFamilyTravel(userId);
   return { ok: true };
 }
 

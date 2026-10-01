@@ -13,7 +13,7 @@
 // Audit text built here carries refs, ids and counts only: never a city, a
 // PNR or anything else read from the mail.
 
-import { TRANSPORT_MODES, isHomeCity, parseLegs, type TransportMode, type TripLeg } from "./core.ts";
+import { TRANSPORT_MODES, checkLegTime, isHomeCity, parseLegs, type TransportMode, type TripLeg } from "./core.ts";
 
 export const TICKET_LEG_CAP = 10;
 // A ticket may be dated a little outside the trip it belongs to: the night
@@ -189,7 +189,19 @@ export function validateTripLegProposals(
       : "other";
     const refRaw = typeof call.input.reference === "string" ? call.input.reference : "";
     const pnr = refRaw.replace(/\s+/g, " ").trim().slice(0, LEG_REF_MAX);
-    const leg: TripLeg = { from, to, date, mode, cost: null, ...(pnr ? { ref: pnr } : {}) };
+    // B29: a time the ticket states clearly. One that is not HH:MM is dropped,
+    // and the leg is still recorded without it.
+    const t = checkLegTime(call.input.time);
+    if (!t.ok) rejected.push(`time for ${ref} is not HH:MM, left empty`);
+    const leg: TripLeg = {
+      from,
+      to,
+      date,
+      mode,
+      cost: null,
+      ...(pnr ? { ref: pnr } : {}),
+      ...(t.ok && t.time ? { time: t.time } : {}),
+    };
     const existing = legsByTrip.get(trip.id) ?? [];
     if (existing.some((l) => sameLeg(l, leg))) {
       rejected.push(`leg for ${ref} is already on trip ${trip.id}`);

@@ -1593,3 +1593,83 @@ the transaction that adds it; a test fails if the first ever uses one.
   lib/trips/write.ts run against the b26 in-memory database,
   scripts/b28-loader.mjs and b28-stubs.ts). m6, m6c and b22 were updated for
   the new enum values (4 hotel arrangements became 5).
+
+## Family travel calendar (B29)
+
+Migration `20261002000100_b29_family_travel.sql`. NOT applied anywhere when it
+was written; apply it before (or with) the deploy of this code, since Settings
+selects `calendars.is_family_travel` and every trip write calls the sync.
+Additive only.
+
+- The problem, in his words on 1 October 2026: his spouse keeps asking for his
+  travel plans, Life OS holds them, and she uses Google Calendar. Decision: a
+  SEPARATE Google calendar that Life OS keeps up to date and that he shares
+  with her, read-only. A private public web link was considered and rejected:
+  a leaked link would tell anyone when his home is empty, and it adds a public
+  surface to the app. A calendar shared to her account needs no new public
+  route.
+- THE PRIVACY RULE (his words, and the most important line of this section):
+  she sees the city, the session days, and each leg's mode, time and route.
+  Nothing else: no PNRs or booking references, no hotel details, no client or
+  organisation names (not ICAI, not Cygnet, not the trip title, notes, work
+  stream, purpose or session label), no amounts.
+- How it is enforced, in `lib/family/travel.ts` (pure): the event builders read
+  ONLY a session date, the first city (home stripped) and each leg's from, to,
+  date, mode and time, so a title, note, stream, label, PNR or cost is never in
+  reach. Each event is a summary, a start and an end, and nothing else: no
+  description, location, attendees or visibility, `reminders` is
+  `useDefault: false` with no overrides, and all-day events are transparent. A
+  place name that itself contains "icai", "aica", "cygnet" or "hotel" is
+  WITHHELD (that event is not written) rather than printed: privacy beats
+  completeness. scripts/b29.test.ts fails if any event carries a forbidden word,
+  and fails if travel.ts ever reads one of the private fields.
+- What is written (trips and legs from today for the next 120 days, cancelled
+  trips excluded): for each session date an all-day "In <city> (full day)"; for
+  each leg a timed "<Mode> <from> to <to>" at its time, 60 minutes long (flight
+  120), or with no time an all-day "<Mode> <from> to <to> (time to be
+  confirmed)". Mode words: Flight, Train (Vande Bharat, Tejas, AC sleeper), Cab,
+  Travel (other). Place names pass through as written.
+- Leg time: legs (jsonb) gain an optional `time`, "HH:MM" IST 24-hour, no
+  migration. `checkLegTime` (lib/trips/core.ts) is the one validator: log_trip_leg,
+  update_trip_leg and the B20 ticket proposal (propose_trip_leg) all use it, a
+  bad value is refused on the two tools and, on the ticket proposal, left empty
+  while the leg is still recorded. The ticket pass fills it only when the ticket
+  states it clearly. parseLegs drops a malformed value on read. The trip screen
+  and journey page show it and the leg form edits it. lifeos_list_trips returns
+  `time` (null when unknown). Undo covers it (the legs are restored whole).
+- Which calendar: `calendars.is_family_travel` (nullable boolean, partial unique
+  index, one per user). Chosen only by the owner-session Settings action
+  `setFamilyTravelCalendarAction` ("Family travel calendar" beside the
+  reminder-home choice); no tool or connector names it, and b29.test.ts fails if
+  one does. A trigger insists on the ca_tapasnr account and refuses the
+  reminder-home calendar. Calendar sync lists every calendar on the account
+  (`calendarList`, secondary calendars included), so a calendar he creates and
+  shares appears after Refresh calendars. "None" removes every event Life OS
+  wrote there; switching calendar clears the old one first.
+- The sync: `family_travel_events` (user_id, trip_id, kind, item_key,
+  ext_event_id, content_hash; RLS owner only) records what Life OS wrote, and
+  `syncFamilyTravel(owner)` (lib/family/sync.ts) creates, updates (content hash
+  changed) or deletes ONLY recorded events. An event on that calendar that Life
+  OS did not write is not in the table, so nothing can name it. trip_id is
+  `on delete set null`, so a deleted trip's events keep their Google ids and the
+  next sync removes them. It runs after createTrip, updateTrip (when legs,
+  status, cities or session date are in the patch) and deleteTrip in
+  lib/trips/write.ts, which every browser, assistant and connector write uses
+  (so leg log, update, remove, undo and cancel are all covered), and once a day
+  from the 7 AM brief cron as a repair pass. It never throws and never blocks the
+  trip write; a failure is an audit row (`family_travel_sync_failed`) with counts
+  and a short reason, never event text. Google calls are the reminder writer's
+  own (`gcalCreate`, `gcalPatch`, `gcalDelete`, now exported), so each is inside
+  withResourceAuth. A patch names the unused start field as null and states
+  transparency, so an all-day leg that gains a time converts in place.
+- A leg's `item_key` is its date, route and an occurrence number among identical
+  ones, NOT its position in the list, so removing one leg deletes only its own
+  event instead of shifting every later key.
+- Not built: a lock against two syncs in the same second (one user; the
+  duplicate would show and the next repair pass would not remove it, add a row
+  lock if it ever does), de-duplicating against events already on the family
+  calendar by hand, and hiding the family calendar from his own synced calendar
+  view.
+- Tests: `npm run test:b29` (offline; the calendar is an in-memory stand-in, the
+  tools run through the real executor and the real lib/trips/write.ts against the
+  b26 in-memory database via scripts/b28-loader.mjs).

@@ -8,6 +8,7 @@ import {
   setForwardedAction,
   setPrimaryWriteAction,
   setReminderHomeAction,
+  setFamilyTravelCalendarAction,
   setCalendarSyncAction,
 } from "@/app/(app)/settings/actions";
 
@@ -28,6 +29,7 @@ export interface CalendarView {
   name: string;
   is_primary_write: boolean;
   is_reminder_home: boolean;
+  is_family_travel: boolean | null;
   sync_enabled: boolean;
 }
 
@@ -141,6 +143,7 @@ export default function AccountsPanel({
   const caAccount = bySlot.get("ca_tapasnr");
   const reminderCals = caAccount ? calsByAccount.get(caAccount.id) ?? [] : [];
   const currentReminderHome = reminderCals.find((c) => c.is_reminder_home);
+  const currentFamilyCal = reminderCals.find((c) => c.is_family_travel);
 
   return (
     <div className="space-y-4">
@@ -359,6 +362,61 @@ export default function AccountsPanel({
               </option>
             ))}
           </select>
+        </section>
+      )}
+
+      {caAccount && reminderCals.length > 0 && (
+        <section className="rounded-xl border border-border p-4">
+          <h3 className="font-medium">Family travel calendar</h3>
+          <p className="text-sm text-secondary">
+            A separate Google calendar that Life OS keeps up to date and you share
+            with your family, read-only. Create it in Google Calendar on the
+            ca.tapasnr account, share it, refresh calendars above, then pick it
+            here. It shows the city, the session days and each leg&apos;s mode,
+            time and route, and nothing else: no booking references, hotels,
+            client names, trip titles or amounts. Choosing None removes the
+            events Life OS wrote there.
+          </p>
+          <select
+            value={currentFamilyCal?.id ?? ""}
+            disabled={busyId === `family-${caAccount.id}`}
+            onChange={(e) => {
+              const next = e.target.value || null;
+              setNotice(null);
+              setBusyId(`family-${caAccount.id}`);
+              startTransition(async () => {
+                try {
+                  const r = await setFamilyTravelCalendarAction(next);
+                  setNotice({ id: `family-${caAccount.id}`, tone: r.ok ? "ok" : "err", text: r.message });
+                } catch (err) {
+                  setNotice({
+                    id: `family-${caAccount.id}`,
+                    tone: "err",
+                    text: err instanceof Error ? err.message : "Something went wrong.",
+                  });
+                } finally {
+                  setBusyId(null);
+                }
+              });
+            }}
+            className="mt-2 w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm"
+          >
+            <option value="">None</option>
+            {reminderCals
+              .filter((c) => !c.is_reminder_home)
+              .map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+          </select>
+          {notice?.id === `family-${caAccount.id}` && (
+            <p
+              className={`mt-2 text-sm ${notice.tone === "err" ? "text-overdue" : "text-secondary"}`}
+            >
+              {notice.text}
+            </p>
+          )}
         </section>
       )}
     </div>

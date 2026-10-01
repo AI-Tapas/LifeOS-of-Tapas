@@ -321,6 +321,7 @@ export type Database = {
           color: string | null
           ext_calendar_id: string
           id: string
+          is_family_travel: boolean | null
           is_primary_write: boolean
           is_reminder_home: boolean
           last_synced_at: string | null
@@ -334,6 +335,7 @@ export type Database = {
           color?: string | null
           ext_calendar_id: string
           id?: string
+          is_family_travel?: boolean | null
           is_primary_write?: boolean
           is_reminder_home?: boolean
           last_synced_at?: string | null
@@ -347,6 +349,7 @@ export type Database = {
           color?: string | null
           ext_calendar_id?: string
           id?: string
+          is_family_travel?: boolean | null
           is_primary_write?: boolean
           is_reminder_home?: boolean
           last_synced_at?: string | null
@@ -427,6 +430,47 @@ export type Database = {
             columns: ["calendar_id"]
             isOneToOne: false
             referencedRelation: "calendars"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      family_travel_events: {
+        Row: {
+          content_hash: string
+          created_at: string
+          ext_event_id: string
+          id: string
+          item_key: string
+          kind: string
+          trip_id: string | null
+          user_id: string
+        }
+        Insert: {
+          content_hash: string
+          created_at?: string
+          ext_event_id: string
+          id?: string
+          item_key: string
+          kind: string
+          trip_id?: string | null
+          user_id?: string
+        }
+        Update: {
+          content_hash?: string
+          created_at?: string
+          ext_event_id?: string
+          id?: string
+          item_key?: string
+          kind?: string
+          trip_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "family_travel_events_trip_id_fkey"
+            columns: ["trip_id"]
+            isOneToOne: false
+            referencedRelation: "trips"
             referencedColumns: ["id"]
           },
         ]

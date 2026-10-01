@@ -8,3 +8,5 @@ export * from "./b26-stubs.ts";
 const noop = async () => undefined;
 export const syncTripEvent = noop;
 export const removeTripEvent = noop;
+// B29: the family travel sync, called by the real write.ts.
+export const syncFamilyTravel = noop;

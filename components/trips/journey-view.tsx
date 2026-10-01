@@ -89,7 +89,7 @@ export default function JourneyView({
 
   const legs = ordered
     .flatMap((s) => s.legs.map((l) => ({ ...l, session: s })))
-    .sort((a, b) => a.date.localeCompare(b.date));
+    .sort((a, b) => a.date.localeCompare(b.date) || (a.time ?? "").localeCompare(b.time ?? ""));
   const sorted = [...expenses].sort((a, b) => a.date.localeCompare(b.date));
 
   function moveTo(e: JourneyExpense, tripId: string) {
@@ -171,7 +171,8 @@ export default function JourneyView({
                     {l.from || "?"} to {l.to || "?"}
                   </p>
                   <p className="mt-0.5 text-xs text-secondary">
-                    {dayLabel(l.date) || "no date"} · {MODE_LABELS[l.mode]} · to{" "}
+                    {dayLabel(l.date) || "no date"}
+                    {l.time ? ` at ${l.time}` : ""} · {MODE_LABELS[l.mode]} · to{" "}
                     {l.session.stream_name || l.session.title}
                   </p>
                 </div>

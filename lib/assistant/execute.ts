@@ -64,7 +64,7 @@ import {
   type TicketUndo,
 } from "@/lib/trips/ticket";
 import { cabActionPayload, cabDescription, cabExpenseInput, type CabRide } from "@/lib/trips/cab";
-import { TRANSPORT_MODES, type TransportMode, type TripLeg } from "@/lib/trips/core";
+import { TRANSPORT_MODES, checkLegTime, type TransportMode, type TripLeg } from "@/lib/trips/core";
 import { HOTEL_ARRANGEMENTS, type HotelArrangement } from "@/lib/trips/checklist";
 import { isFinanceKeyDateType, isReminderMode } from "@/lib/reminders/core";
 import {
@@ -1382,6 +1382,9 @@ const performers: Record<string, Performer> = {
     const date = s(input.date);
     if (!tripId || !date) throw new Error("trip_id and date are required.");
     const mode = s(input.mode) as TransportMode | null;
+    // B29: departure time, validated the same way on every path.
+    const time = checkLegTime(input.time);
+    if (!time.ok) throw new Error(time.message);
     const leg: TripLeg = {
       from: s(input.from_city) ?? "",
       to: s(input.to_city) ?? "",
@@ -1390,6 +1393,7 @@ const performers: Record<string, Performer> = {
       cost: typeof input.cost === "number" ? input.cost : null,
       // B20: the PNR or booking id, stored on the leg (an optional jsonb key).
       ...(s(input.reference) ? { ref: s(input.reference)!.slice(0, 40) } : {}),
+      ...(time.time ? { time: time.time } : {}),
     };
     const r = await addTripLeg(supabase, userId, tripId, leg);
     if (!r.ok) throw new Error(r.message);
@@ -1687,6 +1691,7 @@ export async function logScannedTripLeg(
     date: t.leg.date,
     mode: t.leg.mode,
     ...(t.leg.ref ? { reference: t.leg.ref } : {}),
+    ...(t.leg.time ? { time: t.leg.time } : {}),
   };
   const undo: TicketUndo = await applyTicketLeg(
     {
