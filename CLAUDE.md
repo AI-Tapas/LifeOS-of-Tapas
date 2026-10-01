@@ -1854,3 +1854,6 @@ hand-rolled). Type shim in lib/push/web-push.d.ts.
   handler against an in-memory database, web-push mocked, scripts/
   b31-loader.mjs and b31-stubs.ts). The live proof of the tables' RLS is in
   scripts/rls.test.mjs for the local stack; test:rls:cloud is never run for it.
+- One deliberate exception to quiet hours: the Settings "Send a test alert"
+  button passes `ignoreQuietHours` (Tapas is holding the phone). No automatic
+  source ever does, and b31.test.ts is the place to keep that true.
