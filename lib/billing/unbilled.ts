@@ -20,18 +20,16 @@ export const UNBILLED_HREF = "/unbilled";
 
 export interface BillableFields {
   billable?: boolean | null; // tasks.billable: null follows the stream
-  is_billable?: boolean | null; // the older checkbox: true still counts
   recurring_rule?: string | null;
   trip_id?: string | null;
 }
 
 // Recurring tasks and trip checklist steps are never billable work: trips bill
-// through the month pack. Otherwise the task's own choice wins, an old
-// "billable" tick still counts, and a task with neither follows its stream.
+// through the month pack. Otherwise the task's own choice wins, else the
+// stream's tick applies. (The older is_billable column no longer counts.)
 export function effectiveBillable(t: BillableFields, streamBillable: boolean): boolean {
   if (t.recurring_rule || t.trip_id) return false;
   if (t.billable === true || t.billable === false) return t.billable;
-  if (t.is_billable === true) return true;
   return streamBillable;
 }
 

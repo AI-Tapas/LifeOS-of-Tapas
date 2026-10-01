@@ -360,7 +360,7 @@ function TaskItem({
             <span>starts {formatDateIST(`${task.not_before}T04:00:00Z`)}</span>
           )}
           {task.recurring_rule && <span>repeats {task.recurring_rule}</span>}
-          {(task.billable ?? task.is_billable) && <span>billable</span>}
+          {task.billable === true && <span>billable</span>}
         </div>
         <PriorityReason
           reason={task.priority_reason}
@@ -1016,7 +1016,7 @@ function taskToFields(t: TaskRow | null, workStreams: WorkStreamRow[]): FormFiel
     dueTime: t?.due_ts ? hmFromIso(t.due_ts) : "09:00",
     recurFreq: (rec[0] as FormFields["recurFreq"]) || "",
     recurInterval: rec[1] ?? "1",
-    billableChoice: t?.billable === true ? "yes" : t?.billable === false ? "no" : t?.is_billable ? "yes" : "follow",
+    billableChoice: t?.billable === true ? "yes" : t?.billable === false ? "no" : "follow",
     offsets: t?.remind_offsets ?? [7, 3, 1, 0],
     // A new task interrupts him on the calendar unless he says otherwise,
     // which is what every task did before M7a.
@@ -1186,10 +1186,8 @@ function TaskForm({
       work_stream_id: f.workStreamId,
       project_id: f.projectId || null,
       recurring_rule,
-      // B30: the three-way choice. The older checkbox column is cleared, so
-      // "follow the stream" really follows the stream.
+      // B30: the three-way choice (the older is_billable column is unused).
       billable: f.billableChoice === "follow" ? null : f.billableChoice === "yes",
-      is_billable: false,
       remind_offsets: offsets.length ? offsets : [7, 3, 1, 0],
       reminder_mode: f.onCalendar ? "calendar" : "in_app",
       not_before: f.notBefore || null,

@@ -68,7 +68,7 @@ test("effective billable: the task's own choice wins, otherwise the stream's", (
   assert.equal(effectiveBillable({ billable: false }, true), false, "stream on, task false");
   assert.equal(effectiveBillable({ billable: true }, false), true, "stream off, task true");
   assert.equal(effectiveBillable({ billable: null }, false), false, "stream off, task null");
-  assert.equal(effectiveBillable({ billable: null, is_billable: true }, false), true, "the older tick still counts");
+  assert.equal(effectiveBillable({ billable: null, is_billable: true } as never, false), false, "the older tick no longer counts");
 });
 
 test("recurring tasks and trip checklist steps are never billable work", () => {
@@ -362,4 +362,12 @@ test("no B30 file carries an amount, rate, total or Zoho call", () => {
     assert.ok(!/formatINR|hourly_rate|\bamount\b|\btotal\b|fetch\(|zoho\.(com|in)/i.test(code), `${f}: no money and no Zoho call`);
     assert.ok(!src(f).includes(EM_DASH), `${f}: no em dash`);
   }
+});
+
+test("not_billable without a ref clears an earlier estimate ref", async () => {
+  resetDb();
+  const t = addTask({ billing_state: "estimate_drafted", billing_ref: "EST-9" });
+  await executeToolCall("set_billing_state", { task_id: t.id, state: "not_billable" });
+  assert.equal(t.billing_state, "not_billable");
+  assert.equal(t.billing_ref, null);
 });

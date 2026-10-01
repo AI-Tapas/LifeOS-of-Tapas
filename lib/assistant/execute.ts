@@ -975,7 +975,9 @@ const performers: Record<string, Performer> = {
     const check = checkAgentBilling(input, row.billing_state);
     if (!check.ok) throw new Error(check.message);
     const patch: { billing_state: string; billing_ref?: string | null } = { billing_state: check.state };
+    // not_billable without a ref clears any estimate ref left from before.
     if (check.ref !== undefined) patch.billing_ref = check.ref === "" ? null : check.ref;
+    else if (check.state === "not_billable") patch.billing_ref = null;
     const { error } = await supabase.from("tasks").update(patch).eq("id", taskId).eq("user_id", userId);
     if (error) throw new Error(error.message);
     return {

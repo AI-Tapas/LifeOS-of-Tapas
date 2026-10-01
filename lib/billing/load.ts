@@ -16,7 +16,7 @@ export async function loadUnbilled(
   const { data, error } = await supabase
     .from("tasks")
     .select(
-      "id, title, status, completed_at, billable, is_billable, billing_state, billing_ref, recurring_rule, trip_id, agent_instructions, work_streams(name, billable), projects(name)"
+      "id, title, status, completed_at, billable, billing_state, billing_ref, recurring_rule, trip_id, agent_instructions, work_streams(name, billable), projects(name)"
     )
     .eq("user_id", userId)
     .eq("status", "done")
@@ -30,7 +30,6 @@ export async function loadUnbilled(
       status: t.status,
       completed_at: t.completed_at,
       billable: t.billable,
-      is_billable: t.is_billable,
       billing_state: t.billing_state,
       billing_ref: t.billing_ref,
       recurring_rule: t.recurring_rule,

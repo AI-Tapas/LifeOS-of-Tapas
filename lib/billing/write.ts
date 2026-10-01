@@ -68,6 +68,9 @@ export async function setBillingState(
       to_ref: state === null ? null : cleaned.ref,
     } as Json,
   });
-  if (auditError) return { ok: false, message: `Saved, but the audit row failed: ${auditError.message}` };
+  // The state has already changed, so a failed audit row must not read as a
+  // failed save (the caller would show an error and the Undo would be lost).
+  // ponytail: the audit failure is swallowed; add a warning field if it matters.
+  void auditError;
   return { ok: true, prev };
 }

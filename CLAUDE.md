@@ -1718,16 +1718,16 @@ seeded as billable, RLS unchanged.
   40 characters, the Zoho estimate or invoice number) and
   `tasks.billing_updated_at` (stamped by the trigger). Note the older
   `tasks.is_billable` (M1, not null default false, written by the
-  `billable` parameter of create_task and update_task) is left alone: a true
-  there still counts as billable while `tasks.billable` is null, and the drawer
-  now writes `billable` and clears `is_billable`. `work_streams.feeds_billing`
+  `billable` parameter of create_task and update_task) stays in the schema but
+  no longer feeds the unbilled list or the drawer; only `tasks.billable` and the
+  stream's tick count. `work_streams.feeds_billing`
   (M6d, which streams feed his invoice run) is a different flag and its label in
   Settings now reads "in the invoice run".
 - Effective billable, pure in lib/billing/unbilled.ts `effectiveBillable`:
   recurring tasks (`recurring_rule`) and trip checklist steps (`trip_id`) are
   NEVER billable work, whatever the flags say (trips bill through the month
-  pack); otherwise the task's own `billable` wins, then the old `is_billable`
-  tick, then the stream's tick.
+  pack); otherwise the task's own `billable` wins, else the stream's tick
+  (`task.billable ?? stream.billable`, nothing else).
 - The list, `unbilledGroups` (same file): done tasks, effectively billable,
   completed in the last 180 days, `billing_state` null or `estimate_drafted`,
   grouped by work stream, oldest completion first (rows and groups). A row is

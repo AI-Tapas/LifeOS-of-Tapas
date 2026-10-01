@@ -914,7 +914,7 @@ export const TOOLS: ToolDef[] = [
     bucket: "autonomous",
     disclosure: "app_data",
     description:
-      "Record where the billing of one finished task stands, from lifeos_list_unbilled. Use estimate_drafted after you have prepared an UNSENT estimate for it (pass its number as ref, at most 40 characters), or not_billable when the work should not be billed. You can never mark work invoiced and can never clear a state: only Tapas does that, in the app. A task he has marked invoiced is refused. Nothing here sends, pays or invoices anything, and Life OS holds no amount. Undo restores the previous state and ref (undo from the app).",
+      "Record where the billing of one finished task stands, from lifeos_list_unbilled. Use estimate_drafted after you have prepared an UNSENT estimate for it (pass its number as ref, at most 40 characters), or not_billable when the work should not be billed. You can never mark work invoiced and can never clear a state: only Tapas does that, in the app. A task he has marked invoiced is refused. Nothing here sends, pays or invoices anything, and Life OS holds no amount. Undo of a billing mark works only from the app (History tab), never over the connector, which cannot clear a state or move a task off invoiced.",
     input_schema: schema({
       task_id: str("The task id from lifeos_list_unbilled."),
       state: enumOf(["estimate_drafted", "not_billable"], "estimate_drafted: an unsent estimate is prepared. not_billable: this work will not be billed."),
