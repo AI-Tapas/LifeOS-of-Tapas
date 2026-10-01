@@ -1652,10 +1652,20 @@ Additive only.
   one does. A trigger insists on the ca_tapasnr account and refuses the
   reminder-home calendar. Calendar sync lists every calendar on the account
   (`calendarList`, secondary calendars included), so a calendar he creates and
-  shares appears after Refresh calendars. "None" removes every event Life OS
-  wrote there; switching calendar clears the old one first.
+  shares appears after Refresh calendars. The ca.tapasnr reminder-home and
+  write-back calendars cannot be chosen (UI, Settings action and trigger), and
+  setReminderHomeAction refuses a family calendar BEFORE it clears the current
+  home. "None" removes every event Life OS wrote there; switching calendar
+  clears the old one first and the flag does not move if that clear did not run.
 - The sync: `family_travel_events` (user_id, trip_id, kind, item_key,
-  ext_event_id, content_hash; RLS owner only) records what Life OS wrote, and
+  ext_event_id, ext_calendar_id, content_hash; RLS owner only) records what Life
+  OS wrote, and every patch and delete goes to the recorded `ext_calendar_id`
+  (an event recorded on another calendar is removed there and made on the
+  current one). Every read the sync depends on (trips, work streams, recorded
+  events, calendars, account) is checked: a failed read stops the run before any
+  Google call and returns ran:false, because an error read as an empty list
+  would delete every event or create them all twice. Only clearFamilyTravel
+  passes an explicit empty desired set.
   `syncFamilyTravel(owner)` (lib/family/sync.ts) creates, updates (content hash
   changed) or deletes ONLY recorded events. An event on that calendar that Life
   OS did not write is not in the table, so nothing can name it. trip_id is
@@ -1678,6 +1688,9 @@ Additive only.
   lock if it ever does), de-duplicating against events already on the family
   calendar by hand, and hiding the family calendar from his own synced calendar
   view.
-- Tests: `npm run test:b29` (offline; the calendar is an in-memory stand-in, the
-  tools run through the real executor and the real lib/trips/write.ts against the
-  b26 in-memory database via scripts/b28-loader.mjs).
+- Tests: `npm run test:b29` (offline, two files; the calendar is an in-memory
+  stand-in, the tools run through the real executor and the real
+  lib/trips/write.ts against the b26 in-memory database via
+  scripts/b28-loader.mjs, and scripts/b29-sync.test.ts runs the real sync.ts
+  against a database stand-in that can fail a read, via
+  scripts/b29-sync-loader.mjs).
