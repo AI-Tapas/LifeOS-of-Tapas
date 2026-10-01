@@ -157,6 +157,16 @@ export async function setPrimaryWriteAction(
 
 export async function setReminderHomeAction(calendarId: string): Promise<void> {
   const { supabase, user } = await requireUser("/settings");
+  // B29: refuse BEFORE clearing the current home, so a refused change never
+  // leaves the user with no reminder-home calendar.
+  const { data: target } = await supabase
+    .from("calendars")
+    .select("is_family_travel")
+    .eq("id", calendarId)
+    .maybeSingle();
+  if (target?.is_family_travel) {
+    throw new Error("The family travel calendar cannot also be the reminder-home calendar.");
+  }
   await supabase
     .from("calendars")
     .update({ is_reminder_home: false })
@@ -180,16 +190,19 @@ export async function setFamilyTravelCalendarAction(
 ): Promise<{ ok: boolean; message: string }> {
   const { supabase, user } = await requireUser("/settings");
 
-  let target: { id: string; account_id: string; is_reminder_home: boolean } | null = null;
+  let target: { id: string } | null = null;
   if (calendarId) {
     const { data } = await supabase
       .from("calendars")
-      .select("id, account_id, is_reminder_home")
+      .select("id, is_reminder_home, is_primary_write")
       .eq("id", calendarId)
       .maybeSingle();
     if (!data) return { ok: false, message: "That calendar was not found." };
     if (data.is_reminder_home) {
       return { ok: false, message: "The reminder-home calendar cannot also be the family calendar." };
+    }
+    if (data.is_primary_write) {
+      return { ok: false, message: "The write-back calendar cannot also be the family calendar." };
     }
     target = data;
   }
@@ -203,8 +216,12 @@ export async function setFamilyTravelCalendarAction(
   let note = "";
   if (current && current.id !== calendarId) {
     const cleared = await clearFamilyTravel(user.id);
-    if (!cleared.ran) note = " The old calendar could not be reached, so its events were left in place.";
-    else if (cleared.failed) note = ` ${cleared.failed} old events could not be removed.`;
+    // Never move the flag if the clear did not run: the old events would be
+    // stranded with nothing pointing at their calendar.
+    if (!cleared.ran) {
+      return { ok: false, message: `The old family calendar could not be cleared (${cleared.reason}), so nothing was changed.` };
+    }
+    if (cleared.failed) note = ` ${cleared.failed} old events could not be removed.`;
   }
 
   if (current && current.id !== calendarId) {

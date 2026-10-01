@@ -24,7 +24,8 @@ create unique index if not exists calendars_one_family_travel
   on calendars (user_id) where is_family_travel;
 
 -- The family calendar belongs to the ca_tapasnr account, and is never also
--- the reminder-home (reminders must not land on a calendar he shares).
+-- the reminder-home (reminders must not land on a calendar he shares) or the
+-- account's primary write-back calendar (his own events must not either).
 create or replace function public.enforce_family_travel_calendar()
 returns trigger
 language plpgsql
@@ -40,6 +41,10 @@ begin
     if new.is_reminder_home then
       raise exception
         'the family travel calendar cannot also be the reminder-home calendar';
+    end if;
+    if new.is_primary_write then
+      raise exception
+        'the family travel calendar cannot also be the primary write-back calendar';
     end if;
   end if;
   return new;
@@ -62,6 +67,9 @@ create table if not exists family_travel_events (
   -- A session's date, or a leg's date, route and occurrence number.
   item_key text not null,
   ext_event_id text not null,
+  -- The Google calendar the event was written to. Every later patch and delete
+  -- goes to THIS calendar, even if the family calendar has since changed.
+  ext_calendar_id text not null,
   -- sha256 of the event payload last written, so an unchanged event is not
   -- written again.
   content_hash text not null,
@@ -82,4 +90,4 @@ create policy owner_all on family_travel_events
 revoke all on table public.family_travel_events from anon;
 
 comment on table family_travel_events is
-  'Google events Life OS wrote to the family travel calendar. Ids and a hash only: no event text, no title, no city. The sync touches only events recorded here.';
+  'Google events Life OS wrote to the family travel calendar. Ids (event and calendar) and a hash only: no event text, no title, no city. The sync touches only events recorded here.';

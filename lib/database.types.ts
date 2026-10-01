@@ -438,6 +438,7 @@ export type Database = {
         Row: {
           content_hash: string
           created_at: string
+          ext_calendar_id: string
           ext_event_id: string
           id: string
           item_key: string
@@ -448,6 +449,7 @@ export type Database = {
         Insert: {
           content_hash: string
           created_at?: string
+          ext_calendar_id: string
           ext_event_id: string
           id?: string
           item_key: string
@@ -458,6 +460,7 @@ export type Database = {
         Update: {
           content_hash?: string
           created_at?: string
+          ext_calendar_id?: string
           ext_event_id?: string
           id?: string
           item_key?: string

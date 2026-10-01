@@ -29,6 +29,7 @@ import {
   type RecordedEvent,
 } from "../lib/family/travel.ts";
 import { checkLegTime, parseLegs } from "../lib/trips/core.ts";
+import { safePlace } from "../lib/family/travel.ts";
 import { editLeg } from "../lib/trips/legs.ts";
 import { validateTripLegProposals } from "../lib/trips/ticket.ts";
 import { TOOLS, TICKET_TOOL, toolByName } from "../lib/assistant/tools.ts";
@@ -195,6 +196,57 @@ test("PRIVACY: a place name that is itself an organisation or hotel word is with
   assert.ok(!all.includes("In ICAI Bengaluru (full day)"), "a city that carries an organisation is not announced");
 });
 
+// --- place names are free text: safe by construction ----------------------------
+
+test("PLACES: every forbidden word and a work stream name is refused, in any case, anywhere in the text", () => {
+  for (const w of FORBIDDEN_WORDS) {
+    assert.equal(safePlace(`Near ${w.toUpperCase()}`), null, w);
+    assert.equal(safePlace(`${w}ville`), null, w);
+  }
+  for (const w of ["inn", "resort", "residency", "suites", "marriott", "taj", "itc", "novotel", "hyatt", "lemon tree", "ginger", "fortune", "radisson", "oyo", "office", "bhavan", "institute", "chapter", "branch", "client", "guest house"]) {
+    assert.ok((FORBIDDEN_WORDS as readonly string[]).includes(w), `${w} is on the list`);
+  }
+  assert.equal(safePlace("Surat"), "Surat");
+  assert.equal(safePlace("Acme Training Surat", ["Acme Training"]), null, "a work stream name");
+  assert.equal(safePlace("Surat", ["Acme"]), "Surat");
+});
+
+test("PLACES: a digit withholds the place", () => {
+  for (const p of ["Sector 5", "Surat 395007", "Gate2", "Flat 4B"]) assert.equal(safePlace(p), null, p);
+});
+
+test("PLACES: more than three words is withheld, three is fine", () => {
+  assert.equal(safePlace("Mumbai Chhatrapati Shivaji Airport"), null);
+  assert.equal(safePlace("Surat Railway Station"), "Surat Railway Station");
+});
+
+test("PLACES: everything after a comma or an opening bracket goes, a short round bracket stays", () => {
+  assert.equal(safePlace("Delhi, near the guest list"), "Delhi");
+  assert.equal(safePlace("Surat [private note"), "Surat");
+  assert.equal(safePlace("Surat {x}"), "Surat");
+  assert.equal(safePlace("Ahmedabad (Ambli Road)"), "Ahmedabad (Ambli Road)");
+  assert.equal(safePlace("Ahmedabad (Kalupur)"), "Ahmedabad (Kalupur)");
+  assert.equal(safePlace("Surat (Platform for the big boss)"), "Surat", "a long bracket is dropped");
+  assert.equal(safePlace("Surat (Ambli, Road)"), "Surat", "a comma ends it before the bracket closes");
+  assert.equal(safePlace("Surat (door 9)"), null, "digits withhold");
+  assert.equal(safePlace("Surat (Ambli"), "Surat", "an unclosed bracket is dropped");
+  assert.equal(safePlace(""), null);
+});
+
+test("PLACES: a withheld place becomes travel wording, never the place", () => {
+  const leg = (from: string, to: string) => legEvent({ from, to, date: "2026-10-09", mode: "flight", cost: null, time: "10:00" }, ["Acme Training"])!.summary;
+  assert.equal(leg("Hotel Taj, Delhi", "Surat"), "Flight to Surat");
+  assert.equal(leg("Delhi", "Marriott Surat"), "Flight from Delhi");
+  assert.equal(leg("Acme Training Park", "ICAI Bhavan"), "Flight");
+  assert.equal(leg("Delhi, Terminal", "Surat"), "Flight Delhi to Surat");
+  // A session city that is withheld writes no session event at all.
+  const t = { ...journey()[0], cities: ["Grand Residency"] };
+  assert.equal(desiredFamilyEvents([t], TODAY).filter((e) => e.kind === "session").length, 0);
+  // Work stream names reach the whole desired set.
+  const named = desiredFamilyEvents([{ ...journey()[0], cities: ["Acme Training City"] }], TODAY, ["Acme Training"]);
+  assert.equal(named.filter((e) => e.kind === "session").length, 0);
+});
+
 test("the home city is never the session city, and a trip with no other city has no session event", () => {
   const trips = journey();
   trips[0].cities = ["Ahmedabad", "Sabarmati (Station)", "Bengaluru"];
@@ -208,9 +260,11 @@ test("cancelled trips, past days and days beyond 120 are left out; the edges are
   const trips = journey();
   trips[1].status = "cancelled";
   assert.ok(!titles(trips).some((t) => t.includes("Delhi to Surat") || t === "In Delhi (full day)"));
-  // Today is in, yesterday is out.
-  assert.equal(desiredFamilyEvents(journey(), "2026-10-06").some((e) => e.payload.summary.includes("Ahmedabad to Bengaluru")), true);
-  assert.equal(desiredFamilyEvents(journey(), "2026-10-07").some((e) => e.payload.summary.includes("Ahmedabad to Bengaluru")), false);
+  // Past events stay for 30 days: the leg of 6 Oct is in on 5 Nov, out on 6 Nov.
+  const has = (today: string) => desiredFamilyEvents(journey(), today).some((e) => e.payload.summary.includes("Ahmedabad to Bengaluru"));
+  assert.equal(has("2026-10-07"), true, "the morning after, mid-trip");
+  assert.equal(has("2026-11-05"), true);
+  assert.equal(has("2026-11-06"), false);
   // 120 days after 2026-10-01 is 2026-01-29 of the next year: 2027-01-29.
   const far = [{ ...journey()[1], session_date: "2027-01-29", legs: [] }, { ...journey()[1], id: "x", session_date: "2027-01-30", legs: [] }];
   assert.deepEqual(desiredFamilyEvents(far, TODAY).map((e) => e.item_key), ["2027-01-29"]);
@@ -243,15 +297,20 @@ function world() {
   let n = 0;
   // An event Life OS did not write: it must survive everything.
   calendar.set("foreign-1", { summary: "Dentist", start: { date: "2026-10-07" }, end: { date: "2026-10-08" }, reminders: { useDefault: false, overrides: [] } });
+  // Which Google calendar each event sits on; `current` is the chosen one.
+  const calOf = new Map<string, string>();
+  const state = { current: "cal-family" };
   const io: FamilyIO & { failRemove?: boolean; goneIds: Set<string> } = {
     goneIds: new Set(),
     async create(p) {
       const id = `g${++n}`;
       calendar.set(id, p);
+      calOf.set(id, state.current);
       log.push(`create ${id}`);
       return id;
     },
-    async patch(id, p) {
+    async patch(cal, id, p) {
+      assert.equal(calOf.get(id), cal, "a patch goes to the calendar the event is on");
       if (!calendar.has(id) || io.goneIds.has(id)) return false;
       // The body Google would get: the unused field is explicitly null.
       const body = familyPatchBody(p) as { start: Record<string, unknown> };
@@ -260,7 +319,8 @@ function world() {
       log.push(`patch ${id}`);
       return true;
     },
-    async remove(id) {
+    async remove(cal, id) {
+      assert.equal(calOf.get(id) ?? cal, cal, "a delete goes to the calendar the event is on");
       if (io.failRemove) throw new Error("boom");
       calendar.delete(id);
       log.push(`remove ${id}`);
@@ -274,8 +334,8 @@ function world() {
       records.splice(records.findIndex((r) => r.id === id), 1);
     },
   };
-  const run = (trips: FamilyTrip[]) => runFamilySync(desiredFamilyEvents(trips, TODAY), records, io);
-  return { calendar, records, log, io, run };
+  const run = (trips: FamilyTrip[]) => runFamilySync(desiredFamilyEvents(trips, TODAY), records, io, state.current);
+  return { calendar, records, log, io, run, state, calOf };
 }
 
 test("the first run writes every event, and a second run with no change writes nothing", async () => {
@@ -390,11 +450,25 @@ test("an event deleted by hand in Google is recreated, and a failed delete is re
   assert.equal((await w.run([])).deleted, 8);
 });
 
+test("a delete or patch goes to the calendar the event was recorded on, and switching calendars moves events", async () => {
+  const w = world();
+  await w.run(journey()); // all on cal-family
+  w.state.current = "cal-other"; // the family calendar changed
+  const moved = await w.run(journey());
+  assert.deepEqual(moved, { created: 0, updated: 8, deleted: 0, failed: 0 });
+  assert.ok(w.records.every((r) => r.ext_calendar_id === "cal-other"));
+  assert.equal([...w.calOf.values()].filter((c) => c === "cal-family").length, 8, "old ones were removed from cal-family by id, new ones created on cal-other");
+  assert.equal(w.calendar.size, 9);
+  // A clear (no calendar needed) still deletes from where each record sits.
+  const gone = await runFamilySync([], w.records, w.io, "");
+  assert.equal(gone.deleted, 8);
+});
+
 test("planFamilySync is a pure plan: create, update, remove", () => {
   const d = desiredFamilyEvents(journey(), TODAY);
-  const recorded: RecordedEvent[] = d.slice(0, 3).map((e, i) => ({ id: `r${i}`, trip_id: e.trip_id, kind: e.kind, item_key: e.item_key, ext_event_id: `x${i}`, content_hash: i === 0 ? "stale" : e.hash }));
-  recorded.push({ id: "r9", trip_id: "gone", kind: "leg", item_key: "k", ext_event_id: "x9", content_hash: "h" });
-  const plan = planFamilySync(d, recorded);
+  const recorded: RecordedEvent[] = d.slice(0, 3).map((e, i) => ({ id: `r${i}`, trip_id: e.trip_id, kind: e.kind, item_key: e.item_key, ext_event_id: `x${i}`, ext_calendar_id: "cal-family", content_hash: i === 0 ? "stale" : e.hash }));
+  recorded.push({ id: "r9", trip_id: "gone", kind: "leg", item_key: "k", ext_event_id: "x9", ext_calendar_id: "cal-family", content_hash: "h" });
+  const plan = planFamilySync(d, recorded, "cal-family");
   assert.equal(plan.create.length, d.length - 3);
   assert.equal(plan.update.length, 1);
   assert.deepEqual(plan.remove.map((r) => r.id), ["r9"]);
@@ -530,6 +604,31 @@ test("the sync runs after every trip write and in the brief cron, goes through w
   for (const field of [".title", ".notes", ".session_label", ".work_stream", ".purpose", ".ref", ".cost"]) {
     assert.ok(!pure.includes(`t${field}`) && !pure.includes(`leg${field}`), `travel.ts reads ${field}`);
   }
+});
+
+test("the migration records the calendar of each event and keeps the family calendar off the home and write-back calendars", () => {
+  const sql = src("supabase/migrations/20261002000100_b29_family_travel.sql");
+  assert.match(sql, /ext_calendar_id text not null/);
+  assert.match(sql, /if new\.is_primary_write then\s+raise exception/);
+  assert.match(sql, /if new\.is_reminder_home then\s+raise exception/);
+});
+
+test("Settings: the family choice excludes the write-back calendar, refuses to move the flag when the clear did not run, and the reminder-home change checks first", () => {
+  const actions = src("app/(app)/settings/actions.ts");
+  const fam = actions.slice(actions.indexOf("export async function setFamilyTravelCalendarAction"), actions.indexOf("export async function setCalendarSyncAction"));
+  assert.match(fam, /data\.is_primary_write/);
+  assert.match(fam, /if \(!cleared\.ran\) \{\s+return \{ ok: false/);
+  assert.ok(fam.indexOf("if (!cleared.ran)") < fam.indexOf("is_family_travel: false"), "refused before the flag moves");
+  assert.match(src("components/accounts-panel.tsx"), /!c\.is_reminder_home && !c\.is_primary_write/);
+  const home = actions.slice(actions.indexOf("export async function setReminderHomeAction"), actions.indexOf("export async function setFamilyTravelCalendarAction"));
+  assert.ok(home.indexOf("is_family_travel") < home.indexOf("is_reminder_home: false"), "checked before the current home is cleared");
+});
+
+test("sync.ts checks every read it depends on, and only the clear passes an explicit empty set", () => {
+  const sync = src("lib/family/sync.ts");
+  for (const read of ["tripErr", "streamErr", "calErr", "acctErr"]) assert.ok(sync.includes(read), read);
+  assert.match(sync, /if \(error \|\| !recorded\) throw new ReadFailed/);
+  assert.match(sync, /runOn\(svc, userId, null, null, \[\]\)/);
 });
 
 test("B29 is documented with the privacy rule verbatim", () => {

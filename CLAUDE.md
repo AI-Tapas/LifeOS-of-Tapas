@@ -1618,13 +1618,21 @@ Additive only.
   date, mode and time, so a title, note, stream, label, PNR or cost is never in
   reach. Each event is a summary, a start and an end, and nothing else: no
   description, location, attendees or visibility, `reminders` is
-  `useDefault: false` with no overrides, and all-day events are transparent. A
-  place name that itself contains "icai", "aica", "cygnet" or "hotel" is
-  WITHHELD (that event is not written) rather than printed: privacy beats
-  completeness. scripts/b29.test.ts fails if any event carries a forbidden word,
-  and fails if travel.ts ever reads one of the private fields.
-- What is written (trips and legs from today for the next 120 days, cancelled
-  trips excluded): for each session date an all-day "In <city> (full day)"; for
+  `useDefault: false` with no overrides, and all-day events are transparent.
+  Place names are free text, so `safePlace` makes each one safe by construction:
+  a place containing a forbidden word (icai, aica, cygnet, hotel, inn, resort,
+  residency, suites, marriott, taj, itc, novotel, hyatt, lemon tree, ginger,
+  fortune, radisson, oyo, office, bhavan, institute, chapter, branch, client,
+  guest house) or any work stream name (loaded from work_streams on every run),
+  or a digit, or more than three words, is WITHHELD; everything after a comma or
+  an opening square or curly bracket is cut; a round bracket survives only as
+  one or two plain words ("Ahmedabad (Ambli Road)"). A withheld leg place falls
+  back to travel wording ("Flight to Surat", or just "Flight"); a withheld
+  session city writes no session event. scripts/b29.test.ts has a test for each
+  class and fails if travel.ts ever reads one of the private fields.
+- What is written (trips and legs from 30 days before today to 120 days after
+  it, so a leg does not vanish the morning after it mid-trip; cancelled trips
+  excluded): for each session date an all-day "In <city> (full day)"; for
   each leg a timed "<Mode> <from> to <to>" at its time, 60 minutes long (flight
   120), or with no time an all-day "<Mode> <from> to <to> (time to be
   confirmed)". Mode words: Flight, Train (Vande Bharat, Tejas, AC sleeper), Cab,

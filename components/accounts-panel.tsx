@@ -403,7 +403,7 @@ export default function AccountsPanel({
           >
             <option value="">None</option>
             {reminderCals
-              .filter((c) => !c.is_reminder_home)
+              .filter((c) => !c.is_reminder_home && !c.is_primary_write)
               .map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
