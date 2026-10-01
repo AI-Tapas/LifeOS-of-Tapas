@@ -34,6 +34,8 @@ const UNDOABLE = new Set([
   // the morning sweep of closed windows, each one tap to reverse.
   "log_trip_leg",
   "lapse_tasks",
+  // B30: a billing state an agent recorded; undo puts the previous one back.
+  "set_billing_state",
   // B26: an agent result; undo re-opens the instruction for the next sweep.
   "report_agent_result",
   "save_reply_draft",

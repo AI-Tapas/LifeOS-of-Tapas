@@ -242,7 +242,7 @@ test("list_tasks returns created_at and billable, and its search reads the note 
   for (const col of ["is_billable", "lapses_on", "created_at", "completed_at", "recurring_rule", "reminder_mode", "projects(name)"]) {
     assert.ok(handler.includes(col), col);
   }
-  for (const field of ["billable: t.is_billable", "created_at: t.created_at", "completed_at: t.completed_at", "project:", "recurring_rule: t.recurring_rule", "reminder_mode: t.reminder_mode", "lapses_on: t.lapses_on"]) {
+  for (const field of ["billable: effectiveBillable(", "created_at: t.created_at", "completed_at: t.completed_at", "project:", "recurring_rule: t.recurring_rule", "reminder_mode: t.reminder_mode", "lapses_on: t.lapses_on"]) {
     assert.ok(handler.includes(field), field);
   }
   assert.ok(handler.includes("title.ilike.%${safe}%,notes.ilike.%${safe}%"), "title or note");

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { inputCls } from "@/components/ui";
 import { formatINR } from "@/lib/datetime";
 import { RATE_FLOOR } from "@/lib/money/rates";
-import { setWorkStreamRateAction } from "@/app/(app)/settings/actions";
+import { setWorkStreamRateAction, setWorkStreamBillableAction } from "@/app/(app)/settings/actions";
 
 export interface WorkStreamView {
   id: string;
@@ -13,6 +13,9 @@ export interface WorkStreamView {
   kind: string;
   billing_entity: string | null;
   feeds_billing: boolean;
+  // B30: finished tasks of this stream count as work to invoice, so they show
+  // on /unbilled until he marks them invoiced.
+  billable?: boolean;
   hourly_rate: number | null;
   // B20: what mail belongs here, for the mail scan. At most 200 characters.
   scan_hint?: string | null;
@@ -49,6 +52,22 @@ function StreamRow({ stream }: { stream: WorkStreamView }) {
   const [hint, setHint] = useState(stream.scan_hint ?? "");
   const [err, setErr] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [billable, setBillable] = useState(stream.billable === true);
+
+  // B30: saves at once, like a switch; put back if the save fails.
+  function toggleBillable(next: boolean) {
+    setErr(null);
+    setBillable(next);
+    startTransition(async () => {
+      const r = await setWorkStreamBillableAction(stream.id, next);
+      if (!r.ok) {
+        setBillable(!next);
+        setErr(r.message ?? "Could not save.");
+      } else {
+        router.refresh();
+      }
+    });
+  }
 
   function save() {
     setErr(null);
@@ -79,9 +98,18 @@ function StreamRow({ stream }: { stream: WorkStreamView }) {
           </p>
         </div>
         <span className="shrink-0 text-xs text-muted">
-          {stream.feeds_billing ? "billable" : "non-billing"}
+          {stream.feeds_billing ? "in the invoice run" : "not in the invoice run"}
         </span>
       </div>
+      <label className="mt-2 flex min-h-11 items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={billable}
+          disabled={pending}
+          onChange={(e) => toggleBillable(e.target.checked)}
+        />
+        Billable: finished tasks show on Unbilled until invoiced
+      </label>
 
       {editing ? (
         <div className="mt-2 space-y-2">

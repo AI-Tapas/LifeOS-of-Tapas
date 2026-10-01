@@ -22,6 +22,7 @@ import {
   reviewsDue,
   type Holding,
 } from "../money/investments.ts";
+import { unbilledBriefLine, type UnbilledSummary } from "../billing/unbilled.ts";
 import {
   RECOVERY_ADVICE,
   recoveryLine,
@@ -109,6 +110,9 @@ export interface ComposeBriefInput {
   pendingApprovalsCount: number;
   accountsNeedingReconnect: BriefAccountIssue[];
   appBaseUrl: string;
+  // B30: finished client work with no invoice (lib/billing/unbilled.ts). Used
+  // on a Monday only, and only when there is some: stream names, no clients.
+  unbilled?: UnbilledSummary | null;
   // B20: one-line housekeeping notes from the night, e.g. "3 closed windows
   // dropped." and "1 ticket email did not match a trip." Not tasks. Optional
   // so older fixtures stay valid.
@@ -203,6 +207,9 @@ export function composeBrief(input: ComposeBriefInput): ComposedBrief {
   // still be fixed.
   const receiptGapLine = briefGapLine(input.tripExpenses ?? [], civilKey(today));
 
+  // B30: the weekly nudge. Monday's brief only; nothing when there is none.
+  const unbilledNote = weekday === 1 ? unbilledBriefLine(input.unbilled) : null;
+
   // Holdings past or approaching their review date. Overdue ones lead, since
   // a review he has walked past for three weeks is the one worth naming.
   const moneyReviewLine = reviewLine(
@@ -232,6 +239,7 @@ export function composeBrief(input: ComposeBriefInput): ComposedBrief {
     pendingApprovalsCount,
     scannedTasks,
     receiptGapLine,
+    unbilledNote,
     moneyReviewLine,
     recoveryNote,
     waitingNote,
@@ -250,6 +258,7 @@ export function composeBrief(input: ComposeBriefInput): ComposedBrief {
     pendingApprovalsCount,
     scannedTasks,
     receiptGapLine,
+    unbilledNote,
     moneyReviewLine,
     recoveryNote,
     waitingNote,
@@ -290,6 +299,7 @@ interface RenderInput {
   pendingApprovalsCount: number;
   scannedTasks: BriefTask[];
   receiptGapLine: string | null;
+  unbilledNote: string | null;
   moneyReviewLine: string | null;
   recoveryNote: string | null;
   waitingNote: string | null;
@@ -439,6 +449,19 @@ function renderHtml(r: RenderInput): string {
     </td></tr>`
     : "";
 
+  const unbilledBlock = r.unbilledNote
+    ? `
+    <tr><td style="padding:16px 32px 0 32px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+        <td style="border-radius:10px;background-color:${COLORS.todayBg};padding:12px 14px;">
+          <a href="${r.appBaseUrl}/unbilled" style="text-decoration:none;font-size:13px;color:${COLORS.todayText};font-family:${FONT};">
+            ${esc(r.unbilledNote)} Open Unbilled.
+          </a>
+        </td>
+      </tr></table>
+    </td></tr>`
+    : "";
+
   const recoveryBlock = r.recoveryNote
     ? `
     <tr><td style="padding:16px 32px 0 32px;">
@@ -527,6 +550,7 @@ function renderHtml(r: RenderInput): string {
         </div>
       </td></tr>
       ${receiptBlock}
+      ${unbilledBlock}
       ${moneyBlock}
       ${approvalsBlock}
       ${scannedBlock}
@@ -599,6 +623,10 @@ function renderText(r: RenderInput): string {
       `${r.receiptGapLine} Open the month pack: ${r.appBaseUrl}/trips/month`,
       ""
     );
+  }
+
+  if (r.unbilledNote) {
+    lines.push(`${r.unbilledNote} Open Unbilled: ${r.appBaseUrl}/unbilled`, "");
   }
 
   if (r.moneyReviewLine) {

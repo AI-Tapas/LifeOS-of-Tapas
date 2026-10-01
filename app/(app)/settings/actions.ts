@@ -495,3 +495,21 @@ export async function setWorkStreamRateAction(
   revalidatePath("/settings");
   return { ok: true };
 }
+
+// B30: whether a stream's finished tasks count as work to invoice. Ticked by
+// Tapas for client streams; no stream is seeded as billable. It records a
+// flag: no amount, no invoice.
+export async function setWorkStreamBillableAction(
+  workStreamId: string,
+  billable: boolean
+): Promise<{ ok: boolean; message?: string }> {
+  const { supabase } = await requireUser("/settings");
+  const { error } = await supabase
+    .from("work_streams")
+    .update({ billable: billable === true })
+    .eq("id", workStreamId);
+  if (error) return { ok: false, message: error.message };
+  revalidatePath("/settings");
+  revalidatePath("/unbilled");
+  return { ok: true };
+}

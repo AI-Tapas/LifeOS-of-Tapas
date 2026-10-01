@@ -905,6 +905,22 @@ export const TOOLS: ToolDef[] = [
       result: str("Plain text, at most 4,000 characters: what was done, or exactly what you need from Tapas."),
     }),
   },
+  {
+    // B30. Autonomous: it writes only the billing columns of one task, only to
+    // estimate_drafted or not_billable. It can never set invoiced and never
+    // clear a state: only Tapas's own session may (the database trigger
+    // guard_task_billing_state says so too, since the connector is service_role).
+    name: "set_billing_state",
+    bucket: "autonomous",
+    disclosure: "app_data",
+    description:
+      "Record where the billing of one finished task stands, from lifeos_list_unbilled. Use estimate_drafted after you have prepared an UNSENT estimate for it (pass its number as ref, at most 40 characters), or not_billable when the work should not be billed. You can never mark work invoiced and can never clear a state: only Tapas does that, in the app. A task he has marked invoiced is refused. Nothing here sends, pays or invoices anything, and Life OS holds no amount. Undo restores the previous state and ref (undo from the app).",
+    input_schema: schema({
+      task_id: str("The task id from lifeos_list_unbilled."),
+      state: enumOf(["estimate_drafted", "not_billable"], "estimate_drafted: an unsent estimate is prepared. not_billable: this work will not be billed."),
+      ref: opt(str("The Zoho estimate number, plain text, at most 40 characters. Leave out if there is none.")),
+    }),
+  },
 ];
 
 export const AUTONOMOUS_KINDS = new Set(
@@ -1004,6 +1020,8 @@ export const TOOL_TARGETS: Record<string, ToolTarget> = {
   remove_trip_leg: { arg: "trip_id", label: "trip", table: "trips" },
   // B26. The agents' answer lands on an existing task.
   report_agent_result: { arg: "task_id", label: "task", table: "tasks" },
+  // B30. The billing state lands on an existing task.
+  set_billing_state: { arg: "task_id", label: "task", table: "tasks" },
   undo_action: {
     arg: "action_id",
     label: "queued action",
@@ -1167,6 +1185,8 @@ export const MCP_READ_TOOLS = [
   "lifeos_read_mail_attachment",
   // B26.
   "lifeos_list_agent_instructions",
+  // B30.
+  "lifeos_list_unbilled",
 ] as const;
 
 export type McpReadTool = (typeof MCP_READ_TOOLS)[number];
@@ -1220,6 +1240,8 @@ export const READ_TOOL_DISCLOSURES: Record<McpReadTool, ToolDisclosure> = {
   lifeos_read_mail_attachment: "mail_body",
   // B26. Task rows Life OS owns, plus Tapas's own instruction text.
   lifeos_list_agent_instructions: "app_data",
+  // B30. Finished task rows Life OS owns, plus Tapas's own instruction text.
+  lifeos_list_unbilled: "app_data",
 };
 
 export function mcpWriteTools(): ToolDef[] {

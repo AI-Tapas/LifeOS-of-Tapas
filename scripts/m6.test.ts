@@ -351,8 +351,12 @@ test("one gap reads as one", () => {
 
 // --- 6. the removals ---------------------------------------------------------
 
+// B30 records where billing stands (a state and a reference) and nothing more;
+// it names two tools with "bill" in them on purpose, and they are the only ones.
+const B30_BILLING_STATE_TOOLS = ["set_billing_state", "lifeos_list_unbilled"];
+
 test("no tool in the registry bills, sends a bill or settles one", () => {
-  for (const t of TOOLS) {
+  for (const t of TOOLS.filter((x) => !B30_BILLING_STATE_TOOLS.includes(x.name))) {
     assert.doesNotMatch(
       t.name,
       /bill|invoice/i,
@@ -364,7 +368,7 @@ test("no tool in the registry bills, sends a bill or settles one", () => {
 
 test("lifeos_list_bills is off the connector read surface", () => {
   assert.ok(!(MCP_READ_TOOLS as readonly string[]).includes("lifeos_list_bills"));
-  for (const name of MCP_READ_TOOLS) {
+  for (const name of MCP_READ_TOOLS.filter((x) => !B30_BILLING_STATE_TOOLS.includes(x))) {
     assert.doesNotMatch(name, /bill|invoice/i, `${name} still reads bills`);
   }
 });

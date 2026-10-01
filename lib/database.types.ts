@@ -879,6 +879,10 @@ export type Database = {
           lapses_on: string | null
           agent_instructions: string | null
           agent_instructions_at: string | null
+          billable: boolean | null
+          billing_ref: string | null
+          billing_state: string | null
+          billing_updated_at: string | null
           agent_status: string | null
           agent_result: string | null
           agent_result_at: string | null
@@ -911,6 +915,10 @@ export type Database = {
           lapses_on?: string | null
           agent_instructions?: string | null
           agent_instructions_at?: string | null
+          billable?: boolean | null
+          billing_ref?: string | null
+          billing_state?: string | null
+          billing_updated_at?: string | null
           agent_status?: string | null
           agent_result?: string | null
           agent_result_at?: string | null
@@ -943,6 +951,10 @@ export type Database = {
           lapses_on?: string | null
           agent_instructions?: string | null
           agent_instructions_at?: string | null
+          billable?: boolean | null
+          billing_ref?: string | null
+          billing_state?: string | null
+          billing_updated_at?: string | null
           agent_status?: string | null
           agent_result?: string | null
           agent_result_at?: string | null
@@ -1106,6 +1118,7 @@ export type Database = {
       work_streams: {
         Row: {
           active: boolean
+          billable: boolean
           billing_entity: string | null
           feeds_billing: boolean
           hourly_rate: number | null
@@ -1119,6 +1132,7 @@ export type Database = {
         }
         Insert: {
           active?: boolean
+          billable?: boolean
           billing_entity?: string | null
           feeds_billing?: boolean
           hourly_rate?: number | null
@@ -1132,6 +1146,7 @@ export type Database = {
         }
         Update: {
           active?: boolean
+          billable?: boolean
           billing_entity?: string | null
           feeds_billing?: boolean
           hourly_rate?: number | null

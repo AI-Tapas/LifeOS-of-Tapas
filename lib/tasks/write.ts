@@ -54,6 +54,11 @@ export interface TaskInput {
   trip_id?: string | null;
   recurring_rule?: string | null;
   is_billable?: boolean;
+  // B30. Per-task override of the stream's billable tick: null follows the
+  // stream. Read ONLY when origin is "app" (his own drawer): no tool schema
+  // declares it, so an agent cannot hide finished work by marking it not
+  // billable.
+  billable?: boolean | null;
   remind_offsets?: number[];
   // Whether this task interrupts him on the calendar (M7a). 'calendar' is the
   // default and today's behaviour: one Google Calendar event with the task's
@@ -158,6 +163,7 @@ export async function createTask(
       trip_id: input.trip_id ?? null,
       recurring_rule: input.recurring_rule ?? null,
       is_billable: input.is_billable ?? false,
+      ...(origin === "app" && input.billable !== undefined ? { billable: input.billable } : {}),
       remind_offsets: input.remind_offsets ?? [7, 3, 1, 0],
       reminder_mode: input.reminder_mode ?? "calendar",
       source: input.source ?? "manual",
@@ -250,6 +256,7 @@ export async function updateTask(
         ? { recurring_rule: patch.recurring_rule }
         : {}),
       ...(patch.is_billable !== undefined ? { is_billable: patch.is_billable } : {}),
+      ...(origin === "app" && patch.billable !== undefined ? { billable: patch.billable } : {}),
       ...(patch.remind_offsets !== undefined
         ? { remind_offsets: patch.remind_offsets }
         : {}),

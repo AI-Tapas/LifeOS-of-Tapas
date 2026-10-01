@@ -27,6 +27,7 @@ import {
   type TaskInput,
 } from "@/lib/tasks/write";
 import { undoLapse } from "@/lib/tasks/lapse";
+import { checkAgentBilling, undoAllowedForService } from "@/lib/billing/unbilled";
 import {
   INSTRUCTION_COLUMNS,
   checkReportArgs,
@@ -881,6 +882,12 @@ const performers: Record<string, Performer> = {
         "Tapas has given agents an instruction on this task. Leave it for him to delete or finish."
       );
     }
+    // B30. Deleting a task Tapas marked invoiced would erase the record that
+    // the work was billed, and the undo re-insert (service_role) could not
+    // restore that state.
+    if (row.billing_state === "invoiced") {
+      throw new Error("Tapas has marked this task invoiced. Leave it for him to delete.");
+    }
     const r = await deleteTask(supabase, userId, taskId);
     if (!r.ok) throw new Error(r.message ?? "Could not delete the task.");
     return { summary: `Task deleted: ${row.title}.`, undo: { row } };
@@ -948,6 +955,36 @@ const performers: Record<string, Performer> = {
         status: args.status,
         result_chars: args.result.length,
       },
+    };
+  },
+
+  // B30. The connector's billing tool. Autonomous and undoable, but it can only
+  // set estimate_drafted or not_billable: never invoiced, never a clear, never
+  // a task Tapas marked invoiced. The database trigger refuses the same, since
+  // this runs as service_role.
+  async set_billing_state(supabase, userId, input) {
+    const taskId = s(input.task_id);
+    if (!taskId) throw new Error("task_id is required.");
+    const { data: row } = await supabase
+      .from("tasks")
+      .select("title, billing_state, billing_ref")
+      .eq("id", taskId)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (!row) throw new Error("Task not found.");
+    const check = checkAgentBilling(input, row.billing_state);
+    if (!check.ok) throw new Error(check.message);
+    const patch: { billing_state: string; billing_ref?: string | null } = { billing_state: check.state };
+    if (check.ref !== undefined) patch.billing_ref = check.ref === "" ? null : check.ref;
+    const { error } = await supabase.from("tasks").update(patch).eq("id", taskId).eq("user_id", userId);
+    if (error) throw new Error(error.message);
+    return {
+      summary: `Billing marked ${check.state === "estimate_drafted" ? "estimate drafted" : "not billable"} on: ${row.title}.`,
+      undo: {
+        task_id: taskId,
+        prev: { billing_state: row.billing_state, billing_ref: row.billing_ref },
+      },
+      auditMeta: { task_id: taskId, state: check.state, has_ref: check.ref ? true : false },
     };
   },
 
@@ -2093,6 +2130,8 @@ const UNDOABLE = new Set([
   "sync_trip_hotel_step",
   "update_trip_leg",
   "remove_trip_leg",
+  // B30.
+  "set_billing_state",
   // B26.
   "report_agent_result",
   "save_reply_draft",
@@ -2123,6 +2162,24 @@ export async function undoExecutedAction(
     | Record<string, unknown>
     | null;
   if (!undo) return { ok: false, message: "No undo information was recorded." };
+
+  // B30. Over the connector an undo is held to the same rule as the tool: it
+  // cannot clear a billing state or move a task Tapas marked invoiced (the
+  // database trigger would refuse it too). Checked BEFORE the claim, so a
+  // refusal leaves the action undoable from the app.
+  if (action.kind === "set_billing_state" && owner.origin !== "owner_session") {
+    const { data: cur } = await supabase
+      .from("tasks")
+      .select("billing_state")
+      .eq("id", String(undo.task_id))
+      .maybeSingle();
+    const prev = (undo.prev ?? {}) as Record<string, unknown>;
+    const refusal = undoAllowedForService(
+      cur?.billing_state ?? null,
+      (prev.billing_state as string | null | undefined) ?? null
+    );
+    if (refusal) return { ok: false, message: refusal };
+  }
 
   // Claim the row first (executed -> undone via the trigger whitelist), so a
   // double tap performs the inverse exactly once.
@@ -2501,6 +2558,20 @@ async function performUndo(
           agent_result: (prev.agent_result as string | null) ?? null,
           agent_result_at: (prev.agent_result_at as string | null) ?? null,
           agent_done_hash: (prev.agent_done_hash as string | null) ?? null,
+        })
+        .eq("id", String(undo.task_id));
+      if (error) throw new Error(error.message);
+      return;
+    }
+    case "set_billing_state": {
+      // Puts the previous state and reference back (the guard trigger decides
+      // who may clear one: his own session, or nobody over the connector).
+      const prev = (undo.prev ?? {}) as Record<string, unknown>;
+      const { error } = await supabase
+        .from("tasks")
+        .update({
+          billing_state: (prev.billing_state as string | null) ?? null,
+          billing_ref: (prev.billing_ref as string | null) ?? null,
         })
         .eq("id", String(undo.task_id));
       if (error) throw new Error(error.message);

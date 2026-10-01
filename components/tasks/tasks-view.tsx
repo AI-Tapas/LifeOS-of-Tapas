@@ -33,6 +33,8 @@ import {
   updateProjectAction,
   deleteProjectAction,
 } from "@/app/(app)/tasks/actions";
+import { setBillingStateAction } from "@/app/(app)/unbilled/actions";
+import { REF_MAX, type BillingState } from "@/lib/billing/unbilled";
 import type { TaskInput } from "@/lib/tasks/write";
 
 export interface TaskRow {
@@ -58,6 +60,12 @@ export interface TaskRow {
   trip_id: string | null;
   recurring_rule: string | null;
   is_billable: boolean;
+  // B30. Per-task override of the stream's billable tick (null: follow the
+  // stream), and where this task's billing stands. Optional so the dev-preview
+  // fixtures stay small.
+  billable?: boolean | null;
+  billing_state?: string | null;
+  billing_ref?: string | null;
   remind_offsets: number[];
   // Whether this task interrupts him on the calendar. Optional so the
   // dev-preview fixtures stay small; a row without it reads as 'calendar',
@@ -352,7 +360,7 @@ function TaskItem({
             <span>starts {formatDateIST(`${task.not_before}T04:00:00Z`)}</span>
           )}
           {task.recurring_rule && <span>repeats {task.recurring_rule}</span>}
-          {task.is_billable && <span>billable</span>}
+          {(task.billable ?? task.is_billable) && <span>billable</span>}
         </div>
         <PriorityReason
           reason={task.priority_reason}
@@ -980,7 +988,8 @@ interface FormFields {
   dueTime: string;
   recurFreq: "" | "daily" | "weekly" | "monthly" | "yearly";
   recurInterval: string;
-  isBillable: boolean;
+  // B30: follow the stream, billable, or not billable.
+  billableChoice: "follow" | "yes" | "no";
   offsets: number[];
   onCalendar: boolean;
   // YYYY-MM-DD from the date input, or "" for "can start now".
@@ -1007,7 +1016,7 @@ function taskToFields(t: TaskRow | null, workStreams: WorkStreamRow[]): FormFiel
     dueTime: t?.due_ts ? hmFromIso(t.due_ts) : "09:00",
     recurFreq: (rec[0] as FormFields["recurFreq"]) || "",
     recurInterval: rec[1] ?? "1",
-    isBillable: t?.is_billable ?? false,
+    billableChoice: t?.billable === true ? "yes" : t?.billable === false ? "no" : t?.is_billable ? "yes" : "follow",
     offsets: t?.remind_offsets ?? [7, 3, 1, 0],
     // A new task interrupts him on the calendar unless he says otherwise,
     // which is what every task did before M7a.
@@ -1015,6 +1024,125 @@ function taskToFields(t: TaskRow | null, workStreams: WorkStreamRow[]): FormFiel
     notBefore: t?.not_before ?? "",
     agentInstructions: t?.agent_instructions ?? "",
   };
+}
+
+// B30. Where a finished task's billing stands, with his own marks. They act at
+// once (not on Save), each is audited, and the last one can be undone here.
+// No amounts: Life OS records state and a reference, nothing more.
+function BillingBox({ task }: { task: TaskRow }) {
+  const router = useRouter();
+  const [state, setState] = useState<BillingState | null>((task.billing_state as BillingState | null) ?? null);
+  const [ref, setRef] = useState(task.billing_ref ?? "");
+  const [asking, setAsking] = useState(false);
+  const [prev, setPrev] = useState<{ state: BillingState | null; ref: string | null } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  function mark(next: BillingState | null, refValue: string | null) {
+    setErr(null);
+    startTransition(async () => {
+      const r = await setBillingStateAction(task.id, next, refValue);
+      if (!r.ok) {
+        setErr(r.message);
+        return;
+      }
+      setPrev({ state: r.prev_state, ref: r.prev_ref });
+      setState(next);
+      setRef(next ? (refValue ?? "") : "");
+      setAsking(false);
+      router.refresh();
+    });
+  }
+
+  function undo() {
+    if (!prev) return;
+    const p = prev;
+    setErr(null);
+    startTransition(async () => {
+      const r = await setBillingStateAction(task.id, p.state, p.ref);
+      if (!r.ok) {
+        setErr(r.message);
+        return;
+      }
+      setState(p.state);
+      setRef(p.ref ?? "");
+      setPrev(null);
+      router.refresh();
+    });
+  }
+
+  const label =
+    state === "invoiced"
+      ? `Invoiced${ref ? `, ref ${ref}` : ""}`
+      : state === "estimate_drafted"
+        ? `Estimate drafted${ref ? `, ref ${ref}` : ""}`
+        : state === "not_billable"
+          ? "Not billable this time"
+          : "Not marked yet";
+  return (
+    <div className="rounded-lg border border-border bg-surface p-2.5">
+      <p className="text-xs font-semibold text-foreground">Billing: {label}</p>
+      {asking ? (
+        <div className="mt-2 space-y-2">
+          <input
+            value={ref}
+            maxLength={REF_MAX}
+            onChange={(e) => setRef(e.target.value)}
+            placeholder="Zoho invoice number (optional)"
+            className={inputCls}
+          />
+          <div className="flex gap-2">
+            <button onClick={() => mark("invoiced", ref)} disabled={pending} className={btnPrimary}>
+              {pending ? "Saving" : "Mark invoiced"}
+            </button>
+            <button
+              onClick={() => setAsking(false)}
+              disabled={pending}
+              className="press min-h-11 rounded-lg border border-border-strong px-3 text-sm font-medium disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {state !== "invoiced" && (
+            <button
+              onClick={() => setAsking(true)}
+              disabled={pending}
+              className="press min-h-11 rounded-lg border border-border-strong px-3 text-sm font-medium disabled:opacity-50"
+            >
+              Invoiced
+            </button>
+          )}
+          {state !== "not_billable" && (
+            <button
+              onClick={() => mark("not_billable", null)}
+              disabled={pending}
+              className="press min-h-11 rounded-lg border border-border-strong px-3 text-sm font-medium disabled:opacity-50"
+            >
+              Not billable this time
+            </button>
+          )}
+          {state !== null && (
+            <button
+              onClick={() => mark(null, null)}
+              disabled={pending}
+              className="press min-h-11 rounded-lg border border-border-strong px-3 text-sm font-medium disabled:opacity-50"
+            >
+              Reopen
+            </button>
+          )}
+          {prev && (
+            <button onClick={undo} disabled={pending} className="press min-h-11 px-3 text-sm font-medium text-accent">
+              Undo
+            </button>
+          )}
+        </div>
+      )}
+      {err && <p className="mt-1 text-sm text-overdue">{err}</p>}
+    </div>
+  );
 }
 
 function TaskForm({
@@ -1058,7 +1186,10 @@ function TaskForm({
       work_stream_id: f.workStreamId,
       project_id: f.projectId || null,
       recurring_rule,
-      is_billable: f.isBillable,
+      // B30: the three-way choice. The older checkbox column is cleared, so
+      // "follow the stream" really follows the stream.
+      billable: f.billableChoice === "follow" ? null : f.billableChoice === "yes",
+      is_billable: false,
       remind_offsets: offsets.length ? offsets : [7, 3, 1, 0],
       reminder_mode: f.onCalendar ? "calendar" : "in_app",
       not_before: f.notBefore || null,
@@ -1289,14 +1420,18 @@ function TaskForm({
             </Field>
           )}
         </div>
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={f.isBillable}
-            onChange={(e) => setF({ ...f, isBillable: e.target.checked })}
-          />
-          Billable
-        </label>
+        <Field label="Billable">
+          <select
+            value={f.billableChoice}
+            onChange={(e) => setF({ ...f, billableChoice: e.target.value as FormFields["billableChoice"] })}
+            className={inputCls}
+          >
+            <option value="follow">Follow stream</option>
+            <option value="yes">Billable</option>
+            <option value="no">Not billable</option>
+          </select>
+        </Field>
+        {task && task.status === "done" && <BillingBox task={task} />}
         <Field label="Notes">
           <textarea
             value={f.notes}

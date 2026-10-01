@@ -426,8 +426,10 @@ test("the new parameters keep the one-concrete-type rule", () => {
 test("nothing can approve, and nothing bills at all", () => {
   const kinds = TOOLS.map((t) => t.name);
   assert.ok(!kinds.some((k) => /approve/i.test(k)));
+  // B30's set_billing_state records where billing stands (a state and a
+  // reference); it is the one tool allowed a "bill" in its name.
   assert.ok(
-    !kinds.some((k) => /bill|invoice/i.test(k)),
+    !kinds.filter((k) => k !== "set_billing_state").some((k) => /bill|invoice/i.test(k)),
     "M6d removed billing from this app entirely"
   );
   assert.equal(toolByName("create_trip")!.bucket, "autonomous");

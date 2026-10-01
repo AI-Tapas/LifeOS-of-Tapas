@@ -267,3 +267,86 @@ test("B26: agent instructions are writable by the owner session only", async () 
 
   await admin.from("tasks").delete().eq("id", plain.data.id); // cleanup
 });
+
+// B30: only the owner's own signed-in session may mark work invoiced, clear a
+// billing state, or change a task that is marked invoiced. service_role
+// (connectors, crons) bypasses RLS, so this is proved against the
+// guard_task_billing_state trigger. Needs the local stack with the B30
+// migration applied. Not run for the build that added it.
+test("B30: only the owner session may mark work invoiced or clear a billing state", async () => {
+  await admin.auth.admin.createUser({ email: ALLOWED_EMAIL, email_confirm: true });
+  const { data: link, error: linkError } = await admin.auth.admin.generateLink({
+    type: "magiclink",
+    email: ALLOWED_EMAIL,
+  });
+  assert.ifError(linkError);
+  const owner = createClient(url, anonKey, { auth: { persistSession: false } });
+  const { data: session, error: verifyError } = await owner.auth.verifyOtp({
+    type: "magiclink",
+    token_hash: link.properties.hashed_token,
+  });
+  assert.ifError(verifyError);
+  const ownerId = session.user.id;
+  const { data: streams } = await owner.from("work_streams").select("id").limit(1);
+  const stream = streams[0].id;
+
+  // service_role cannot insert an invoiced task.
+  const planted = await admin
+    .from("tasks")
+    .insert({ user_id: ownerId, title: "B30 probe planted", work_stream_id: stream, billing_state: "invoiced" })
+    .select("id");
+  assert.ok(planted.error, "service_role must not insert an invoiced task");
+
+  const plain = await admin
+    .from("tasks")
+    .insert({ user_id: ownerId, title: "B30 probe plain", work_stream_id: stream })
+    .select("id")
+    .single();
+  assert.ifError(plain.error);
+
+  // service_role cannot mark invoiced, but may draft an estimate and change it.
+  const inv = await admin.from("tasks").update({ billing_state: "invoiced" }).eq("id", plain.data.id).select("id");
+  assert.ok(inv.error, "service_role must not mark work invoiced");
+  const est = await admin
+    .from("tasks")
+    .update({ billing_state: "estimate_drafted", billing_ref: "EST-1" })
+    .eq("id", plain.data.id)
+    .select("billing_state, billing_updated_at")
+    .single();
+  assert.ifError(est.error);
+  assert.equal(est.data.billing_state, "estimate_drafted");
+  assert.ok(est.data.billing_updated_at, "the trigger stamps the change");
+  const nb = await admin.from("tasks").update({ billing_state: "not_billable" }).eq("id", plain.data.id).select("id");
+  assert.ifError(nb.error);
+
+  // service_role cannot clear a state.
+  const clear = await admin.from("tasks").update({ billing_state: null }).eq("id", plain.data.id).select("id");
+  assert.ok(clear.error, "service_role must not clear a billing state");
+
+  // A reference over 40 characters is refused by the check constraint.
+  const long = await admin.from("tasks").update({ billing_ref: "x".repeat(41) }).eq("id", plain.data.id).select("id");
+  assert.ok(long.error, "a reference over 40 characters is refused");
+
+  // The owner can mark it invoiced; then service_role cannot move it away.
+  const own = await owner
+    .from("tasks")
+    .update({ billing_state: "invoiced", billing_ref: "INV-1" })
+    .eq("id", plain.data.id)
+    .select("billing_state")
+    .single();
+  assert.ifError(own.error);
+  assert.equal(own.data.billing_state, "invoiced");
+  const away = await admin.from("tasks").update({ billing_state: "not_billable" }).eq("id", plain.data.id).select("id");
+  assert.ok(away.error, "service_role must not move a task away from invoiced");
+  const ref = await admin.from("tasks").update({ billing_ref: "INV-2" }).eq("id", plain.data.id).select("id");
+  assert.ok(ref.error, "service_role must not change the reference of an invoiced task");
+  const other = await admin.from("tasks").update({ title: "B30 probe renamed" }).eq("id", plain.data.id).select("id");
+  assert.ifError(other.error); // an ordinary write on an invoiced task is still fine
+
+  // The owner can reopen it.
+  const reopen = await owner.from("tasks").update({ billing_state: null }).eq("id", plain.data.id).select("billing_state").single();
+  assert.ifError(reopen.error);
+  assert.equal(reopen.data.billing_state, null);
+
+  await admin.from("tasks").delete().eq("id", plain.data.id); // cleanup
+});

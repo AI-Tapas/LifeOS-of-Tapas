@@ -563,7 +563,8 @@ test("the hard rule points at the stream's rate, not at one remembered number", 
 
 test("no tool quotes, invoices or tracks time on the back of the rate", () => {
   // B4 stores one number and tells the assistant. Nothing else.
-  for (const t of TOOLS) {
+  // B30's set_billing_state records a billing state only (no rate, no amount).
+  for (const t of TOOLS.filter((x) => x.name !== "set_billing_state")) {
     assert.doesNotMatch(
       t.name,
       /(quote|invoice|timesheet|time_entry|bill)/i,

@@ -387,6 +387,7 @@ What the app does instead:
 - One recurring task, "Raise the AICA invoice for last month", monthly, due
   on the 3rd, seeded into the ICAI stream by migration 20260901000300. It
   replaced the per-trip "Build the reimbursement bill" step.
+- B30 records billing state only; still no invoice, number, total or Zoho call.
 
 ## Theme (Settings > Appearance)
 
@@ -1694,3 +1695,89 @@ Additive only.
   scripts/b28-loader.mjs, and scripts/b29-sync.test.ts runs the real sync.ts
   against a database stand-in that can fail a read, via
   scripts/b29-sync-loader.mjs).
+
+## Unbilled work (B30)
+
+Migration `20261002000200_b30_unbilled_work.sql`. NOT applied anywhere when it
+was written; apply it before (or with) the deploy of this code, since Settings,
+the Tasks page, /unbilled, the Monday brief and both connectors select its
+columns. Defaulted or nullable additions only, nothing backfilled, no stream
+seeded as billable, RLS unchanged.
+
+- The problem, in his words on 1 October 2026: work he has already done is
+  never invoiced. Tasks get marked done and the billing is forgotten. M6d
+  still holds: Life OS never produces an invoice, a number, a total or a PDF
+  and never calls Zoho. B30 only records which work is billable and where its
+  billing stands. No amounts anywhere; scripts/b30.test.ts fails if a B30 file
+  grows one.
+- Columns: `work_streams.billable` (boolean, not null, default false; he ticks
+  it in Settings > Work streams, "Billable: finished tasks show on Unbilled
+  until invoiced"). `tasks.billable` (nullable: null follows the stream, true
+  or false overrides it). `tasks.billing_state` (null, `estimate_drafted`,
+  `invoiced`, `not_billable`; check constraint), `tasks.billing_ref` (at most
+  40 characters, the Zoho estimate or invoice number) and
+  `tasks.billing_updated_at` (stamped by the trigger). Note the older
+  `tasks.is_billable` (M1, not null default false, written by the
+  `billable` parameter of create_task and update_task) is left alone: a true
+  there still counts as billable while `tasks.billable` is null, and the drawer
+  now writes `billable` and clears `is_billable`. `work_streams.feeds_billing`
+  (M6d, which streams feed his invoice run) is a different flag and its label in
+  Settings now reads "in the invoice run".
+- Effective billable, pure in lib/billing/unbilled.ts `effectiveBillable`:
+  recurring tasks (`recurring_rule`) and trip checklist steps (`trip_id`) are
+  NEVER billable work, whatever the flags say (trips bill through the month
+  pack); otherwise the task's own `billable` wins, then the old `is_billable`
+  tick, then the stream's tick.
+- The list, `unbilledGroups` (same file): done tasks, effectively billable,
+  completed in the last 180 days, `billing_state` null or `estimate_drafted`,
+  grouped by work stream, oldest completion first (rows and groups). A row is
+  title, project, completion date, days since, and the estimate ref if one was
+  drafted. `lib/billing/load.ts` `loadUnbilled` is the one query, used by
+  /unbilled (cookie client), the Monday brief and the connector, so they cannot
+  disagree.
+- `/unbilled` (nav item "Unbilled", the nav is now nine items): grouped list,
+  each row with "Invoiced" (asks for the optional reference first, so a stray
+  tap does not fire) and "Not billable". The last change shows an Undo bar.
+  The task drawer has the three-way "Follow stream, Billable, Not billable" and,
+  for a done task, a Billing box (Invoiced with a reference, Not billable this
+  time, Reopen, Undo). His own marks go through lib/billing/write.ts
+  `setBillingState` (server actions in app/(app)/unbilled/actions.ts) and each
+  writes an `audit_log` row (`billing_state_set`) with the previous state and
+  reference; Undo writes those back.
+- Monday nudge: `composeBrief` takes `unbilled` (a summary) and, on a Monday
+  only and only when there is some, prints one line "Unbilled work: <n>
+  finished tasks across <stream names> not invoiced, oldest from <date>." with
+  a link to /unbilled, in the HTML, the text and so the stored copy. Stream
+  names only: no client detail. The brief cron reads it on Mondays only and a
+  failed read never stops the brief. No new cron.
+- Connector: `lifeos_list_unbilled` (read, optional `work_stream`, disclosure
+  `app_data`) returns the same rows with task ids and each task's
+  `instructions_for_agents` (his B26 words) if set. `lifeos_set_billing_state`
+  (registry `set_billing_state`, autonomous, undoable, TOOL_TARGETS on tasks):
+  `task_id`, `state` (`estimate_drafted` or `not_billable`, one string type),
+  optional `ref` (at most 40 characters). `lifeos_list_tasks` now returns
+  `billable` (effective), `billing_state` and `billing_ref`.
+- THE GUARD, the reason for it, and how it works: only Tapas's own session may
+  mark work invoiced, otherwise an agent could hide unbilled work. The
+  connector can never set `invoiced`, never clear a state and never move a task
+  that is marked invoiced. Enforced three times: the tool schema has no
+  `invoiced` value; `checkAgentBilling` and the performer refuse it on the
+  server, and an undo over the connector is held to the same rule
+  (`undoAllowedForService`, checked before the undo claims the action, so a
+  refusal leaves it undoable from the app); and the trigger
+  `guard_task_billing_state` (before insert or update on tasks, same caller test
+  as B26: authenticated role, JWT role and uid equal to the row's owner) refuses
+  a non-owner who sets `invoiced`, clears a state, or changes billing_state or
+  billing_ref on a row that is `invoiced`. It stamps `billing_updated_at`
+  whenever state or reference change. `delete_task` refuses a task marked
+  invoiced (its undo re-insert runs as service_role and could not restore it).
+- Not built, and a known residue: no tool writes `tasks.billable`, so an agent
+  cannot mark work not billable that way, but the existing `update_task` can
+  still move a task out of `done` or drop it, which takes it off the list (that
+  was true of every task field before B30). The Monday line and the page do not
+  list a task that is not done.
+- Tests: `npm run test:b30` (offline; the real executor, the real connector
+  reads and the real brief composer, run against the b26 in-memory database).
+  The live proof of the trigger belongs in scripts/rls.test.mjs on the local
+  stack; it was not run for this build (no database), and test:rls:cloud is
+  never run for it.

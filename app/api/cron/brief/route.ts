@@ -20,7 +20,9 @@ import type { MonthExpense } from "@/lib/trips/month";
 import type { Holding } from "@/lib/money/investments";
 import { syncFamilyTravel } from "@/lib/family/sync";
 import { cronAuthorized, alreadyRanToday } from "@/lib/cron/guard";
-import { addDays, civilKey, civilToday, istInstant } from "@/lib/datetime";
+import { addDays, civilKey, civilToday, civilWeekday, istInstant } from "@/lib/datetime";
+import { loadUnbilled } from "@/lib/billing/load";
+import { summarise, type UnbilledSummary } from "@/lib/billing/unbilled";
 import type { Json } from "@/lib/database.types";
 
 export const runtime = "nodejs";
@@ -204,6 +206,17 @@ export async function GET(req: Request): Promise<Response> {
       (l): l is string => l !== null
     );
 
+    // B30: the Monday nudge about finished work with no invoice. Read on a
+    // Monday only; a failure to read never stops the brief.
+    let unbilled: UnbilledSummary | null = null;
+    if (civilWeekday(today) === 1) {
+      try {
+        unbilled = summarise(await loadUnbilled(supabase, userId));
+      } catch {
+        unbilled = null;
+      }
+    }
+
     const streamName = new Map((streams ?? []).map((s) => [s.id, s.name]));
     const briefTasks: BriefTask[] = (tasks ?? []).filter((t) => !lapsedIds.has(t.id)).map((t) => ({
       id: t.id,
@@ -280,6 +293,7 @@ export async function GET(req: Request): Promise<Response> {
         cities: Array.isArray(t.cities) ? (t.cities as string[]) : [],
       })),
       pendingApprovalsCount: pendingCount ?? 0,
+      unbilled,
       accountsNeedingReconnect,
       appBaseUrl,
       housekeeping,

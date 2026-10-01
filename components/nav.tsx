@@ -6,7 +6,7 @@ import { Rolling } from "@/components/ui";
 
 // Bottom navigation. Every destination is visible: a "More" sheet saved a row
 // of height but cost a tap and, worse, hid half the app behind a guess. On a
-// phone the eight sit as two rows of four; from small screens up they fit on
+// phone the nine sit as two rows (five and four); from small screens up they fit on
 // one row.
 
 type Item = { href: string; label: string; icon: React.ReactNode };
@@ -45,6 +45,12 @@ const icons = {
       <path d="M6 9.5v.01M18 14.5v.01" />
     </svg>
   ),
+  unbilled: (
+    <svg viewBox="0 0 24 24" className="h-6 w-6" {...stroke}>
+      <path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" />
+      <path d="M9.5 8h5M9.5 12h5" />
+    </svg>
+  ),
   trips: (
     <svg viewBox="0 0 24 24" className="h-6 w-6" {...stroke}>
       <path d="M2.5 19h19" />
@@ -76,6 +82,7 @@ const items: Item[] = [
   { href: "/calendar", label: "Calendar", icon: icons.calendar },
   { href: "/tasks", label: "Tasks", icon: icons.tasks },
   { href: "/money", label: "Money", icon: icons.money },
+  { href: "/unbilled", label: "Unbilled", icon: icons.unbilled },
   { href: "/trips", label: "Trips", icon: icons.trips },
   { href: "/brain", label: "Brain", icon: icons.brain },
   { href: "/assistant", label: "Assistant", icon: icons.assistant },
@@ -87,7 +94,7 @@ export default function Nav({ queueCount = 0 }: { queueCount?: number }) {
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-lg dark:bg-background/92">
-      <div className="mx-auto grid max-w-3xl grid-cols-4 sm:grid-cols-8">
+      <div className="mx-auto grid max-w-3xl grid-cols-5 sm:grid-cols-9">
         {items.map((item) => {
           const active = pathname === item.href;
           const showBadge = item.href === "/assistant" && queueCount > 0;
