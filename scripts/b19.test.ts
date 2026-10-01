@@ -337,7 +337,7 @@ test("checklist steps of different trips are not reported as repeats", () => {
     { id: "e", title: "Raise the AICA invoice for last month", status: "todo", due_ts: null, not_before: null },
   ];
   const out = buildReport(rows, "2026-10-01");
-  assert.match(out, /repeats of each other: 2 pairs/);
+  assert.match(out, /repeats of each other: 2 pairs\b/);
   assert.match(out, /ids a, c/, "same trip is still a repeat");
   assert.match(out, /ids d, e/, "tasks on no trip are still compared");
   assert.doesNotMatch(out, /ids a, b|ids b, c/, "different trips are not repeats");
