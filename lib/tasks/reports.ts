@@ -86,6 +86,7 @@ export interface ReportRow {
   status: string;
   due_ts: string | null;
   not_before: string | null;
+  trip_id?: string | null;
 }
 
 function dayLabel(key: string): string {
@@ -109,6 +110,10 @@ export function duplicatePairs(rows: ReportRow[]): { a: ReportRow; b: ReportRow;
   const pairs: { a: ReportRow; b: ReportRow; score: number }[] = [];
   for (let i = 0; i < open.length; i++) {
     for (let j = i + 1; j < open.length; j++) {
+      // Checklist steps of two different trips share titles by design
+      // ("Collect cab receipts"), so they are never repeats of each other.
+      const ta = open[i].trip_id, tb = open[j].trip_id;
+      if (ta && tb && ta !== tb) continue;
       const score = duplicateScore(open[i].title, open[j].title);
       if (score >= NEAR_DUPLICATE_THRESHOLD) pairs.push({ a: open[i], b: open[j], score });
     }

@@ -43,7 +43,7 @@ async function main(): Promise<void> {
   });
   const { data, error } = await supabase
     .from("tasks")
-    .select("id, title, status, due_ts, not_before")
+    .select("id, title, status, due_ts, not_before, trip_id")
     .in("status", ["inbox", "todo", "doing"]);
   if (error) {
     console.error(`Could not read the tasks: ${error.message}`);

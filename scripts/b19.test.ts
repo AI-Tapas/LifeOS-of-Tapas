@@ -328,6 +328,21 @@ test("the report lists premature and repeated tasks and changes nothing", () => 
   assert.match(script, /\.select\(/);
 });
 
+test("checklist steps of different trips are not reported as repeats", () => {
+  const rows: ReportRow[] = [
+    { id: "a", title: "Collect cab receipts", status: "todo", due_ts: null, not_before: null, trip_id: "t1" },
+    { id: "b", title: "Collect cab receipts", status: "todo", due_ts: null, not_before: null, trip_id: "t2" },
+    { id: "c", title: "Collect cab receipts", status: "todo", due_ts: null, not_before: null, trip_id: "t1" },
+    { id: "d", title: "Raise the AICA invoice for last month", status: "todo", due_ts: null, not_before: null },
+    { id: "e", title: "Raise the AICA invoice for last month", status: "todo", due_ts: null, not_before: null },
+  ];
+  const out = buildReport(rows, "2026-10-01");
+  assert.match(out, /repeats of each other: 2 pairs/);
+  assert.match(out, /ids a, c/, "same trip is still a repeat");
+  assert.match(out, /ids d, e/, "tasks on no trip are still compared");
+  assert.doesNotMatch(out, /ids a, b|ids b, c/, "different trips are not repeats");
+});
+
 test("no emojis or em dashes in anything B19 wrote", () => {
   for (const file of [
     "lib/tasks/near-duplicate.ts",

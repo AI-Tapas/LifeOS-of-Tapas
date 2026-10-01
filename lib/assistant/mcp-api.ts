@@ -842,7 +842,7 @@ export async function runReadTool(
   if (name === "lifeos_report_premature_tasks") {
     const { data, error } = await supabase
       .from("tasks")
-      .select("id, title, status, due_ts, not_before")
+      .select("id, title, status, due_ts, not_before, trip_id")
       .eq("user_id", userId)
       .in("status", ["inbox", "todo", "doing"]);
     if (error) throw new Error(error.message);
