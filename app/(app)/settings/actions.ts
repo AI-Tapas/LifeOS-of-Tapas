@@ -11,6 +11,8 @@ import { sweepInAppReminderEvents } from "@/lib/reminders/writer";
 import { clearFamilyTravel, syncFamilyTravel } from "@/lib/family/sync";
 import { reportable, describeError, recordEvent } from "@/lib/errors";
 import { checkStreamEdit } from "@/lib/tasks/stream";
+import { sendPush } from "@/lib/push/send";
+import { CAPTURE_TOKENS_MAX, hashCaptureToken, newCaptureToken } from "@/lib/capture/core";
 
 export type RefreshResult =
   | { ok: true; count: number }
@@ -512,4 +514,135 @@ export async function setWorkStreamBillableAction(
   revalidatePath("/settings");
   revalidatePath("/unbilled");
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// B31: phone alerts and share-to-Life OS capture
+// ---------------------------------------------------------------------------
+// Owner session only. The push endpoint and its two public keys come from the
+// browser after Tapas taps "Turn on alerts on this device"; a capture token is
+// made here, shown once, and only its sha256 is stored.
+
+export interface PanelResult {
+  ok: boolean;
+  message: string;
+}
+
+const KEY_SHAPE = /^[A-Za-z0-9_\-+/=]{8,200}$/;
+
+export async function savePushSubscriptionAction(input: {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  device_label: string;
+}): Promise<PanelResult> {
+  const { supabase, user } = await requireUser("/settings");
+  const endpoint = (input.endpoint ?? "").trim();
+  if (!endpoint.startsWith("https://") || endpoint.length > 2000) {
+    return { ok: false, message: "That device sent an address Life OS cannot use." };
+  }
+  if (!KEY_SHAPE.test(input.p256dh ?? "") || !KEY_SHAPE.test(input.auth ?? "")) {
+    return { ok: false, message: "That device sent keys Life OS cannot use." };
+  }
+  const label = (input.device_label ?? "").replace(/\s+/g, " ").trim().slice(0, 60) || "This device";
+  const { error } = await supabase
+    .from("push_subscriptions")
+    .upsert(
+      { user_id: user.id, endpoint, p256dh: input.p256dh, auth: input.auth, device_label: label },
+      { onConflict: "endpoint" }
+    );
+  if (error) return { ok: false, message: describeError(error) };
+  await supabase.from("audit_log").insert({
+    user_id: user.id,
+    actor: "user",
+    action: "push_device_added",
+    entity: "push_subscriptions",
+    meta: {},
+  });
+  revalidatePath("/settings");
+  return { ok: true, message: "Alerts are on for this device." };
+}
+
+export async function removePushSubscriptionAction(id: string): Promise<PanelResult> {
+  const { supabase, user } = await requireUser("/settings");
+  const { error } = await supabase.from("push_subscriptions").delete().eq("id", id).eq("user_id", user.id);
+  if (error) return { ok: false, message: describeError(error) };
+  await supabase.from("audit_log").insert({
+    user_id: user.id,
+    actor: "user",
+    action: "push_device_removed",
+    entity: "push_subscriptions",
+    entity_id: id,
+    meta: {},
+  });
+  revalidatePath("/settings");
+  return { ok: true, message: "That device was removed." };
+}
+
+export async function sendTestAlertAction(): Promise<PanelResult> {
+  const { supabase, user } = await requireUser("/settings");
+  const r = await sendPush(
+    supabase,
+    user.id,
+    { title: "Life OS test alert", body: "Alerts are working on this device.", url: "/settings" },
+    { ignoreQuietHours: true }
+  );
+  revalidatePath("/settings");
+  switch (r.status) {
+    case "sent":
+      return { ok: true, message: `Sent to ${r.sent} device${r.sent === 1 ? "" : "s"}. It should buzz in a moment.` };
+    case "not_configured":
+      return { ok: false, message: "Alerts are not set up yet. The push keys are missing in Vercel." };
+    case "no_devices":
+      return { ok: false, message: "No device has alerts turned on yet." };
+    case "rate_limited":
+      return { ok: false, message: "Twenty alerts have already gone out in the last 24 hours." };
+    default:
+      return { ok: false, message: "The alert could not be delivered. Remove the device and turn alerts on again." };
+  }
+}
+
+export async function createCaptureTokenAction(
+  label: string
+): Promise<PanelResult & { token?: string }> {
+  const { supabase, user } = await requireUser("/settings");
+  const clean = (label ?? "").replace(/\s+/g, " ").trim().slice(0, 60);
+  if (!clean) return { ok: false, message: "Give the token a label such as iPhone." };
+  const { count } = await supabase
+    .from("capture_tokens")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id);
+  if ((count ?? 0) >= CAPTURE_TOKENS_MAX) {
+    return { ok: false, message: `You already have ${CAPTURE_TOKENS_MAX} tokens. Revoke one first.` };
+  }
+  const token = newCaptureToken();
+  const { error } = await supabase
+    .from("capture_tokens")
+    .insert({ user_id: user.id, label: clean, token_hash: hashCaptureToken(token) });
+  if (error) return { ok: false, message: describeError(error) };
+  await supabase.from("audit_log").insert({
+    user_id: user.id,
+    actor: "user",
+    action: "capture_token_created",
+    entity: "capture_tokens",
+    meta: {},
+  });
+  revalidatePath("/settings");
+  return { ok: true, message: "Copy the token now. It is shown once.", token };
+}
+
+export async function revokeCaptureTokenAction(id: string): Promise<PanelResult> {
+  const { supabase, user } = await requireUser("/settings");
+  const { error } = await supabase.from("capture_tokens").delete().eq("id", id).eq("user_id", user.id);
+  if (error) return { ok: false, message: describeError(error) };
+  await supabase.from("audit_log").insert({
+    user_id: user.id,
+    actor: "user",
+    action: "capture_token_revoked",
+    entity: "capture_tokens",
+    entity_id: id,
+    meta: {},
+  });
+  revalidatePath("/settings");
+  return { ok: true, message: "That token no longer works." };
 }

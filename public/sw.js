@@ -102,3 +102,57 @@ self.addEventListener("fetch", (event) => {
     );
   }
 });
+
+// B31: phone alerts (Web Push). The install, activate and fetch behaviour
+// above is unchanged.
+//
+// Only a path inside this app may be opened from an alert: anything that
+// resolves to another origin (https://elsewhere, //elsewhere, a backslash
+// trick) falls back to the home screen.
+function alertTarget(raw) {
+  try {
+    const url = new URL(typeof raw === "string" ? raw : "/", self.location.origin);
+    if (url.origin !== self.location.origin) return "/";
+    return url.pathname + url.search;
+  } catch {
+    return "/";
+  }
+}
+
+// iOS revokes a subscription that receives a push and shows nothing, so every
+// push shows a notification, with a plain fallback when the payload is odd.
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = {};
+  }
+  const title = typeof data.title === "string" && data.title ? data.title.slice(0, 100) : "Life OS";
+  const body = typeof data.body === "string" ? data.body.slice(0, 140) : "";
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon: "/icons/icon-192.png",
+      data: { url: alertTarget(data.url) },
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const target = alertTarget(event.notification.data && event.notification.data.url);
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      for (const client of list) {
+        if ("focus" in client) {
+          return client
+            .focus()
+            .then((c) => (c && "navigate" in c ? c.navigate(target) : undefined))
+            .catch(() => self.clients.openWindow(target));
+        }
+      }
+      return self.clients.openWindow(target);
+    })
+  );
+});

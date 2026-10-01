@@ -40,6 +40,9 @@ export default async function proxy(request: NextRequest) {
     // an API call to /login would also hand the caller an HTML page instead
     // of a usable error.
     request.nextUrl.pathname.startsWith("/api/mcp") ||
+    // B31: an Apple Shortcut posts shared text here with its own capture
+    // token (a bearer, checked by the route), and has no cookie.
+    request.nextUrl.pathname.startsWith("/api/capture") ||
     // Vercel Cron calls these with a bearer token and no cookie, same
     // reasoning as /api/mcp above.
     request.nextUrl.pathname.startsWith("/api/cron") ||

@@ -27,6 +27,8 @@ import {
   type TaskInput,
 } from "@/lib/tasks/write";
 import { undoLapse } from "@/lib/tasks/lapse";
+import { checkNotifyText, needsYouAlert } from "@/lib/push/core";
+import { sendPush, sendPushQuietly } from "@/lib/push/send";
 import { checkAgentBilling, undoAllowedForService } from "@/lib/billing/unbilled";
 import {
   INSTRUCTION_COLUMNS,
@@ -568,9 +570,17 @@ async function performAutonomous(
           status: input.status,
           result_chars: typeof input.result === "string" ? input.result.length : 0,
         }
-      : isDraft
-        ? storedDraftPayload(input)
-        : input;
+      : name === "notify"
+        ? // B31: the alert's words never sit in the queue row, only its target
+          // and lengths. They would otherwise outlive the lock screen.
+          {
+            task_id: input.task_id ?? null,
+            title_chars: typeof input.title === "string" ? input.title.length : 0,
+            body_chars: typeof input.body === "string" ? input.body.length : 0,
+          }
+        : isDraft
+          ? storedDraftPayload(input)
+          : input;
   const spec = TOOL_TARGETS[name];
   const outcome = await runAutonomousAction<Performed>(input, spec, {
     resolveTarget: (value) => targetResolves(supabase, userId, spec, value, input),
@@ -937,6 +947,11 @@ const performers: Record<string, Performer> = {
     if (!updated?.length) {
       throw new Error("The instruction changed while you were reporting, so nothing was recorded. Read it again with lifeos_list_agent_instructions.");
     }
+    // B31. An agent that needs him raises exactly one phone alert. Best effort:
+    // quiet hours, the daily cap or a missing key never fail the result.
+    if (args.status === "needs_you") {
+      await sendPushQuietly(supabase, userId, needsYouAlert(taskId, row.title));
+    }
     return {
       summary: `Agent result (${args.status}) recorded on: ${row.title}.`,
       undo: {
@@ -955,6 +970,53 @@ const performers: Record<string, Performer> = {
         status: args.status,
         result_chars: args.result.length,
       },
+    };
+  },
+
+  // B31. One short alert to his phone. The words are screened first (one
+  // line, no link, no credential, no figures), a task_id must be one of his,
+  // and the sender enforces quiet hours and the 20-a-day cap. Not undoable.
+  async notify(supabase, userId, input) {
+    const text = checkNotifyText(input.title, input.body);
+    if (!text.ok) throw new Error(text.message);
+    const taskId = s(input.task_id);
+    if (taskId) {
+      const { data: task } = await supabase
+        .from("tasks")
+        .select("id")
+        .eq("id", taskId)
+        .eq("user_id", userId)
+        .maybeSingle();
+      if (!task) throw new Error("That task_id is not one of Tapas's tasks. Take it from lifeos_list_tasks.");
+    }
+    const r = await sendPush(supabase, userId, {
+      title: text.title,
+      body: text.body,
+      url: taskId ? `/tasks?task=${encodeURIComponent(taskId)}` : "/",
+    });
+    if (r.status === "rate_limited") {
+      throw new Error("Alert limit reached: at most 20 alerts go out in 24 hours across all sources. Nothing was sent. Leave it for the morning brief.");
+    }
+    if (r.status === "not_configured") {
+      throw new Error("Phone alerts are not set up yet (the push keys are missing in Vercel). Nothing was sent.");
+    }
+    if (r.status === "no_devices") {
+      throw new Error("No phone has alerts turned on yet (Settings > Phone alerts). Nothing was sent.");
+    }
+    if (r.status === "error") {
+      throw new Error("The alert could not be delivered to any device. Nothing was recorded as sent.");
+    }
+    if (r.status === "quiet_hours") {
+      return {
+        summary: "Held, not sent: quiet hours run from 10 PM to 7 AM IST. The item stays in the app and the morning brief.",
+        undo: {},
+        auditMeta: { sent: 0, held: "quiet_hours", has_task: taskId !== null },
+      };
+    }
+    return {
+      summary: `Alert sent to ${r.sent} device${r.sent === 1 ? "" : "s"}.`,
+      undo: {},
+      auditMeta: { sent: r.sent, failed: r.failed, removed: r.removed, has_task: taskId !== null },
     };
   },
 

@@ -70,7 +70,7 @@ export function searchRows(rows: SearchRow[], query: string): { hits: SearchHit[
       kind: r.kind,
       id: r.id,
       title: r.title,
-      excerpt: r.untrusted ? fenceUntrusted("text from a task created from scanned email", excerpt) : excerpt,
+      excerpt: r.untrusted ? fenceUntrusted("text from a task created from scanned email or shared text", excerpt) : excerpt,
       untrusted: r.untrusted,
     };
   });

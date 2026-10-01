@@ -9,6 +9,7 @@
 
 import { formatDateIST } from "../datetime.ts";
 import { fenceUntrusted } from "./prompt.ts";
+import { isUntrustedSource } from "../tasks/untrusted.ts";
 
 export interface ContextTask {
   id: string;
@@ -29,9 +30,9 @@ export function taskContextLines(tasks: ContextTask[], todayKey: string): string
   const startsLabel = (t: ContextTask) => formatDateIST(`${t.not_before}T04:00:00Z`);
   const due = (t: ContextTask) => (t.due_ts ? formatDateIST(t.due_ts) : "no due date");
   const created = (t: ContextTask) => formatDateIST(t.created_at);
-  const trusted = tasks.filter((t) => t.source !== "email" && !isWaiting(t));
-  const waiting = tasks.filter((t) => t.source !== "email" && isWaiting(t));
-  const fromMail = tasks.filter((t) => t.source === "email");
+  const trusted = tasks.filter((t) => !isUntrustedSource(t.source) && !isWaiting(t));
+  const waiting = tasks.filter((t) => !isUntrustedSource(t.source) && isWaiting(t));
+  const fromMail = tasks.filter((t) => isUntrustedSource(t.source));
 
   // "set by" is not decoration: a priority marked Tapas is his own judgment
   // and may never be changed, whatever the assistant now thinks. The reason
@@ -74,7 +75,7 @@ export function taskContextLines(tasks: ContextTask[], todayKey: string): string
       .join("\n");
     lines.push(
       "",
-      fenceUntrusted("tasks created from scanned email (id | title | stream | priority | set by | why | due | status | created)", body)
+      fenceUntrusted("tasks created from scanned email or shared text (id | title | stream | priority | set by | why | due | status | created)", body)
     );
   }
   return lines;

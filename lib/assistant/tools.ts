@@ -921,6 +921,23 @@ export const TOOLS: ToolDef[] = [
       ref: opt(str("The Zoho estimate number, plain text, at most 40 characters. Leave out if there is none.")),
     }),
   },
+  {
+    // B31. Autonomous: it sends one short alert to Tapas's own phone and
+    // changes nothing in the database but an audit row. A sent alert cannot be
+    // recalled, so it is deliberately NOT undoable. The words are screened in
+    // lib/push/core.ts (no link, no credential, no figures) and at most 20
+    // alerts go out in a rolling 24 hours across every source.
+    name: "notify",
+    bucket: "autonomous",
+    disclosure: "app_data",
+    description:
+      "Send ONE short alert to Tapas's phone lock screen. Use it once per item that truly needs him: a decision, a deadline at risk, something only he can do. Never for routine progress, and never for the same item twice. The text shows on a locked phone, so never put client document content, an amount, a reference number, an email body or any secret in it: name the task and say what he must do, in plain words. Plain text only: no link, web address or scheme such as http, and nothing that looks like a password or key (those are refused). Newlines are collapsed to one line. title at most 60 characters, body at most 140. Pass task_id (one of his tasks) when the alert is about a task: tapping it opens that task. Nothing is sent between 10 PM and 7 AM IST (the item stays in the app and the morning brief), and at most 20 alerts go out in 24 hours across all sources; above that this tool refuses. An alert cannot be recalled, so this cannot be undone.",
+    input_schema: schema({
+      title: str("Short headline, at most 60 characters, one line."),
+      body: str("What he must do or decide, at most 140 characters, one line. No links, amounts, reference numbers or document text."),
+      task_id: opt(str("The id of one of his tasks, when the alert is about it. Omit otherwise.")),
+    }),
+  },
 ];
 
 export const AUTONOMOUS_KINDS = new Set(

@@ -13,6 +13,8 @@ import { ticketBriefLine } from "@/lib/trips/ticket";
 import { cabBriefLine } from "@/lib/trips/cab";
 import { SCAN_HEALTH_ACTIONS, scanHealthWarning } from "@/lib/brief/scan-health";
 import { keepBrief } from "@/lib/brief/store";
+import { scanFailedAlert } from "@/lib/push/core";
+import { sendPushQuietly } from "@/lib/push/send";
 import { briefStoreFor } from "@/lib/brief/store-db";
 import { loadTripSteps } from "@/lib/tasks/trip-steps";
 import { setTaskStatus } from "@/lib/tasks/write";
@@ -198,6 +200,9 @@ export async function GET(req: Request): Promise<Response> {
       .in("action", SCAN_HEALTH_ACTIONS)
       .gte("ts", new Date(Date.now() - 36 * 3600 * 1000).toISOString());
     const scanWarning = healthRows ? scanHealthWarning(healthRows, istDate) : null;
+    // B31: the same line, to his phone. It names no client and no mail, quiet
+    // hours do not apply at 7 AM, and a failure to send never stops the brief.
+    if (scanWarning) await sendPushQuietly(supabase, userId, scanFailedAlert(scanWarning));
     const housekeeping = [
       lapsedLine(lapsedIds.size),
       ticketBriefLine(noTrip, unreadable),

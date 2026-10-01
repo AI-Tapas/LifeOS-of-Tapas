@@ -18,6 +18,8 @@ import ReminderCleanupPanel from "@/components/settings/reminder-cleanup-panel";
 import ConnectionsPanel, {
   type ConnectionView,
 } from "@/components/settings/connections-panel";
+import PhoneAlertsPanel, { type DeviceView } from "@/components/settings/phone-alerts-panel";
+import CapturePanel, { type CaptureTokenView } from "@/components/settings/capture-panel";
 import { providerOptions } from "@/lib/assistant/config";
 import { slotByKey } from "@/lib/accounts";
 import { formatDateIST } from "@/lib/datetime";
@@ -100,6 +102,8 @@ export default async function SettingsPage({
     { data: modelSettings },
     { data: mcpClients },
     { data: mcpGrants },
+    { data: pushDevices },
+    { data: captureTokens },
   ] =
     await Promise.all([
       supabase
@@ -132,6 +136,15 @@ export default async function SettingsPage({
         .from("mcp_grants")
         .select("client_id, kind, expires_at, revoked_at")
         .is("revoked_at", null),
+      // B31: device endpoints and keys are never selected, only what is shown.
+      supabase
+        .from("push_subscriptions")
+        .select("id, device_label, created_at, last_ok_at, last_error_at")
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("capture_tokens")
+        .select("id, label, created_at, last_used_at")
+        .order("created_at", { ascending: false }),
     ]);
 
   // Shaping the rows for display is where a render throws if any value is not
@@ -140,6 +153,8 @@ export default async function SettingsPage({
   let personaVersions: PersonaVersionView[] = [];
   let activePersonaMd = "";
   let connections: ConnectionView[] = [];
+  let devices: DeviceView[] = [];
+  let tokens: CaptureTokenView[] = [];
   let renderFault: string | null = null;
   try {
     personaVersions = (personas ?? []).map((p) => ({
@@ -156,6 +171,19 @@ export default async function SettingsPage({
       created_label: formatDateIST(c.created_at),
       last_used_label: c.last_used_at ? formatDateIST(c.last_used_at) : null,
       active_tokens: countLiveTokens(mcpGrants ?? [], c.client_id),
+    }));
+    devices = (pushDevices ?? []).map((d) => ({
+      id: d.id,
+      label: d.device_label ?? "Device",
+      added_label: formatDateIST(d.created_at),
+      last_ok_label: d.last_ok_at ? formatDateIST(d.last_ok_at) : null,
+      last_error_label: d.last_error_at ? formatDateIST(d.last_error_at) : null,
+    }));
+    tokens = (captureTokens ?? []).map((t) => ({
+      id: t.id,
+      label: t.label,
+      created_label: formatDateIST(t.created_at),
+      last_used_label: t.last_used_at ? formatDateIST(t.last_used_at) : null,
     }));
   } catch (e) {
     renderFault = describeError(e);
@@ -237,6 +265,19 @@ export default async function SettingsPage({
       </p>
       <div className="mt-2">
         <ConnectionsPanel items={connections} />
+      </div>
+
+      <h2 className="mt-8 text-base font-semibold tracking-tight">Phone alerts</h2>
+      <p className="mt-1 text-sm text-secondary">
+        A buzz on this phone when an agent needs you, or the mail scan fails.
+      </p>
+      <div className="mt-2">
+        <PhoneAlertsPanel devices={devices} />
+      </div>
+
+      <h2 className="mt-8 text-base font-semibold tracking-tight">Share to Life OS</h2>
+      <div className="mt-2">
+        <CapturePanel tokens={tokens} />
       </div>
 
       <h2 className="mt-8 text-base font-semibold tracking-tight">Calendar reminders</h2>
