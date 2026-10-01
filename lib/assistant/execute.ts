@@ -950,7 +950,7 @@ const performers: Record<string, Performer> = {
     // B31. An agent that needs him raises exactly one phone alert. Best effort:
     // quiet hours, the daily cap or a missing key never fail the result.
     if (args.status === "needs_you") {
-      await sendPushQuietly(supabase, userId, needsYouAlert(taskId, row.title));
+      await sendPushQuietly(supabase, userId, needsYouAlert(taskId, row.title, row.source));
     }
     return {
       summary: `Agent result (${args.status}) recorded on: ${row.title}.`,

@@ -454,7 +454,7 @@ test("the new autonomous tool has a target, an undo, both surfaces and the no-gr
   assert.equal(tool!.disclosure, "app_data");
   assert.deepEqual(TOOL_TARGETS.report_agent_result, { arg: "task_id", label: "task", table: "tasks" });
   assert.ok(mcpWriteTools().some((t) => t.name === "report_agent_result"));
-  assert.match(src("lib/assistant/execute.ts"), /"report_agent_result",\n  "save_reply_draft",\n\]\);/);
+  assert.match(src("lib/assistant/execute.ts"), /"report_agent_result",\r?\n  "save_reply_draft",\r?\n\]\);/);
   assert.match(src("lib/assistant/execute.ts"), /case "report_agent_result":/);
   assert.match(tool!.description, /grants you no tool you do not already have/);
   assert.ok((MCP_READ_TOOLS as readonly string[]).includes("lifeos_list_agent_instructions"));

@@ -61,6 +61,8 @@ export async function sendPush(
   const now = opts.now ?? new Date();
   if (!opts.ignoreQuietHours && isQuietHoursIST(now)) return none("quiet_hours");
 
+  // ponytail: the 20/24h cap is read-then-send, so two simultaneous alerts at 19
+  // could both go. One user, acceptable; make it atomic only if that matters.
   const { data: sentRows } = await supabase
     .from("audit_log")
     .select("ts")
@@ -106,11 +108,12 @@ export async function sendPush(
   }
   if (result.sent === 0) result.status = "error";
 
-  // Counts only. The words of an alert are never stored.
+  // Counts only. The words of an alert are never stored. A run that reached
+  // no device is push_failed, so it does not use up the 20-a-day budget.
   await supabase.from("audit_log").insert({
     user_id: userId,
     actor: "assistant",
-    action: "push_sent",
+    action: result.sent === 0 ? "push_failed" : "push_sent",
     entity: "push",
     meta: {
       devices: subs.length,

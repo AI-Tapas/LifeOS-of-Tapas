@@ -42,7 +42,7 @@ export default async function proxy(request: NextRequest) {
     request.nextUrl.pathname.startsWith("/api/mcp") ||
     // B31: an Apple Shortcut posts shared text here with its own capture
     // token (a bearer, checked by the route), and has no cookie.
-    request.nextUrl.pathname.startsWith("/api/capture") ||
+    request.nextUrl.pathname === "/api/capture" ||
     // Vercel Cron calls these with a bearer token and no cookie, same
     // reasoning as /api/mcp above.
     request.nextUrl.pathname.startsWith("/api/cron") ||

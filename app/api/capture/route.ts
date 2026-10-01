@@ -10,7 +10,8 @@ export const runtime = "nodejs";
 export async function POST(req: Request): Promise<Response> {
   const reply = await handleCapture(createServiceClient(), {
     authorization: req.headers.get("authorization"),
-    body: await req.text(),
+    body: () => req.text(),
+    content_length: req.headers.has("content-length") ? Number(req.headers.get("content-length")) : null,
   });
   return Response.json(reply.body, { status: reply.status });
 }

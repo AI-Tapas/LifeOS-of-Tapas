@@ -7,6 +7,9 @@
 // accepted. The database keeps only the sha256 of a token.
 
 import {
+  CAPTURE_BODY_BYTES_MAX,
+  CAPTURE_DUP_WINDOW_MS,
+  CAPTURE_MAX_CHARS,
   CAPTURE_PER_DAY,
   bearerToken,
   captureTitle,
@@ -29,7 +32,14 @@ const fail = (status: number, error: string): CaptureReply => ({ status, body: {
 
 export async function handleCapture(
   supabase: SupabaseClient<Database>,
-  req: { authorization: string | null; body: string },
+  // body is the text itself, or (the route) a reader called only after the
+  // token and the declared size have been checked. content_length is the
+  // Content-Length header: absent or over the limit gives 413 before reading.
+  req: {
+    authorization: string | null;
+    body: string | (() => Promise<string>);
+    content_length?: number | null;
+  },
   nowMs: number = Date.now()
 ): Promise<CaptureReply> {
   const token = bearerToken(req.authorization);
@@ -44,7 +54,17 @@ export async function handleCapture(
   if (!row || !hashesEqual(row.token_hash, hash)) return fail(401, "Unauthorized.");
   const userId = row.user_id;
 
-  const parsed = parseCaptureBody(req.body);
+  let raw: string;
+  if (typeof req.body === "string") {
+    raw = req.body;
+  } else {
+    const len = req.content_length;
+    if (len == null || !Number.isFinite(len) || len > CAPTURE_BODY_BYTES_MAX) {
+      return fail(413, `Too large. Send at most ${CAPTURE_MAX_CHARS} characters of text.`);
+    }
+    raw = await req.body();
+  }
+  const parsed = parseCaptureBody(raw);
   if (!parsed.ok) return fail(parsed.status, parsed.message);
   const { text } = parsed;
 
@@ -54,10 +74,21 @@ export async function handleCapture(
     .select("id, notes, created_at")
     .eq("user_id", userId)
     .eq("source", "capture")
-    .gte("created_at", since);
+    .gte("created_at", new Date(nowMs - CAPTURE_DUP_WINDOW_MS).toISOString());
+  // The day's count comes from the append-only audit log, not from task rows,
+  // which Tapas can delete or an undo can remove.
+  const { data: made } = await supabase
+    .from("audit_log")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("action", "capture_created")
+    .gte("ts", since);
   const dup = findRecentCapture(recent ?? [], text, nowMs);
   if (dup) return { status: 200, body: { ok: true, task_id: dup, duplicate: true } };
-  if ((recent ?? []).length >= CAPTURE_PER_DAY) {
+  // ponytail: count-then-insert, so two simultaneous captures at 59 could both
+  // pass (one user, one phone: at most a few over 60). Make it atomic with a
+  // DB-side check or advisory lock if that ever matters.
+  if ((made ?? []).length >= CAPTURE_PER_DAY) {
     return fail(429, `That is ${CAPTURE_PER_DAY} captures today. Try again tomorrow.`);
   }
 
@@ -83,7 +114,9 @@ export async function handleCapture(
   await supabase.from("capture_tokens").update({ last_used_at: new Date(nowMs).toISOString() }).eq("id", row.id);
   await supabase.from("audit_log").insert({
     user_id: userId,
-    actor: "user",
+    // The text is somebody else's, saved through the assistant-origin path
+    // (createTask above gets "assistant"), so the audit actor agrees.
+    actor: "assistant",
     action: "capture_created",
     entity: "tasks",
     entity_id: created.id,

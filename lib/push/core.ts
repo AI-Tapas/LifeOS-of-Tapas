@@ -7,6 +7,7 @@
 // allowed (Tapas wrote or accepted them).
 
 import { istHour } from "../datetime.ts";
+import { isUntrustedSource } from "../tasks/untrusted.ts";
 
 export const QUIET_FROM_HOUR_IST = 22; // 10 PM
 export const QUIET_TO_HOUR_IST = 7; // 7 AM
@@ -72,9 +73,16 @@ export function shapePush(m: { title: string; body: string; url?: string }): Pus
 
 // The agent asked for him. The words of the result never go on the lock
 // screen: they can carry client detail.
-export function needsYouAlert(taskId: string, taskTitle: string): PushMessage {
+export function needsYouAlert(taskId: string, taskTitle: string, source?: string | null): PushMessage {
+  // An untrusted task (scanned mail, shared text) or a private-looking title
+  // never reaches the lock screen: the generic wording is used instead.
+  const safe =
+    !isUntrustedSource(source) &&
+    !looksLikeUrl(taskTitle) &&
+    !looksLikeCredential(taskTitle) &&
+    !looksPrivate(taskTitle);
   return shapePush({
-    title: `Needs you: ${taskTitle}`,
+    title: `Needs you: ${safe ? taskTitle : "a task"}`,
     body: "An agent has a question or needs a decision from you.",
     url: `/tasks?task=${encodeURIComponent(taskId)}`,
   });

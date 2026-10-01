@@ -353,7 +353,7 @@ test("no place that tests for email-sourced task text is left without capture", 
 // 5. Wiring: gate, service worker, migrations, docs, hygiene
 // ---------------------------------------------------------------------------
 test("the capture route is exempt from the cookie gate and uses no cookie session", () => {
-  assert.match(src("proxy.ts"), /startsWith\("\/api\/capture"\)/);
+  assert.match(src("proxy.ts"), /pathname === "\/api\/capture"/);
   const route = src("app/api/capture/route.ts");
   assert.doesNotMatch(route, /supabase\/server|cookies\(/);
   // The token table is read only by the capture handler.
@@ -424,4 +424,79 @@ test("docs and notes exist and nothing B31 wrote carries an emoji or an em dash"
     assert.equal(text.includes(String.fromCharCode(0x2014)), false, `${f} has an em dash`);
     assert.doesNotMatch(text, /\p{Extended_Pictographic}/u, `${f} has an emoji`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// 6. Review fixes
+// ---------------------------------------------------------------------------
+test("needs_you alert: untrusted or private titles fall back to the generic wording", () => {
+  assert.equal(needsYouAlert("1", "Reply to the branch", "manual").title, "Needs you: Reply to the branch");
+  assert.equal(needsYouAlert("1", "Reply to the branch", "email").title, "Needs you: a task");
+  assert.equal(needsYouAlert("1", "Forwarded message", "capture").title, "Needs you: a task");
+  for (const t of ["Pay Rs 45,000 to vendor", "PNR 4521896307", "ABCDE1234F notice", "password: hunter22", "see https://x.example/a"]) {
+    assert.equal(needsYouAlert("1", t, "manual").title, "Needs you: a task", t);
+  }
+});
+
+test("needs_you from a capture task sends the generic title through the executor", async () => {
+  resetDb();
+  addDevice();
+  const { instructionHash } = await import("../lib/tasks/agent-instructions.ts");
+  const t = addTask({ title: "Secret WhatsApp text", source: "capture", agent_instructions: "Look.", agent_instructions_at: "2026-09-30T05:00:00Z" });
+  mock.timers.enable({ apis: ["Date"], now: DAYTIME });
+  try {
+    await executeToolCall("report_agent_result", { task_id: t.id, instruction_hash: instructionHash("Look."), status: "needs_you", result: "x" });
+    assert.equal(JSON.parse(push.calls[0].payload).title, "Needs you: a task");
+  } finally {
+    mock.timers.reset();
+  }
+});
+
+test("a run that reaches no device writes push_failed and does not use the daily budget", async () => {
+  resetDb();
+  addDevice("https://push.example/flaky");
+  push.statusFor["https://push.example/flaky"] = 500;
+  const r = await sendPush(db_, OWNER, { title: "T", body: "B" }, { now: DAYTIME });
+  assert.equal(r.status, "error");
+  assert.deepEqual(db.audit_log.map((a) => a.action), ["push_failed"]);
+  assert.equal(alertsInWindow(db.audit_log.filter((a) => a.action === "push_sent") as { ts: string }[], DAYTIME.getTime()), 0);
+  push.statusFor["https://push.example/flaky"] = 201;
+  assert.equal((await sendPush(db_, OWNER, { title: "T", body: "B" }, { now: DAYTIME })).status, "sent");
+});
+
+test("capture route: token first (401 before the body is read), then declared size (413), then read", async () => {
+  resetDb();
+  const token = addToken();
+  let reads = 0;
+  const body = () => { reads++; return Promise.resolve(JSON.stringify({ text: "hello there" })); };
+  const call = (auth: string | null, len: number | null | undefined) =>
+    handleCapture(db_, { authorization: auth, body, content_length: len });
+  assert.equal((await call(null, 20)).status, 401);
+  assert.equal((await call("Bearer lo_cap_wrong", 20)).status, 401);
+  assert.equal(reads, 0, "body never read without a good token");
+  assert.equal((await call(`Bearer ${token}`, null)).status, 413, "no content-length");
+  assert.equal((await call(`Bearer ${token}`, 32 * 1024 + 1)).status, 413, "too large");
+  assert.equal(reads, 0, "body never read when the size is refused");
+  assert.equal((await call(`Bearer ${token}`, 30)).status, 200);
+  assert.equal(reads, 1);
+  // The post-read check still holds when the header understates the size.
+  assert.equal((await handleCapture(db_, { authorization: `Bearer ${token}`, body: () => Promise.resolve(JSON.stringify({ text: "a".repeat(4001) })), content_length: 50 })).status, 413);
+  assert.match(src("app/api/capture/route.ts"), /content-length/);
+});
+
+test("the cookie gate exempts exactly /api/capture, not prefixes", () => {
+  assert.match(src("proxy.ts"), /pathname === "\/api\/capture"/);
+  assert.doesNotMatch(src("proxy.ts"), /startsWith\("\/api\/capture"\)/);
+});
+
+test("the daily capture count comes from the audit log: deleting the tasks does not reset it", async () => {
+  resetDb();
+  const token = addToken();
+  for (let i = 1; i <= 60; i++) {
+    assert.equal((await post(token, `Another capture ${i} about subject${i * 104729} alone`)).status, 200);
+  }
+  assert.equal(db.audit_log.filter((a) => a.action === "capture_created").length, 60);
+  db.tasks.length = 0; // deleted or undone
+  assert.equal((await post(token, "A wholly different message about kumquats")).status, 429);
+  assert.ok(db.audit_log.every((a) => a.actor === "assistant"), "audit actor matches the assistant-origin task write");
 });
