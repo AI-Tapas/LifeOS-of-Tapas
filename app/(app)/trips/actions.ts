@@ -9,6 +9,7 @@ import {
   syncTripHotelStep,
   deleteTrip,
   deleteTripExpense,
+  resolveJourneyId,
   updateTrip,
   updateTripExpense,
   type ExpenseInput,
@@ -20,8 +21,18 @@ import { updateTask } from "@/lib/tasks/write";
 // Every action is a thin owner-session shell over lib/trips/write.ts, which
 // the assistant and the MCP connector call with the same arguments.
 
-export async function createTripAction(input: TripInput): Promise<WriteResult> {
+// B28: sameJourneyAs is the id of a trip already on the journey this one
+// joins. The server finds that trip's journey id, or starts one on both.
+export async function createTripAction(
+  input: TripInput,
+  sameJourneyAs?: string | null
+): Promise<WriteResult> {
   const { supabase, user } = await requireUser("/trips");
+  if (sameJourneyAs) {
+    const j = await resolveJourneyId(supabase, user.id, sameJourneyAs);
+    if (!j.ok) return j;
+    input = { ...input, journey_id: j.journey_id };
+  }
   const r = await createTrip(supabase, user.id, input);
   revalidatePath("/trips");
   revalidatePath("/trips/month");
@@ -34,11 +45,18 @@ export async function createTripAction(input: TripInput): Promise<WriteResult> {
 
 export async function updateTripAction(
   id: string,
-  patch: Partial<TripInput>
+  patch: Partial<TripInput>,
+  sameJourneyAs?: string | null
 ): Promise<WriteResult> {
   const { supabase, user } = await requireUser("/trips");
+  if (sameJourneyAs) {
+    const j = await resolveJourneyId(supabase, user.id, sameJourneyAs);
+    if (!j.ok) return j;
+    patch = { ...patch, journey_id: j.journey_id };
+  }
   const r = await updateTrip(supabase, user.id, id, patch);
   revalidatePath("/trips");
+  revalidatePath("/trips/journey/[journey_id]", "page");
   revalidatePath("/trips/month");
   revalidatePath(`/trips/${id}`);
   return r;
@@ -135,19 +153,23 @@ export async function addExpenseAction(input: ExpenseInput): Promise<WriteResult
   revalidatePath("/trips");
   revalidatePath("/trips/month");
   revalidatePath(`/trips/${input.trip_id}`);
+  revalidatePath("/trips/journey/[journey_id]", "page");
   return r;
 }
 
 export async function updateExpenseAction(
   id: string,
   tripId: string,
-  patch: Partial<Omit<ExpenseInput, "trip_id">>
+  patch: Partial<ExpenseInput>
 ): Promise<WriteResult> {
   const { supabase, user } = await requireUser("/trips");
   const r = await updateTripExpense(supabase, user.id, id, patch);
   revalidatePath("/trips");
   revalidatePath("/trips/month");
   revalidatePath(`/trips/${tripId}`);
+  // B28: a move changes two trips and the journey page that shows both.
+  if (patch.trip_id) revalidatePath(`/trips/${patch.trip_id}`);
+  revalidatePath("/trips/journey/[journey_id]", "page");
   return r;
 }
 

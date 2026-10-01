@@ -19,6 +19,9 @@ export type EditResult<T> = { ok: true; value: T } | { ok: false; message: strin
 // ---------------------------------------------------------------------------
 
 export interface ExpenseRow {
+  // B28: moving an expense to another session changes its trip. The target
+  // being one of his trips is checked at the write (updateTripExpense).
+  trip_id: string;
   category: ExpenseCategory;
   amount: number;
   date: string;
@@ -26,13 +29,19 @@ export interface ExpenseRow {
   receipt_ref: string | null;
 }
 
-export const EXPENSE_EDIT_FIELDS = ["category", "amount", "date", "billable", "receipt_ref"] as const;
+export const EXPENSE_EDIT_FIELDS = ["trip_id", "category", "amount", "date", "billable", "receipt_ref"] as const;
 
 // What update_trip_expense may change, checked. Only keys present in the input
 // are in the patch, so an omitted field is never touched. An empty
 // receipt_ref string clears the reference.
 export function expensePatch(input: Record<string, unknown>): EditResult<Partial<ExpenseRow>> {
   const patch: Partial<ExpenseRow> = {};
+  if (input.trip_id !== undefined && input.trip_id !== null) {
+    if (typeof input.trip_id !== "string" || !input.trip_id.trim()) {
+      return { ok: false, message: "trip_id must be the id of one of his trips." };
+    }
+    patch.trip_id = input.trip_id.trim();
+  }
   if (input.category !== undefined && input.category !== null) {
     if (!EXPENSE_CATEGORIES.includes(input.category as ExpenseCategory)) {
       return { ok: false, message: `category must be one of ${EXPENSE_CATEGORIES.join(", ")}.` };
@@ -57,7 +66,7 @@ export function expensePatch(input: Record<string, unknown>): EditResult<Partial
     patch.receipt_ref = input.receipt_ref.trim().slice(0, 200) || null;
   }
   if (!Object.keys(patch).length) {
-    return { ok: false, message: "Nothing to change: give at least one of category, amount, date, billable or receipt_ref." };
+    return { ok: false, message: "Nothing to change: give at least one of trip_id, category, amount, date, billable or receipt_ref." };
   }
   return { ok: true, value: patch };
 }

@@ -5,19 +5,15 @@
 // and the month pack all speak the same visual language.
 
 import { BILLS_TO_LABELS, type BillsTo } from "@/lib/trips/month";
+import { PURPOSE_LABELS, TRIP_PURPOSES } from "@/lib/trips/core";
 import type { Database } from "@/lib/database.types";
 
 export type TripPurpose = Database["public"]["Enums"]["trip_purpose"];
 export type TripStatus = Database["public"]["Enums"]["trip_status"];
 
-export const PURPOSES: TripPurpose[] = ["aica", "conference", "leisure", "other"];
+export const PURPOSES: TripPurpose[] = [...TRIP_PURPOSES];
 
-export const PURPOSE_LABELS: Record<TripPurpose, string> = {
-  aica: "AICA",
-  conference: "Conference",
-  leisure: "Leisure",
-  other: "Other",
-};
+export { PURPOSE_LABELS };
 
 // The trail he actually works to. 'booked' and 'cancelled' are older values
 // that stay valid; they show as a plain chip rather than a trail position.
@@ -40,7 +36,9 @@ export function PurposeChip({ purpose }: { purpose: TripPurpose }) {
         ? "border-waiting/30 bg-waiting-soft text-waiting"
         : purpose === "leisure"
           ? "border-ok/30 bg-ok-soft text-ok"
-          : "border-border bg-surface-2 text-secondary";
+          : purpose === "training"
+            ? "border-brand/40 bg-surface-2 text-brand-deep"
+            : "border-border bg-surface-2 text-secondary";
   return (
     <span
       className={
@@ -116,7 +114,7 @@ export function StatusTrail({
 export function BillsToChip({ billsTo }: { billsTo: BillsTo }) {
   if (billsTo === "icai_monthly") return null;
   const tone =
-    billsTo === "chapter_aed"
+    billsTo === "chapter_aed" || billsTo === "client"
       ? "border-waiting/30 bg-waiting-soft text-waiting"
       : "border-border bg-surface-2 text-secondary";
   return (

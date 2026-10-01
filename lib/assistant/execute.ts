@@ -41,6 +41,7 @@ import {
   createTrip,
   deleteTrip,
   deleteTripExpense,
+  resolveJourneyId,
   syncTripHotelStep,
   updateTrip,
   updateTripExpense,
@@ -171,6 +172,36 @@ function hotelArrangement(v: unknown): HotelArrangement | null {
   return raw && (HOTEL_ARRANGEMENTS as string[]).includes(raw)
     ? (raw as HotelArrangement)
     : null;
+}
+
+// B28. The journey a create_trip or update_trip call asks for: the id of the
+// journey the named trip is on (same_journey_as: the server finds or mints
+// it), or a journey_id that one of his trips already carries, or "none" to
+// leave a journey. undefined means "not asked, leave it alone".
+async function journeyFromInput(
+  supabase: Parameters<typeof resolveJourneyId>[0],
+  userId: string,
+  input: Record<string, unknown>
+): Promise<string | null | undefined> {
+  const same = s(input.same_journey_as);
+  if (same) {
+    const r = await resolveJourneyId(supabase, userId, same);
+    if (!r.ok) throw new Error(r.message);
+    return r.journey_id;
+  }
+  const given = s(input.journey_id);
+  if (!given) return undefined;
+  if (given.toLowerCase() === "none") return null;
+  const { data } = await supabase
+    .from("trips")
+    .select("id")
+    .eq("journey_id", given)
+    .eq("user_id", userId)
+    .limit(1);
+  if (!data?.length) {
+    throw new Error("No trip of his is on that journey_id. Take it from lifeos_list_trips, or pass same_journey_as with a trip id.");
+  }
+  return given;
 }
 
 function civil(dateOnly: string): { y: number; m: number; d: number } {
@@ -1270,7 +1301,9 @@ const performers: Record<string, Performer> = {
     const purpose = s(input.purpose);
     if (!title || !purpose) throw new Error("A purpose and title are required.");
     const workStreamId = await resolveWorkStream(supabase, s(input.work_stream));
+    const journeyId = await journeyFromInput(supabase, userId, input);
     const r = await createTrip(supabase, userId, {
+      ...(journeyId !== undefined ? { journey_id: journeyId } : {}),
       purpose: purpose as Database["public"]["Enums"]["trip_purpose"],
       title,
       work_stream_id: workStreamId,
@@ -1302,11 +1335,13 @@ const performers: Record<string, Performer> = {
     if (!tripId) throw new Error("trip_id is required.");
     const { data: prev } = await supabase
       .from("trips")
-      .select("title, status, start_date, end_date, bills_to, notes, hotel_arrangement, session_label, session_date, cities")
+      .select("title, status, start_date, end_date, bills_to, notes, hotel_arrangement, session_label, session_date, cities, journey_id")
       .eq("id", tripId)
       .single();
     if (!prev) throw new Error("Trip not found.");
+    const journeyId = await journeyFromInput(supabase, userId, input);
     const r = await updateTrip(supabase, userId, tripId, {
+      ...(journeyId !== undefined ? { journey_id: journeyId } : {}),
       // B22: the whole list is replaced, and undo puts the old list back.
       ...(Array.isArray(input.cities)
         ? {
@@ -1470,7 +1505,7 @@ const performers: Record<string, Performer> = {
     if (!expenseId) throw new Error("expense_id is required.");
     const { data: prev } = await supabase
       .from("trip_expenses")
-      .select("category, amount, date, billable, receipt_ref")
+      .select("trip_id, category, amount, date, billable, receipt_ref")
       .eq("id", expenseId)
       .eq("user_id", userId)
       .maybeSingle();
@@ -2322,6 +2357,10 @@ async function performUndo(
           : {}),
         ...("session_date" in prev
           ? { session_date: (prev.session_date as string | null) ?? null }
+          : {}),
+        // B28. Undo takes the trip back out of (or back into) its journey.
+        ...("journey_id" in prev
+          ? { journey_id: (prev.journey_id as string | null) ?? null }
           : {}),
       });
       if (!r.ok) throw new Error(r.message);

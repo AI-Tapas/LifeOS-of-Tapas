@@ -15,6 +15,7 @@ import { BandHead, Card, Empty, PageHeader, SectionLabel, btnSmall } from "@/com
 import { formatINR } from "@/lib/datetime";
 import { MODE_LABELS, dayLabel, type TransportMode } from "@/lib/trips/core";
 import {
+  ICAI_CLAIM,
   buildMonthPack,
   categoryLabel,
   monthLabel,
@@ -40,11 +41,26 @@ export default function MonthPack({
   const [month, setMonth] = useState(defaultMonth);
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
+  // B28: which claim the pack is for. ICAI, or a client whose sessions are
+  // reimbursed by it (the work stream of a trip billed to 'client').
+  const [claim, setClaim] = useState(ICAI_CLAIM);
+  const clients = useMemo(
+    () =>
+      [
+        ...new Set(
+          trips
+            .filter((t) => t.bills_to === "client" && (t.stream_name ?? "").trim())
+            .map((t) => (t.stream_name ?? "").trim())
+        ),
+      ].sort(),
+    [trips]
+  );
 
   const pack = useMemo(
-    () => buildMonthPack(trips, expenses, month),
-    [trips, expenses, month]
+    () => buildMonthPack(trips, expenses, month, claim),
+    [trips, expenses, month, claim]
   );
+  const isIcai = pack.claim === ICAI_CLAIM;
   const text = useMemo(() => monthPackText(pack), [pack]);
 
   const tripTitle = (id: string) =>
@@ -76,9 +92,31 @@ export default function MonthPack({
       <div className="mt-2">
         <PageHeader
           title={monthLabel(pack.month_key)}
-          subtitle="What your invoice run needs. Records only, not a claim."
+          subtitle={`${pack.claim_label}. What your invoice run needs. Records only, not a claim.`}
         />
       </div>
+
+      {clients.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-1.5" role="radiogroup" aria-label="Claim">
+          {[ICAI_CLAIM, ...clients].map((c) => (
+            <button
+              key={c}
+              type="button"
+              role="radio"
+              aria-checked={c === claim}
+              onClick={() => setClaim(c)}
+              className={
+                "press min-h-11 rounded-full border px-3.5 text-sm " +
+                (c === claim
+                  ? "border-accent bg-accent text-white dark:text-neutral-950"
+                  : "border-border-strong text-secondary")
+              }
+            >
+              {c === ICAI_CLAIM ? "ICAI" : `${c} reimbursables`}
+            </button>
+          ))}
+        </div>
+      )}
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <button
@@ -126,7 +164,9 @@ export default function MonthPack({
         </div>
         {pack.sessions.length === 0 ? (
           <Empty title="No sessions in this month.">
-            Nothing here goes on the monthly ICAI claim.
+            {isIcai
+              ? "Nothing here goes on the monthly ICAI claim."
+              : `Nothing here is reimbursed by ${pack.claim}.`}
           </Empty>
         ) : (
           <div className="space-y-2">
@@ -247,7 +287,9 @@ export default function MonthPack({
         </div>
         {pack.excluded.length === 0 ? (
           <Empty title="Nothing excluded this month.">
-            Every trip in this month goes on the ICAI claim.
+            {isIcai
+              ? "Every trip in this month goes on the ICAI claim."
+              : `Every ${pack.claim} trip in this month is reimbursable.`}
           </Empty>
         ) : (
           <div className="space-y-2">

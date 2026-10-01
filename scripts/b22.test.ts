@@ -125,7 +125,7 @@ test("the connector and the page map rows through the same functions", () => {
   const handler = api.slice(api.indexOf('if (name === "lifeos_get_month_pack")'), api.indexOf('if (name === "lifeos_list_trip_expenses")'));
   assert.match(handler, /monthPackFromRows\(/);
   const page = src("app/(app)/trips/month/page.tsx");
-  assert.match(page, /\.map\(toMonthTrip\)/);
+  assert.match(page, /toMonthTrip\(/);
   assert.match(page, /\.map\(toMonthExpense\)/);
 });
 
@@ -150,7 +150,7 @@ test("list_trip_expenses lists each line with id, date, category, amount, billab
 });
 
 test("update_trip_expense sets receipt_ref, and its undo restores the old value", () => {
-  const row: ExpenseRow = { category: "hotel", amount: 2500, date: "2026-08-04", billable: true, receipt_ref: null };
+  const row: ExpenseRow = { trip_id: "t1", category: "hotel", amount: 2500, date: "2026-08-04", billable: true, receipt_ref: null };
   const p = expensePatch({ expense_id: "e2", receipt_ref: "physical file, August folder" });
   assert.ok(p.ok);
   const undo = expenseUndo(row, p.value);

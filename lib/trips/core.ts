@@ -189,3 +189,37 @@ export function travelDiffersFromSession(
   if (!sessionDate || !start) return true;
   return !(start === sessionDate && (end ?? start) === sessionDate);
 }
+
+// ---------------------------------------------------------------------------
+// Home city never a trip city (B28)
+// ---------------------------------------------------------------------------
+// A trip's cities say where he WENT. Ahmedabad is home, so it is noise: four
+// trips once read "Ahmedabad, Rajkot". One constant, a case-insensitive
+// prefix match, so a station such as "Ahmedabad (Ambli Road)" or "Sabarmati"
+// goes too. Applied on every trip write (lib/trips/write.ts) and once to the
+// existing rows by migration 20261001000200. Legs are never touched: a leg's
+// from and to stay as written.
+export const HOME_CITY_PREFIXES = ["ahmedabad", "sabarmati"];
+
+export function isHomeCity(city: string): boolean {
+  const c = city.trim().toLowerCase();
+  return HOME_CITY_PREFIXES.some((p) => c.startsWith(p));
+}
+
+export function stripHomeCity(cities: string[]): string[] {
+  return cities.filter((c) => !isHomeCity(c));
+}
+
+// ---------------------------------------------------------------------------
+// Trip purpose (B28 moved the labels here so a test can walk them)
+// ---------------------------------------------------------------------------
+export const TRIP_PURPOSES = ["aica", "conference", "leisure", "other", "training"] as const;
+export type TripPurposeValue = (typeof TRIP_PURPOSES)[number];
+
+export const PURPOSE_LABELS: Record<TripPurposeValue, string> = {
+  aica: "AICA",
+  conference: "Conference",
+  leisure: "Leisure",
+  other: "Other",
+  training: "Training (non-ICAI)",
+};

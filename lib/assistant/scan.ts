@@ -372,10 +372,13 @@ async function ticketPass(
 
   const { data: trips } = await supabase
     .from("trips")
-    .select("id, start_date, end_date, legs, status")
+    .select("id, start_date, end_date, legs, status, session_date, cities")
     .eq("user_id", userId)
     .neq("status", "cancelled")
-    .not("start_date", "is", null);
+    .not("start_date", "is", null)
+    // B28: a stable order, so overlapping sessions match the same way every run.
+    .order("start_date", { ascending: true })
+    .order("id", { ascending: true });
 
   const turn = await modelTurn({
     blocks: [{ text: TICKET_SYSTEM, stable: true }],
@@ -498,10 +501,13 @@ async function cabPass(
 
   const { data: trips } = await supabase
     .from("trips")
-    .select("id, title, cities, start_date, end_date, legs, status")
+    .select("id, title, cities, start_date, end_date, legs, status, session_date")
     .eq("user_id", userId)
     .neq("status", "cancelled")
-    .not("start_date", "is", null);
+    .not("start_date", "is", null)
+    // B28: a stable order, so overlapping sessions match the same way every run.
+    .order("start_date", { ascending: true })
+    .order("id", { ascending: true });
 
   const turn = await modelTurn({
     blocks: [{ text: CAB_SYSTEM, stable: true }],

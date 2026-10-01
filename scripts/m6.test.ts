@@ -382,7 +382,7 @@ test("bills_to is an enum on the trip tools, not free text", () => {
       string,
       { type: string; enum?: string[] }
     >;
-    assert.deepEqual(props.bills_to.enum, ["icai_monthly", "chapter_aed", "none"]);
+    assert.deepEqual(props.bills_to.enum, ["icai_monthly", "chapter_aed", "none", "client"]);
     assert.equal(props.bills_to.type, "string");
     assert.ok(
       !((toolByName(name)!.input_schema.required ?? []) as string[]).includes("bills_to"),

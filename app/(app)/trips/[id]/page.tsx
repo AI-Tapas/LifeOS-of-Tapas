@@ -4,7 +4,7 @@ import TripDetail, {
   type ChecklistRow,
   type ExpenseRow,
 } from "@/components/trips/trip-detail";
-import { parseLegs } from "@/lib/trips/core";
+import { parseLegs, shortDayLabel } from "@/lib/trips/core";
 import { civilKey, civilToday } from "@/lib/datetime";
 import type { TripFormValues } from "@/components/trips/trip-form";
 
@@ -21,14 +21,14 @@ export default async function TripDetailPage({
   const { data: trip } = await supabase
     .from("trips")
     .select(
-      "id, purpose, title, work_stream_id, start_date, end_date, cities, legs, status, bills_to, notes, hotel_arrangement, session_label, session_date, work_streams(name)"
+      "id, purpose, title, work_stream_id, start_date, end_date, cities, legs, status, bills_to, notes, hotel_arrangement, session_label, session_date, journey_id, work_streams(name)"
     )
     .eq("id", id)
     .maybeSingle();
   if (!trip) notFound();
 
   const today = civilKey(civilToday());
-  const [{ data: expenses }, { data: checklist }, { data: streams }] =
+  const [{ data: expenses }, { data: checklist }, { data: streams }, { data: others }] =
     await Promise.all([
       supabase
         .from("trip_expenses")
@@ -46,6 +46,14 @@ export default async function TripDetailPage({
         .select("id, name")
         .eq("active", true)
         .order("name"),
+      // B28: the trips he could join a journey with. Not finished yet, or
+      // already on a journey.
+      supabase
+        .from("trips")
+        .select("id, title, cities, start_date, end_date, journey_id")
+        .neq("id", id)
+        .or(`end_date.gte.${today},end_date.is.null`)
+        .order("start_date", { ascending: true, nullsFirst: false }),
     ]);
 
   const values: TripFormValues = {
@@ -60,6 +68,7 @@ export default async function TripDetailPage({
     bills_to: trip.bills_to,
     notes: trip.notes,
     hotel_arrangement: trip.hotel_arrangement,
+    journey_id: trip.journey_id,
   };
 
   return (
@@ -75,6 +84,12 @@ export default async function TripDetailPage({
         }))}
         workStreams={streams ?? []}
         todayKey={today}
+        journeyChoices={(others ?? []).map((o) => ({
+          id: o.id,
+          label: `${(Array.isArray(o.cities) && o.cities.length ? (o.cities as string[]).join(", ") : o.title)}${
+            o.start_date ? `, ${shortDayLabel(o.start_date)}` : ""
+          }`,
+        }))}
       />
     </main>
   );

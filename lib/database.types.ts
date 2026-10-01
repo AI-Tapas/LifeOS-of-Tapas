@@ -990,6 +990,7 @@ export type Database = {
           cities: Json | null
           end_date: string | null
           ext_event_id: string | null
+          journey_id: string | null
           hotel_arrangement:
             | Database["public"]["Enums"]["hotel_arrangement"]
             | null
@@ -1010,6 +1011,7 @@ export type Database = {
           cities?: Json | null
           end_date?: string | null
           ext_event_id?: string | null
+          journey_id?: string | null
           hotel_arrangement?:
             | Database["public"]["Enums"]["hotel_arrangement"]
             | null
@@ -1030,6 +1032,7 @@ export type Database = {
           cities?: Json | null
           end_date?: string | null
           ext_event_id?: string | null
+          journey_id?: string | null
           hotel_arrangement?:
             | Database["public"]["Enums"]["hotel_arrangement"]
             | null
@@ -1144,7 +1147,7 @@ export type Database = {
       event_source: "synced" | "app" | "reminder"
       finance_item_kind: "fd" | "mf" | "stock" | "ncd" | "other"
       finance_key_date_type: "maturity" | "review"
-      hotel_arrangement: "branch" | "self" | "relative" | "same_day"
+      hotel_arrangement: "branch" | "self" | "relative" | "same_day" | "client"
       note_type: "meeting" | "decision" | "idea" | "reference"
       oauth_client: "google_internal" | "google_external" | "microsoft"
       obligation_category:
@@ -1170,9 +1173,9 @@ export type Database = {
       task_priority: "low" | "medium" | "high"
       task_source: "manual" | "email" | "assistant"
       task_status: "inbox" | "todo" | "doing" | "done" | "dropped"
-      trip_bills_to: "icai_monthly" | "chapter_aed" | "none"
+      trip_bills_to: "icai_monthly" | "chapter_aed" | "none" | "client"
       trip_expense_category: "transport" | "hotel" | "per_diem" | "other"
-      trip_purpose: "aica" | "conference" | "leisure" | "other"
+      trip_purpose: "aica" | "conference" | "leisure" | "other" | "training"
       trip_status:
         | "planned"
         | "booked"
@@ -1341,7 +1344,7 @@ export const Constants = {
       event_source: ["synced", "app", "reminder"],
       finance_item_kind: ["fd", "mf", "stock", "ncd", "other"],
       finance_key_date_type: ["maturity", "review"],
-      hotel_arrangement: ["branch", "self", "relative", "same_day"],
+      hotel_arrangement: ["branch", "self", "relative", "same_day", "client"],
       note_type: ["meeting", "decision", "idea", "reference"],
       oauth_client: ["google_internal", "google_external", "microsoft"],
       obligation_category: [
@@ -1368,9 +1371,9 @@ export const Constants = {
       task_priority: ["low", "medium", "high"],
       task_source: ["manual", "email", "assistant"],
       task_status: ["inbox", "todo", "doing", "done", "dropped"],
-      trip_bills_to: ["icai_monthly", "chapter_aed", "none"],
+      trip_bills_to: ["icai_monthly", "chapter_aed", "none", "client"],
       trip_expense_category: ["transport", "hotel", "per_diem", "other"],
-      trip_purpose: ["aica", "conference", "leisure", "other"],
+      trip_purpose: ["aica", "conference", "leisure", "other", "training"],
       trip_status: ["planned", "booked", "done", "cancelled"],
       work_stream_kind: [
         "training",

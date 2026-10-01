@@ -19,7 +19,13 @@ import {
   btnSmall,
 } from "@/components/ui";
 import { formatINR } from "@/lib/datetime";
-import { sessionLine, tripDatesLabel, travelDiffersFromSession } from "@/lib/trips/core";
+import {
+  sessionLine,
+  shortDayLabel,
+  tripDatesLabel,
+  travelDiffersFromSession,
+} from "@/lib/trips/core";
+import { foldJourneys, journeyCities, type ListEntry } from "@/lib/trips/journey";
 import {
   BillsToChip,
   PurposeChip,
@@ -34,6 +40,8 @@ export type { WorkStreamRow };
 
 export interface TripRow {
   id: string;
+  // B28: sessions of one continuous journey share this id.
+  journey_id?: string | null;
   purpose: TripPurpose;
   title: string;
   session_label: string | null;
@@ -56,14 +64,16 @@ export interface TripRow {
 }
 
 // A trip is still ahead until the day after it ends.
-function isUpcoming(t: TripRow, todayKey: string): boolean {
-  const last = t.end_date ?? t.start_date;
+function isUpcoming(t: { start: string | null; end: string | null }, todayKey: string): boolean {
+  const last = t.end ?? t.start;
   if (!last) return true; // undated plans are ahead of him, not behind
   return last >= todayKey;
 }
 
-function monthKey(t: TripRow): string {
-  return t.start_date ? t.start_date.slice(0, 7) : "";
+type Entry = ListEntry<TripRow>;
+
+function monthKey(e: Entry): string {
+  return e.start ? e.start.slice(0, 7) : "";
 }
 
 function daysBetween(a: string, b: string): number {
@@ -89,19 +99,22 @@ export default function TripsView({
   const [adding, setAdding] = useState(false);
 
   const { months, past } = useMemo(() => {
-    const upcoming = trips
+    // B28: sessions sharing a journey_id fold into one card. A trip with no
+    // journey is its own entry and looks exactly as it always did.
+    const entries = foldJourneys(trips);
+    const upcoming = entries
       .filter((t) => isUpcoming(t, todayKey))
-      .sort((a, b) => (a.start_date ?? "9999").localeCompare(b.start_date ?? "9999"));
-    const groups = new Map<string, TripRow[]>();
+      .sort((a, b) => (a.start ?? "9999").localeCompare(b.start ?? "9999"));
+    const groups = new Map<string, Entry[]>();
     for (const t of upcoming) {
       const k = monthKey(t);
       groups.set(k, [...(groups.get(k) ?? []), t]);
     }
     return {
       months: [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0])),
-      past: trips
+      past: entries
         .filter((t) => !isUpcoming(t, todayKey))
-        .sort((a, b) => (b.start_date ?? "").localeCompare(a.start_date ?? "")),
+        .sort((a, b) => (b.start ?? "").localeCompare(a.start ?? "")),
     };
   }, [trips, todayKey]);
 
@@ -160,8 +173,8 @@ export default function TripsView({
             </div>
             <div className="space-y-2">
               {items.map((t, i) => (
-                <div key={t.id}>
-                  <TripCard trip={t} />
+                <div key={entryKey(t)}>
+                  <EntryCard entry={t} />
                   <ChainHint previous={items[i]} next={items[i + 1]} />
                 </div>
               ))}
@@ -175,7 +188,7 @@ export default function TripsView({
           <SectionLabel className="mb-2">Past trips</SectionLabel>
           <div className="space-y-2">
             {past.map((t) => (
-              <TripCard key={t.id} trip={t} />
+              <EntryCard key={entryKey(t)} entry={t} />
             ))}
           </div>
         </section>
@@ -186,9 +199,66 @@ export default function TripsView({
           trip={null}
           workStreams={workStreams}
           onClose={() => setAdding(false)}
+          journeyChoices={trips
+            .filter((t) => isUpcoming({ start: t.start_date, end: t.end_date }, todayKey))
+            .map((t) => ({
+              id: t.id,
+              label: `${t.cities.length ? t.cities.join(", ") : t.title}${
+                t.start_date ? `, ${shortDayLabel(t.start_date)}` : ""
+              }`,
+            }))}
         />
       )}
     </div>
+  );
+}
+
+function entryKey(e: Entry): string {
+  return e.kind === "trip" ? e.trip.id : `journey:${e.journey_id}`;
+}
+
+function EntryCard({ entry }: { entry: Entry }) {
+  return entry.kind === "trip" ? <TripCard trip={entry.trip} /> : <JourneyCard entry={entry} />;
+}
+
+// B28. One card for a journey: its cities in travel order, its dates, and
+// each session with its type, client and session date. Opens the journey page.
+function JourneyCard({ entry }: { entry: Extract<Entry, { kind: "journey" }> }) {
+  const cities = journeyCities(entry.sessions);
+  const billable = entry.sessions.reduce((sum, t) => sum + t.billable_total, 0);
+  return (
+    <Link
+      href={`/trips/journey/${entry.journey_id}`}
+      className="press block rounded-2xl border border-border bg-surface p-3.5 shadow-[var(--shadow-card)]"
+    >
+      <p className="truncate text-base font-semibold text-brand-deep">
+        {cities.length ? cities.join(", ") : "Journey"}
+      </p>
+      <p className="mt-0.5 text-xs text-secondary">
+        {tripDatesLabel(entry.start, entry.end)} · {entry.sessions.length} sessions
+      </p>
+      <ul className="mt-2 space-y-1.5">
+        {entry.sessions.map((t) => (
+          <li key={t.id} className="flex items-center justify-between gap-2 text-sm">
+            <span className="min-w-0 truncate">
+              <span className="font-medium">
+                {t.cities.length ? t.cities.join(", ") : t.title}
+              </span>
+              <span className="text-secondary">
+                {t.stream_name ? ` · ${t.stream_name}` : ""}
+                {sessionLine(t.session_label, t.session_date)
+                  ? ` · ${sessionLine(t.session_label, t.session_date)}`
+                  : ""}
+              </span>
+            </span>
+            <PurposeChip purpose={t.purpose} />
+          </li>
+        ))}
+      </ul>
+      {billable > 0 && (
+        <p className="mt-2 text-right text-sm font-semibold">{formatINR(billable)}</p>
+      )}
+    </Link>
   );
 }
 
@@ -267,10 +337,10 @@ function TripCard({ trip }: { trip: TripRow }) {
 // running them as one trip is a QUESTION, never an automatic merge. So this
 // only observes the gap. There is no chain button, and nothing merges by
 // itself.
-function ChainHint({ previous, next }: { previous?: TripRow; next?: TripRow }) {
+function ChainHint({ previous, next }: { previous?: Entry; next?: Entry }) {
   if (!previous || !next) return null;
-  const a = previous.end_date ?? previous.start_date;
-  const b = next.start_date;
+  const a = previous.end ?? previous.start;
+  const b = next.start;
   if (!a || !b) return null;
   const gap = daysBetween(a, b);
   if (gap <= 1 || gap > 6) return null;

@@ -20,16 +20,17 @@ import { TRANSPORT_HELP } from "./core.ts";
 import type { ReminderMode } from "../reminders/core.ts";
 
 // Mirrors the hotel_arrangement enum (migration 20260901000100).
-export type HotelArrangement = "branch" | "self" | "relative" | "same_day";
+export type HotelArrangement = "branch" | "self" | "relative" | "same_day" | "client";
 // Mirrors the trip_purpose enum. Declared here rather than imported so this
 // module stays free of generated types and node --test can load it.
-export type TripPurpose = "aica" | "conference" | "leisure" | "other";
+export type TripPurpose = "aica" | "conference" | "leisure" | "other" | "training";
 
 export const HOTEL_ARRANGEMENTS: HotelArrangement[] = [
   "branch",
   "self",
   "relative",
   "same_day",
+  "client",
 ];
 
 export const HOTEL_LABELS: Record<HotelArrangement, string> = {
@@ -37,6 +38,7 @@ export const HOTEL_LABELS: Record<HotelArrangement, string> = {
   self: "I book",
   relative: "With family",
   same_day: "Same day",
+  client: "Client arranges",
 };
 
 export const HOTEL_HINTS: Record<HotelArrangement, string> = {
@@ -44,6 +46,7 @@ export const HOTEL_HINTS: Record<HotelArrangement, string> = {
   self: "Mine to book, reimbursable",
   relative: "No booking, no cost",
   same_day: "Back the same day",
+  client: "The client books flights and hotel",
 };
 
 // The one line the trip screen states near the dates.
@@ -52,6 +55,7 @@ export const HOTEL_SENTENCES: Record<HotelArrangement, string> = {
   self: "Hotel: yours to book, and it is reimbursable.",
   relative: "Staying with family. No hotel to arrange.",
   same_day: "Returning the same day. No hotel at all.",
+  client: "Flights and hotel: the client books them.",
 };
 
 export interface ChecklistTrip {
@@ -65,6 +69,9 @@ export interface ChecklistTrip {
   // Null on every row written before milestone 6c, and on any trip he has not
   // answered for. Resolved, never guessed at write time: see below.
   hotel_arrangement?: HotelArrangement | null;
+  // B28: the session's work stream name, the client when the hotel
+  // arrangement is 'client' ("Cygnet"). Absent reads as "the client".
+  stream_name?: string | null;
 }
 
 export interface ChecklistStep {
@@ -95,9 +102,15 @@ export interface ChecklistStep {
 export function defaultHotelArrangement(
   startDate: string | null,
   endDate: string | null,
-  purpose?: TripPurpose | null
+  purpose?: TripPurpose | null,
+  streamName?: string | null
 ): HotelArrangement {
   if (startDate && endDate && startDate === endDate) return "same_day";
+  // B28: a non-ICAI training. Cygnet books travel and hotel for him; for any
+  // other client he books his own.
+  if (purpose === "training") {
+    return (streamName ?? "").trim().toLowerCase() === "cygnet" ? "client" : "self";
+  }
   // Nobody arranges a hotel for his holiday. Branch-arranged is the norm for
   // every kind of WORK trip, which is the rule he gave; leisure was the one
   // case where following it literally read as nonsense on the screen.
@@ -142,6 +155,32 @@ export function buildChecklist(
   const hotel = resolveHotelArrangement(trip);
   const context = `Trip: ${trip.title}.`;
 
+  // B28. `client` therefore means "the client books travel and hotel": there
+  // is nothing for him to book, so the book-ticket and hotel steps give way
+  // to three chases, and no other step is added.
+  if (hotel === "client") {
+    const who = (trip.stream_name ?? "").trim() || "the client";
+    const clientSteps: ChecklistStep[] = [
+      {
+        key: "client_flights",
+        title: `Confirm flights booked by ${who}`,
+        note: `${context} ${who} books the flights, so this is a confirmation, not a booking.`,
+        due_date: shift(start, -7, todayKey),
+        reminder_mode: "in_app",
+      },
+      buildHotelStep("client", context, start, todayKey, who)!,
+      {
+        key: "receipts",
+        title: "Collect cab receipts",
+        note: `${context} Cabs are booked and paid by you, then reimbursed by ${who}. Keep the receipts wherever you file them; the app records a reference only.`,
+        due_date: shift(end, 0, todayKey),
+        reminder_mode: "in_app",
+      },
+    ];
+    if (trip.bills_to === "chapter_aed") clientSteps.push(aedStep(trip, context, end, todayKey));
+    return clientSteps;
+  }
+
   const steps: ChecklistStep[] = [
     {
       key: "onward",
@@ -183,22 +222,24 @@ export function buildChecklist(
   // migration 20260901000300. Only an overseas chapter needs a reminder here,
   // because that invoice is raised separately, in AED, once or twice a year,
   // and the stated risk is forgetting it altogether.
-  if (trip.bills_to === "chapter_aed") {
-    const city = trip.cities[0] ?? "";
-    steps.push({
-      key: "aed",
-      title: `Raise the AED invoice to the ${city || "overseas"} chapter`,
-      note:
-        `${context} This trip is NOT on the monthly ICAI claim. ` +
-        "It is invoiced separately to the chapter, in AED.",
-      due_date: shift(end, 3, todayKey),
-      // The one step that earns a calendar interrupt: once or twice a year,
-      // and he named forgetting it as the specific risk.
-      reminder_mode: "calendar",
-    });
-  }
+  if (trip.bills_to === "chapter_aed") steps.push(aedStep(trip, context, end, todayKey));
 
   return steps;
+}
+
+function aedStep(trip: ChecklistTrip, context: string, end: string, todayKey: string): ChecklistStep {
+  const city = trip.cities[0] ?? "";
+  return {
+    key: "aed",
+    title: `Raise the AED invoice to the ${city || "overseas"} chapter`,
+    note:
+      `${context} This trip is NOT on the monthly ICAI claim. ` +
+      "It is invoiced separately to the chapter, in AED.",
+    due_date: shift(end, 3, todayKey),
+    // The one step that earns a calendar interrupt: once or twice a year,
+    // and he named forgetting it as the specific risk.
+    reminder_mode: "calendar",
+  };
 }
 
 // The hotel step, or none. Split out because the trip screen also needs to
@@ -208,8 +249,19 @@ export function buildHotelStep(
   hotel: HotelArrangement,
   context: string,
   startDate: string,
-  todayKey: string
+  todayKey: string,
+  clientName?: string
 ): ChecklistStep | null {
+  if (hotel === "client") {
+    const who = clientName?.trim() || "the client";
+    return {
+      key: "hotel",
+      title: `Confirm hotel booked by ${who}`,
+      note: `${context} ${who} books the hotel, so this is a confirmation, not a booking.`,
+      due_date: shift(startDate, -5, todayKey),
+      reminder_mode: "in_app",
+    };
+  }
   if (hotel === "branch") {
     return {
       key: "hotel",
@@ -241,5 +293,12 @@ export const HOTEL_STEP_TITLES = [
   "Confirm the hotel", // pre-6c wording for a non-AICA trip
   "Book hotel",
 ];
+
+// The client step carries the client's name, so it is matched by its stem.
+export const CLIENT_HOTEL_STEP_PREFIX = "Confirm hotel booked by ";
+
+export function isHotelStepTitle(title: string): boolean {
+  return HOTEL_STEP_TITLES.includes(title) || title.startsWith(CLIENT_HOTEL_STEP_PREFIX);
+}
 
 export const ONWARD_STEP_TITLE = "Book onward ticket";

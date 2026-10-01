@@ -35,7 +35,14 @@ export interface WorkStreamRow {
   name: string;
 }
 
+// B28: a trip he could join a journey with ("Part of the same journey as...").
+export interface JourneyChoice {
+  id: string;
+  label: string;
+}
+
 export interface TripFormValues {
+  journey_id?: string | null;
   session_label?: string | null;
   session_date?: string | null;
   id?: string;
@@ -64,11 +71,13 @@ export default function TripForm({
   workStreams,
   onClose,
   onDeleted,
+  journeyChoices = [],
 }: {
   trip: TripFormValues | null;
   workStreams: WorkStreamRow[];
   onClose: () => void;
   onDeleted?: () => void;
+  journeyChoices?: JourneyChoice[];
 }) {
   const router = useRouter();
   const isEdit = !!trip?.id;
@@ -83,7 +92,14 @@ export default function TripForm({
   const [sessionLabel, setSessionLabel] = useState(trip?.session_label ?? "");
   const [sessionDate, setSessionDate] = useState(trip?.session_date ?? "");
   const [status, setStatus] = useState<TripStatus>(trip?.status ?? "planned");
-  const [billsTo, setBillsTo] = useState<BillsTo>(trip?.bills_to ?? "icai_monthly");
+  // A non-ICAI training is not on the ICAI claim: null follows the purpose
+  // until he picks one himself.
+  const [billsPick, setBillsPick] = useState<BillsTo | null>(trip?.bills_to ?? null);
+  const billsTo: BillsTo = billsPick ?? (purpose === "training" ? "none" : "icai_monthly");
+  // B28: "Part of the same journey as..." and "Remove from journey".
+  const [sameAs, setSameAs] = useState("");
+  const [leaveJourney, setLeaveJourney] = useState(false);
+  const streamName = workStreams.find((w) => w.id === streamId)?.name ?? null;
   const [notes, setNotes] = useState(trip?.notes ?? "");
   // Null means "still following the dates". On a new trip that is the
   // starting state, so entering one date in both fields flips the choice to
@@ -96,7 +112,9 @@ export default function TripForm({
         ? defaultHotelArrangement(trip!.start_date, trip!.end_date, trip!.purpose)
         : null)
   );
-  const hotel = hotelPick ?? defaultHotelArrangement(start || null, end || null, purpose);
+  // A training defaults to the client booking when the stream is Cygnet.
+  const hotel =
+    hotelPick ?? defaultHotelArrangement(start || null, end || null, purpose, streamName);
   // Checked by default on a new trip: the five steps are what he runs every
   // time, and each one carries its own reminder. Never offered on an edit,
   // where the trip screen's Checklist section adds them instead.
@@ -125,11 +143,12 @@ export default function TripForm({
       notes: notes.trim() || null,
       hotel_arrangement: hotel,
       with_checklist: !isEdit && withChecklist,
+      ...(leaveJourney && !sameAs ? { journey_id: null } : {}),
     };
     startTransition(async () => {
       const r = isEdit
-        ? await updateTripAction(trip!.id!, input)
-        : await createTripAction(input);
+        ? await updateTripAction(trip!.id!, input, sameAs || null)
+        : await createTripAction(input, sameAs || null);
       if (r.ok) {
         onClose();
         router.refresh();
@@ -192,6 +211,14 @@ export default function TripForm({
           </p>
         )}
 
+        {purpose === "training" && (
+          <p className="rounded-lg border border-brand/30 bg-brand-soft p-2.5 text-xs text-brand-deep">
+            Training for a client, not ICAI: pick the client as the work
+            stream. {HOTEL_SENTENCES[hotel]} It stays off the ICAI claim; choose
+            Reimbursed by the client below if they reimburse your costs.
+          </p>
+        )}
+
         <Field label="Title">
           <input
             value={title}
@@ -239,7 +266,7 @@ export default function TripForm({
             value={cities}
             onChange={(e) => setCities(e.target.value)}
             className={inputCls}
-            placeholder="Ahmedabad, Rajkot"
+            placeholder="Rajkot (home city is left out)"
           />
         </Field>
 
@@ -319,7 +346,7 @@ export default function TripForm({
         <Field label="Billed to">
           <select
             value={billsTo}
-            onChange={(e) => setBillsTo(e.target.value as BillsTo)}
+            onChange={(e) => setBillsPick(e.target.value as BillsTo)}
             className={inputCls}
           >
             {BILLS_TO_VALUES.map((b) => (
@@ -338,6 +365,52 @@ export default function TripForm({
               : "to raise the AED invoice to the chapter"}, due three days
             after the trip ends.
           </p>
+        )}
+
+        {(journeyChoices.length > 0 || trip?.journey_id) && (
+          <Field label="Journey">
+            {journeyChoices.length > 0 && (
+              <select
+                value={sameAs}
+                onChange={(e) => {
+                  setSameAs(e.target.value);
+                  setLeaveJourney(false);
+                }}
+                className={inputCls}
+                aria-label="Part of the same journey as"
+              >
+                <option value="">
+                  {trip?.journey_id ? "Keep the journey it is on" : "Not part of a journey"}
+                </option>
+                {journeyChoices
+                  .filter((c) => c.id !== trip?.id)
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>
+                      Part of the same journey as {c.label}
+                    </option>
+                  ))}
+              </select>
+            )}
+            {trip?.journey_id && (
+              <label className="mt-2 flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={leaveJourney}
+                  onChange={(e) => {
+                    setLeaveJourney(e.target.checked);
+                    if (e.target.checked) setSameAs("");
+                  }}
+                />
+                Remove from journey
+              </label>
+            )}
+            <p className="mt-1.5 text-[11px] text-secondary">
+              A journey is one continuous trip serving several sessions, for
+              example Bengaluru, Delhi, then Surat. Each session keeps its own
+              billing and checklist; the journey page shows all the expenses
+              together.
+            </p>
+          </Field>
         )}
 
         <Field label="Notes">

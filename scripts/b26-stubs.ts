@@ -90,6 +90,7 @@ export const createTrip = noop;
 export const deleteTrip = noop;
 export const deleteTripExpense = noop;
 export const syncTripHotelStep = noop;
+export const resolveJourneyId = noop;
 export const updateTrip = noop;
 export const updateTripExpense = noop;
 export const removeFinanceReminder = noop;

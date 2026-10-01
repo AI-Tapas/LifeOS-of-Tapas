@@ -656,8 +656,8 @@ export const TOOLS: ToolDef[] = [
       "Create a trip: an AICA session, a conference, leisure or other travel. Its travel legs and expenses hang off it, and they feed the month pack Tapas invoices from. This app never produces an invoice or a bill.",
     input_schema: schema({
       purpose: enumOf(
-        ["aica", "conference", "leisure", "other"],
-        "What the trip is for."
+        ["aica", "conference", "leisure", "other", "training"],
+        "What the trip is for. training is a non-ICAI training, e.g. for Cygnet or another client: set work_stream to the client."
       ),
       title: str("Short trip title, e.g. AICA session, Rajkot branch."),
       work_stream: strOrNull(
@@ -679,13 +679,19 @@ export const TOOLS: ToolDef[] = [
         ),
       },
       bills_to: enumOrNull(
-        ["icai_monthly", "chapter_aed", "none"],
-        "How it is billed. icai_monthly (the default) goes into the monthly claim to the ICAI AI committee. chapter_aed is an overseas chapter, invoiced separately to the chapter in AED and never on the ICAI claim. none is not billable to anyone."
+        ["icai_monthly", "chapter_aed", "none", "client"],
+        "How it is billed. icai_monthly (the default) goes into the monthly claim to the ICAI AI committee. chapter_aed is an overseas chapter, invoiced separately to the chapter in AED and never on the ICAI claim. none is not billable to anyone. client is reimbursed by the client, the client being the trip's work stream (Cygnet, say). A training trip should usually be none or client."
       ),
       notes: strOrNull("Anything worth remembering about the trip."),
       hotel_arrangement: enumOrNull(
-        ["branch", "self", "relative", "same_day"],
-        "How the accommodation is handled: branch (the ICAI branch arranges it), self (he books it, reimbursable), relative (staying with family), same_day (back the same day). This decides the checklist's hotel step. Omit to let the app default it: branch, which is the norm, or same_day when the trip starts and ends on one date."
+        ["branch", "self", "relative", "same_day", "client"],
+        "How the accommodation is handled: branch (the ICAI branch arranges it), self (he books it, reimbursable), relative (staying with family), same_day (back the same day), client (the client books travel and hotel, so the checklist only confirms them). This decides the checklist's hotel step. Omit to let the app default it: branch, which is the norm, or same_day when the trip starts and ends on one date."
+      ),
+      same_journey_as: strOrNull(
+        "To make this a session of an existing journey, pass the id of one of the trips already on that journey (from lifeos_list_trips). The server joins this trip to that trip's journey, or starts a journey on both when that trip had none. A journey is one continuous trip serving several engagements, e.g. Ahmedabad to Bengaluru (Cygnet) to Delhi (Cygnet) to Surat (ICAI). Omit when it is a trip of its own."
+      ),
+      journey_id: strOrNull(
+        "A journey id taken from lifeos_list_trips (journey_id). Prefer same_journey_as, which needs no id. Omit when not part of a journey."
       ),
       with_checklist: boolOrNull(
         "Also add the standard travel checklist (book onward, book return, confirm hotel, collect receipts), dated from the trip's own dates. Defaults to false. Needs a start date."
@@ -708,8 +714,8 @@ export const TOOLS: ToolDef[] = [
       start_date: { ...strOrNull(DATE_DESC + " Omit to keep.") },
       end_date: { ...strOrNull(DATE_DESC + " Omit to keep.") },
       bills_to: enumOrNull(
-        ["icai_monthly", "chapter_aed", "none"],
-        "How it is billed: icai_monthly, chapter_aed (overseas, AED, never on the ICAI claim) or none. Omit to keep."
+        ["icai_monthly", "chapter_aed", "none", "client"],
+        "How it is billed: icai_monthly, chapter_aed (overseas, AED, never on the ICAI claim), none, or client (reimbursed by the client, the trip's work stream). Omit to keep."
       ),
       notes: strOrNull("New notes. Omit to keep."),
       cities: opt({
@@ -718,8 +724,14 @@ export const TOOLS: ToolDef[] = [
         description: "The cities the trip covers, in order. Replaces the whole list. Omit to keep.",
       }),
       hotel_arrangement: enumOrNull(
-        ["branch", "self", "relative", "same_day"],
-        "How the accommodation is handled: branch, self, relative or same_day. Changing it does not rewrite checklist steps already there: call sync_trip_hotel_step for that. Omit to keep."
+        ["branch", "self", "relative", "same_day", "client"],
+        "How the accommodation is handled: branch, self, relative, same_day or client (the client books travel and hotel). Changing it does not rewrite checklist steps already there: call sync_trip_hotel_step for that. Omit to keep."
+      ),
+      same_journey_as: strOrNull(
+        "To make this a session of an existing journey, pass the id of one of the trips already on that journey (from lifeos_list_trips). The server joins this trip to that trip's journey, or starts a journey on both when that trip had none. A journey is one continuous trip serving several engagements, e.g. Ahmedabad to Bengaluru (Cygnet) to Delhi (Cygnet) to Surat (ICAI). Omit when it is a trip of its own."
+      ),
+      journey_id: strOrNull(
+        "A journey id from lifeos_list_trips, or the single word none to take this trip out of its journey. Prefer same_journey_as to join one. Omit to keep."
       ),
       session_label: strOrNull(
         "Short session identity, e.g. L1D2 for AICA Level 1 Day 2. Omit to keep."
@@ -774,9 +786,12 @@ export const TOOLS: ToolDef[] = [
     bucket: "autonomous",
     disclosure: "app_data",
     description:
-      "Change one trip expense line: its receipt reference, whether it is billable, the amount, the date or the category. Take the expense_id from lifeos_list_trip_expenses. Undo restores the old values. There is no tool that deletes an expense.",
+      "Change one trip expense line: its receipt reference, whether it is billable, the amount, the date, the category, or which trip (session) it belongs to. Take the expense_id from lifeos_list_trip_expenses. An expense is never split: it moves whole. Undo restores the old values. There is no tool that deletes an expense.",
     input_schema: schema({
       expense_id: str("The expense id from lifeos_list_trip_expenses."),
+      trip_id: strOrNull(
+        "Move the expense to this trip (session), from lifeos_list_trips. It must be one of his trips. Omit to keep it where it is."
+      ),
       receipt_ref: strOrNull(
         "Where the receipt lives, as a short note, e.g. 'physical file' or a link he gave. Never the document itself. Omit to keep."
       ),
@@ -1061,7 +1076,7 @@ export function assertNoAttendees(input: Record<string, unknown>): void {
 // `strict` is deliberately OFF unless asked for. It makes the provider compile
 // a grammar for the tool set, which carries hard structural limits: at most 16
 // union-typed and at most 24 optional parameters across all tools. This tool
-// set has 147 parameters, 92 of them optional (M8 census; it was 60 and 31
+// set has 202 parameters, 131 of them optional (B28 census; it was 147 and 92 at M8, 60 and 31
 // when M4 wrote this line), so strict mode refuses the whole
 // request. Nothing about the security model depends on it: every argument is
 // validated server-side in lib/assistant/execute.ts (recipients parsed and

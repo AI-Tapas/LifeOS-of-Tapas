@@ -129,7 +129,13 @@ export function validateCabProposals(
       continue;
     }
     wellFormedRefs.add(ref);
-    const trip = tripForDate(trips, date, CAB_TRIP_SLACK_DAYS);
+    // B28: a ride belongs to the session in whose CITY it happens. The raw
+    // areas are used to match only (so "Hotel, Delhi" still says Delhi) and
+    // are never stored; the date rule decides when no city matches.
+    const trip = tripForDate(trips, date, CAB_TRIP_SLACK_DAYS, [
+      typeof i.from_area === "string" ? i.from_area : null,
+      typeof i.to_area === "string" ? i.to_area : null,
+    ]);
     if (!trip) {
       // A personal ride. Counted, nothing else: no ref, no date, no place.
       personal += 1;

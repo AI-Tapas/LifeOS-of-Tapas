@@ -44,14 +44,15 @@ import {
 } from "@/components/trips/bits";
 import { BILLS_TO_HELP, isReceiptGap } from "@/lib/trips/month";
 import TripForm, {
+  type JourneyChoice,
   type TripFormValues,
   type WorkStreamRow,
 } from "@/components/trips/trip-form";
 import { setTaskStatusAction } from "@/app/(app)/tasks/actions";
 import {
   HOTEL_SENTENCES,
-  HOTEL_STEP_TITLES,
   buildChecklist,
+  isHotelStepTitle,
   resolveHotelArrangement,
 } from "@/lib/trips/checklist";
 import {
@@ -94,6 +95,7 @@ export default function TripDetail({
   expenses,
   workStreams,
   todayKey,
+  journeyChoices = [],
 }: {
   trip: TripFormValues;
   streamName: string;
@@ -102,6 +104,7 @@ export default function TripDetail({
   expenses: ExpenseRow[];
   workStreams: WorkStreamRow[];
   todayKey: string;
+  journeyChoices?: JourneyChoice[];
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
@@ -185,6 +188,17 @@ export default function TripDetail({
 
       <p className="text-sm text-secondary">{HOTEL_SENTENCES[hotel]}</p>
 
+      {trip.journey_id && (
+        <p className="mt-1 text-sm">
+          <Link
+            href={`/trips/journey/${trip.journey_id}`}
+            className="font-semibold text-brand-deep"
+          >
+            Part of a journey: see all its sessions and expenses
+          </Link>
+        </p>
+      )}
+
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <PurposeChip purpose={trip.purpose} />
         <BillsToChip billsTo={trip.bills_to} />
@@ -194,6 +208,11 @@ export default function TripDetail({
         <p className="mt-3 rounded-xl border border-waiting/30 bg-waiting-soft p-3 text-xs text-waiting">
           Excluded from the monthly ICAI claim. {BILLS_TO_HELP.chapter_aed} The
           checklist carries the reminder to raise it.
+        </p>
+      ) : trip.bills_to === "client" ? (
+        <p className="mt-3 text-xs text-muted">
+          {BILLS_TO_HELP.client} It stays off the ICAI month pack, and appears
+          on the month pack for {streamName || "that client"}.
         </p>
       ) : trip.bills_to === "none" ? (
         <p className="mt-3 text-xs text-muted">
@@ -265,6 +284,7 @@ export default function TripDetail({
       {/* --- checklist ------------------------------------------------- */}
       <Checklist
         trip={trip}
+        streamName={streamName}
         items={checklist}
         todayKey={todayKey}
         onError={setErr}
@@ -366,6 +386,7 @@ export default function TripDetail({
           workStreams={workStreams}
           onClose={() => setEditing(false)}
           onDeleted={() => router.push("/trips")}
+          journeyChoices={journeyChoices}
         />
       )}
 
@@ -674,11 +695,13 @@ function ExpenseForm({
 // the morning brief. One control flips the whole trip if he wants them back.
 function Checklist({
   trip,
+  streamName,
   items,
   todayKey,
   onError,
 }: {
   trip: TripFormValues;
+  streamName: string;
   items: ChecklistRow[];
   todayKey: string;
   onError: (m: string | null) => void;
@@ -699,8 +722,8 @@ function Checklist({
   // and either offers one explicit update or, if he has already worked that
   // step, says plainly that it is being left alone.
   const wantHotel =
-    buildChecklist(trip, todayKey).find((s) => s.key === "hotel") ?? null;
-  const hotelRow = live.find((i) => HOTEL_STEP_TITLES.includes(i.title)) ?? null;
+    buildChecklist({ ...trip, stream_name: streamName }, todayKey).find((s) => s.key === "hotel") ?? null;
+  const hotelRow = live.find((i) => isHotelStepTitle(i.title)) ?? null;
   const worked = !!hotelRow && hotelRow.status !== "todo";
   const stale =
     live.length > 0 &&

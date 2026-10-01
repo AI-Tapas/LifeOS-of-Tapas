@@ -13,7 +13,7 @@
 // Audit text built here carries refs, ids and counts only: never a city, a
 // PNR or anything else read from the mail.
 
-import { TRANSPORT_MODES, parseLegs, type TransportMode, type TripLeg } from "./core.ts";
+import { TRANSPORT_MODES, isHomeCity, parseLegs, type TransportMode, type TripLeg } from "./core.ts";
 
 export const TICKET_LEG_CAP = 10;
 // A ticket may be dated a little outside the trip it belongs to: the night
@@ -58,7 +58,10 @@ export interface TicketTrip {
   id: string;
   start_date: string | null;
   end_date: string | null;
-  legs: unknown;
+  legs?: unknown;
+  // B28: used only to tell overlapping sessions of one journey apart.
+  session_date?: string | null;
+  cities?: unknown;
 }
 
 export interface TicketLeg {
@@ -85,25 +88,62 @@ function sameLeg(a: TripLeg, b: TripLeg): boolean {
 // The trip a date belongs to: one whose dates contain it first, otherwise one
 // within the slack either side. A trip with no start date cannot be matched.
 // B21 cab receipts pass a slack of 1.
+//
+// B28: on one journey the spans of consecutive sessions overlap on the travel
+// day (Bengaluru 6 to 7 Oct, Delhi 7 to 8, Surat 8 to 9), so a date can fit
+// several trips. Among them:
+//   1. when `places` is given (a ride's from and to, a ticket's destination),
+//      prefer a trip whose city (home city excluded) appears in them, case
+//      insensitive, so "Surat Airport" belongs to the Surat session whatever
+//      the date says. A ride from home matches no session city and falls on;
+//   2. else the trip whose session_date is nearest the date (its end date when
+//      it has no session date);
+//   3. on a tie, the later trip, the one he is travelling to.
+// Deterministic: it never depends on the order the trips arrive in.
 export function tripForDate<T extends TicketTrip>(
   trips: T[],
   date: string,
-  slack: number = TRIP_DATE_SLACK_DAYS
+  slack: number = TRIP_DATE_SLACK_DAYS,
+  places: (string | null | undefined)[] = []
 ): T | null {
-  let near: T | null = null;
-  for (const t of trips) {
-    if (!t.start_date) continue;
-    const end = t.end_date ?? t.start_date;
-    if (date >= t.start_date && date <= end) return t;
-    if (
-      !near &&
-      date >= shiftKey(t.start_date, -slack) &&
-      date <= shiftKey(end, slack)
-    ) {
-      near = t;
-    }
+  const dated = trips.filter((t) => t.start_date);
+  const end = (t: T) => t.end_date ?? t.start_date!;
+  let pool = dated.filter((t) => date >= t.start_date! && date <= end(t));
+  if (!pool.length) {
+    pool = dated.filter(
+      (t) => date >= shiftKey(t.start_date!, -slack) && date <= shiftKey(end(t), slack)
+    );
   }
-  return near;
+  if (pool.length < 2) return pool[0] ?? null;
+
+  const hay = places
+    .filter((p): p is string => typeof p === "string" && !!p.trim())
+    .join(" | ")
+    .toLowerCase();
+  if (hay) {
+    const hit = pool.filter((t) => tripCities(t).some((c) => hay.includes(c.toLowerCase())));
+    if (hit.length) pool = hit;
+  }
+
+  const gap = (t: T) => Math.abs(dayNumber(t.session_date ?? end(t)) - dayNumber(date));
+  return [...pool].sort(
+    (a, b) =>
+      gap(a) - gap(b) ||
+      b.start_date!.localeCompare(a.start_date!) ||
+      end(b).localeCompare(end(a)) ||
+      b.id.localeCompare(a.id)
+  )[0];
+}
+
+function tripCities(t: { cities?: unknown }): string[] {
+  return (Array.isArray(t.cities) ? t.cities : []).filter(
+    (c): c is string => typeof c === "string" && !!c.trim() && !isHomeCity(c)
+  );
+}
+
+function dayNumber(dateOnly: string): number {
+  const [y, m, d] = dateOnly.split("-").map(Number);
+  return Date.UTC(y, m - 1, d) / 86400000;
 }
 
 export function validateTripLegProposals(
@@ -134,7 +174,8 @@ export function validateTripLegProposals(
       rejected.push(`leg for ${ref} without from, to and a YYYY-MM-DD date`);
       continue;
     }
-    const trip = tripForDate(trips, date);
+    // B28: the leg's destination decides between overlapping sessions.
+    const trip = tripForDate(trips, date, TRIP_DATE_SLACK_DAYS, [to]);
     if (!trip) {
       if (!noTrip.some((n) => n.from === from && n.to === to && n.date === date)) {
         noTrip.push({ ref, from, to, date });

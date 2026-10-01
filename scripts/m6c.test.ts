@@ -3,7 +3,7 @@
 // m3/m4/m5/m6/m6b suites). No network, no database: pure logic only.
 //
 // The point of the field is that it CHANGES WHAT THE APP ASKS OF HIM. These
-// tests hold that: each of the four values produces a different checklist,
+// tests hold that: each of the five values produces a different checklist,
 // and two of them produce no hotel step at all.
 //
 // What is proven:
@@ -87,16 +87,18 @@ test("a day return produces no hotel step at all", () => {
   assert.deepEqual(keys("same_day"), ["onward", "return", "receipts"]);
 });
 
-test("the four values differ from one another, which is the whole point", () => {
+test("the five values differ from one another, which is the whole point", () => {
   const shapes = HOTEL_ARRANGEMENTS.map((h) =>
     JSON.stringify(buildChecklist({ ...TRIP, hotel_arrangement: h }, TODAY))
   );
-  assert.equal(new Set(shapes).size, 4, "no two arrangements ask the same thing");
+  assert.equal(new Set(shapes).size, 5, "no two arrangements ask the same thing");
 });
 
 test("only the hotel step moves: the other steps are untouched", () => {
+  // B28: client swaps the booking steps for chases (see scripts/b28.test.ts),
+  // but its receipts step still falls due on the end date.
   for (const h of HOTEL_ARRANGEMENTS) {
-    assert.equal(step(h, "return")!.due_date, "2026-08-27");
+    if (h !== "client") assert.equal(step(h, "return")!.due_date, "2026-08-27");
     assert.equal(step(h, "receipts")!.due_date, "2026-09-04");
     // No bill step to check: since M6d nothing per trip raises an invoice.
   }
@@ -204,7 +206,7 @@ test("create_trip and update_trip take hotel_arrangement, optional and single-ty
     >;
     const prop = props.hotel_arrangement;
     assert.equal(prop.type, "string", `${name} takes one concrete type`);
-    assert.deepEqual(prop.enum, ["branch", "self", "relative", "same_day"]);
+    assert.deepEqual(prop.enum, ["branch", "self", "relative", "same_day", "client"]);
     assert.ok(
       !((tool.input_schema.required ?? []) as string[]).includes("hotel_arrangement"),
       `${name} leaves hotel_arrangement optional`

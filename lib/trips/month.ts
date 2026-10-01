@@ -29,14 +29,16 @@ import {
 
 // trip_bills_to. Kept as a plain union so this file stays importable by
 // node --test without the generated database types.
-export type BillsTo = "icai_monthly" | "chapter_aed" | "none";
+export type BillsTo = "icai_monthly" | "chapter_aed" | "none" | "client";
 
-export const BILLS_TO_VALUES: BillsTo[] = ["icai_monthly", "chapter_aed", "none"];
+export const BILLS_TO_VALUES: BillsTo[] = ["icai_monthly", "chapter_aed", "none", "client"];
 
 export const BILLS_TO_LABELS: Record<BillsTo, string> = {
   icai_monthly: "Monthly ICAI claim",
   chapter_aed: "Overseas chapter, AED",
   none: "Not billable",
+  // B28: the client is the session's work stream (Cygnet, say).
+  client: "Reimbursed by the client",
 };
 
 export const BILLS_TO_HELP: Record<BillsTo, string> = {
@@ -44,6 +46,7 @@ export const BILLS_TO_HELP: Record<BillsTo, string> = {
   chapter_aed:
     "Invoiced separately to the chapter, in AED. Never on the ICAI invoice.",
   none: "Nobody reimburses this one.",
+  client: "The client of this session's work stream reimburses it. Not on the ICAI claim.",
 };
 
 export interface MonthTrip {
@@ -54,6 +57,9 @@ export interface MonthTrip {
   cities: string[];
   bills_to: BillsTo;
   legs: unknown; // jsonb, read through parseLegs
+  // B28: the session's work stream name, which is the client when
+  // bills_to is 'client'. Null when not known.
+  stream_name?: string | null;
 }
 
 export interface MonthExpense {
@@ -180,13 +186,25 @@ export interface MonthExclusion {
   title: string;
   cities: string[];
   dates: string;
-  bills_to: Exclude<BillsTo, "icai_monthly">;
+  bills_to: BillsTo;
   reason: string;
+}
+
+// B28. Which claim a pack is for: the ICAI claim (today's behaviour) or one
+// client's reimbursables, named by the work stream ("Cygnet").
+export const ICAI_CLAIM = "icai";
+
+export function isIcaiClaim(claim: string | null | undefined): boolean {
+  const c = (claim ?? "").trim().toLowerCase();
+  return !c || c === ICAI_CLAIM;
 }
 
 export interface MonthPack {
   month_key: string;
   month_label: string;
+  // "icai" or the stream name; claim_label is how the pack names itself.
+  claim: string;
+  claim_label: string;
   sessions: MonthSession[];
   legs: MonthLegRow[];
   expense_groups: MonthExpenseGroup[];
@@ -197,13 +215,25 @@ export interface MonthPack {
 export function buildMonthPack(
   trips: MonthTrip[],
   expenses: MonthExpense[],
-  monthKey: string
+  monthKey: string,
+  claim: string = ICAI_CLAIM
 ): MonthPack {
+  const icai = isIcaiClaim(claim);
+  const stream = (claim ?? "").trim();
+  const sameStream = (t: MonthTrip) =>
+    (t.stream_name ?? "").trim().toLowerCase() === stream.toLowerCase();
   const inMonth = trips
     .filter((t) => tripMonthKey(t) === monthKey)
     .sort((a, b) => (a.start_date ?? "").localeCompare(b.start_date ?? ""));
-  const claimed = inMonth.filter((t) => t.bills_to === "icai_monthly");
+  // The ICAI claim takes icai_monthly sessions; a client's takes the
+  // sessions of that stream marked bills_to client.
+  const claimed = inMonth.filter((t) =>
+    icai ? t.bills_to === "icai_monthly" : t.bills_to === "client" && sameStream(t)
+  );
   const claimedIds = new Set(claimed.map((t) => t.id));
+  // A client pack lists only what the client reimburses; the ICAI pack keeps
+  // showing his own costs too, as it always has.
+  const wanted = (e: MonthExpense) => icai || e.billable;
 
   const sessions: MonthSession[] = claimed.map((t) => ({
     trip_id: t.id,
@@ -224,23 +254,30 @@ export function buildMonthPack(
       title: t.title,
       cities: t.cities,
       expenses: expenses
-        .filter((e) => e.trip_id === t.id)
+        .filter((e) => e.trip_id === t.id && wanted(e))
         .sort((a, b) => a.date.localeCompare(b.date)),
     }))
     .filter((g) => g.expenses.length > 0);
 
+  // ICAI view: every other trip of the month, with the reason. A client
+  // session reads "Reimbursed by Cygnet", never "Not billable to anyone".
+  // Client view: the same stream's trips that are not reimbursable.
   const excluded: MonthExclusion[] = inMonth
-    .filter((t) => t.bills_to !== "icai_monthly")
+    .filter((t) => (icai ? t.bills_to !== "icai_monthly" : sameStream(t) && t.bills_to !== "client"))
     .map((t) => ({
       trip_id: t.id,
       title: t.title,
       cities: t.cities,
       dates: tripDatesLabel(t.start_date, t.end_date),
-      bills_to: t.bills_to as Exclude<BillsTo, "icai_monthly">,
+      bills_to: t.bills_to,
       reason:
         t.bills_to === "chapter_aed"
           ? "Bills to the chapter in AED, on its own invoice. Not on the ICAI claim."
-          : "Not billable to anyone.",
+          : t.bills_to === "client"
+            ? `Reimbursed by ${t.stream_name?.trim() || "the client"}`
+            : t.bills_to === "icai_monthly"
+              ? "On the monthly ICAI claim."
+              : "Not billable to anyone.",
     }));
 
   const gaps = expenses
@@ -250,6 +287,8 @@ export function buildMonthPack(
   return {
     month_key: monthKey,
     month_label: monthLabel(monthKey),
+    claim: icai ? ICAI_CLAIM : stream,
+    claim_label: icai ? "Monthly ICAI claim" : `${stream} reimbursables`,
     sessions,
     legs,
     expense_groups,
@@ -266,10 +305,10 @@ export function buildMonthPack(
 // written as bare digits so a spreadsheet reads them as numbers.
 export function monthPackText(pack: MonthPack): string {
   const lines: string[] = [
-    `Life OS month pack: ${pack.month_label}`,
+    `Life OS month pack: ${pack.month_label}${pack.claim === ICAI_CLAIM ? "" : ` (${pack.claim_label})`}`,
     "Records only. No invoice number, no fee, no totals: the workbook computes those.",
     "",
-    "SESSIONS (monthly ICAI claim)",
+    `SESSIONS (${pack.claim === ICAI_CLAIM ? "monthly ICAI claim" : pack.claim_label})`,
   ];
 
   if (pack.sessions.length) {
@@ -353,6 +392,7 @@ export interface TripDbRow {
   cities: unknown; // jsonb
   bills_to: BillsTo;
   legs: unknown; // jsonb
+  stream_name?: string | null;
 }
 
 export interface ExpenseDbRow {
@@ -374,6 +414,7 @@ export function toMonthTrip(t: TripDbRow): MonthTrip {
     cities: Array.isArray(t.cities) ? (t.cities as string[]) : [],
     bills_to: t.bills_to,
     legs: t.legs,
+    stream_name: t.stream_name ?? null,
   };
 }
 
@@ -392,8 +433,9 @@ export function toMonthExpense(e: ExpenseDbRow): MonthExpense {
 export function monthPackFromRows(
   trips: TripDbRow[],
   expenses: ExpenseDbRow[],
-  monthKey: string
+  monthKey: string,
+  claim: string = ICAI_CLAIM
 ): { pack: MonthPack; text: string } {
-  const pack = buildMonthPack(trips.map(toMonthTrip), expenses.map(toMonthExpense), monthKey);
+  const pack = buildMonthPack(trips.map(toMonthTrip), expenses.map(toMonthExpense), monthKey, claim);
   return { pack, text: monthPackText(pack) };
 }

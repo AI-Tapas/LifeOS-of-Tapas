@@ -198,7 +198,7 @@ export const READ_TOOL_SCHEMAS: Record<string, Record<string, unknown>> = {
     properties: {
       purpose: {
         type: "string",
-        enum: ["aica", "conference", "leisure", "other"],
+        enum: ["aica", "conference", "leisure", "other", "training"],
         description: "Restrict to one kind of trip.",
       },
       upcoming_only: {
@@ -244,6 +244,10 @@ export const READ_TOOL_SCHEMAS: Record<string, Record<string, unknown>> = {
       month: {
         type: "string",
         description: "The month as YYYY-MM, e.g. 2026-09. Defaults to the month just gone, the one he invoices.",
+      },
+      claim: {
+        type: "string",
+        description: "Which claim the pack is for: icai (the default, the monthly ICAI claim) or a client's work stream name such as Cygnet, which lists that client's reimbursable sessions and expenses.",
       },
     },
     required: [],
@@ -402,7 +406,7 @@ export const READ_TOOL_DESCRIPTIONS: Record<string, string> = {
   lifeos_list_projects:
     "List projects and the work stream each belongs to, for filing tasks under one.",
   lifeos_list_trips:
-    "List trips with their session (session_label like L1D2, and session_date, the day he actually teaches, which is not the travel start), purpose, dates, cities, how each is billed (bills_to: icai_monthly, chapter_aed or none), how the hotel is arranged (branch, self, relative or same_day), how much billable expense each carries, the legs logged against them, and checklist progress (checklist_done of checklist_total). Life OS holds these records; it does not produce an invoice or a bill.",
+    "List trips with their session (session_label like L1D2, and session_date, the day he actually teaches, which is not the travel start), purpose, dates, cities, how each is billed (bills_to: icai_monthly, chapter_aed, none or client), how the hotel is arranged (branch, self, relative, same_day or client), the journey_id it shares with the other sessions of one continuous journey (null when it stands alone), how much billable expense each carries, the legs logged against them, and checklist progress (checklist_done of checklist_total). Life OS holds these records; it does not produce an invoice or a bill.",
   lifeos_list_action_history:
     "List assistant actions that already ran, with their ids, so one can be undone with lifeos_undo_action.",
   lifeos_list_pending_actions:
@@ -641,7 +645,7 @@ export async function runReadTool(
     const [trips, expenses] = await Promise.all([
       supabase
         .from("trips")
-        .select("id, title, start_date, end_date, cities, bills_to, legs")
+        .select("id, title, start_date, end_date, cities, bills_to, legs, work_streams(name)")
         .eq("user_id", userId),
       supabase
         .from("trip_expenses")
@@ -650,7 +654,12 @@ export async function runReadTool(
     ]);
     if (trips.error) throw new Error(trips.error.message);
     if (expenses.error) throw new Error(expenses.error.message);
-    const { pack, text } = monthPackFromRows(trips.data ?? [], expenses.data ?? [], month);
+    const claim = typeof input.claim === "string" ? input.claim.trim() : "";
+    const rows = (trips.data ?? []).map((t) => ({
+      ...t,
+      stream_name: (t.work_streams as { name: string } | null)?.name ?? null,
+    }));
+    const { pack, text } = monthPackFromRows(rows, expenses.data ?? [], month, claim || undefined);
     return { ...pack, text };
   }
 
@@ -1075,7 +1084,7 @@ export async function runReadTool(
     let q = supabase
       .from("trips")
       .select(
-        "id, title, purpose, status, start_date, end_date, cities, legs, bills_to, notes, hotel_arrangement, session_label, session_date, work_streams(name), trip_expenses(amount, billable, receipt_ref), tasks(status)",
+        "id, title, purpose, status, start_date, end_date, cities, legs, bills_to, notes, hotel_arrangement, session_label, session_date, journey_id, work_streams(name), trip_expenses(amount, billable, receipt_ref), tasks(status)",
         { count: "exact" }
       )
       .order("start_date", { ascending: false, nullsFirst: false })
@@ -1110,6 +1119,8 @@ export async function runReadTool(
         // readable here: nothing writable is invisible.
         session_label: t.session_label,
         session_date: t.session_date,
+        // B28: sessions of one continuous journey share this id.
+        journey_id: t.journey_id,
         start_date: t.start_date,
         end_date: t.end_date,
         cities: t.cities,

@@ -8,12 +8,13 @@
 // (lib/trips/month.ts). Nothing in this file writes a bills row.
 
 import {
-  HOTEL_STEP_TITLES,
   ONWARD_STEP_TITLE,
+  defaultHotelArrangement,
+  isHotelStepTitle,
   buildChecklist,
   type HotelArrangement,
 } from "./checklist.ts";
-import { parseLegs, type TripLeg } from "./core.ts";
+import { parseLegs, stripHomeCity, type TripLeg } from "./core.ts";
 import { createTask, setTaskStatus, updateTask } from "@/lib/tasks/write";
 import { syncTripEvent, removeTripEvent } from "@/lib/reminders/writer";
 import { civilKey, civilToday, istInstant } from "@/lib/datetime";
@@ -48,6 +49,8 @@ export interface TripInput {
   // stays null, which readers resolve to his norm for that purpose. The app
   // sends a value; the connectors may omit it.
   hotel_arrangement?: HotelArrangement | null;
+  // B28: sessions of one continuous journey share this id (null: none).
+  journey_id?: string | null;
   // Not a column: when true, createTrip also seeds the standard travel
   // checklist against the new trip. The add-trip drawer sets it, and so does
   // the connector's with_checklist flag, through this one code path.
@@ -55,6 +58,7 @@ export interface TripInput {
 }
 
 export interface ExpenseInput {
+  // B28: on an edit, trip_id MOVES the expense to another of his trips.
   trip_id: string;
   category: ExpenseCategory;
   amount: number;
@@ -76,6 +80,17 @@ export async function createTrip(
   const dateFault = checkDates(input.start_date, input.end_date);
   if (dateFault) return { ok: false, message: dateFault };
 
+  // B28: a non-ICAI training is not on the ICAI claim (bills_to none unless
+  // told otherwise) and defaults its hotel to the client when the client is
+  // Cygnet, else his own booking. Only when the caller left them out.
+  const client = await streamName(supabase, input.work_stream_id);
+  const billsTo: BillsTo = input.bills_to ?? (input.purpose === "training" ? "none" : "icai_monthly");
+  const hotel =
+    input.hotel_arrangement ??
+    (input.purpose === "training"
+      ? defaultHotelArrangement(input.start_date ?? null, input.end_date ?? null, "training", client)
+      : null);
+
   const { data, error } = await supabase
     .from("trips")
     .insert({
@@ -85,14 +100,16 @@ export async function createTrip(
       work_stream_id: input.work_stream_id,
       start_date: input.start_date ?? null,
       end_date: input.end_date ?? null,
-      cities: (input.cities ?? []) as Json,
+      // B28: home is never a trip city.
+      cities: stripHomeCity(input.cities ?? []) as Json,
       session_label: input.session_label ?? null,
       session_date: input.session_date ?? null,
       legs: (input.legs ?? []) as unknown as Json,
       status: input.status ?? "planned",
-      bills_to: input.bills_to ?? "icai_monthly",
+      bills_to: billsTo,
       notes: input.notes ?? null,
-      hotel_arrangement: input.hotel_arrangement ?? null,
+      hotel_arrangement: hotel,
+      journey_id: input.journey_id ?? null,
     })
     .select("id")
     .single();
@@ -105,7 +122,6 @@ export async function createTrip(
   // revoked, say) must not fail the trip write: the next save re-syncs it.
   if (input.start_date) await syncTripEvent(userId, data.id);
 
-  const billsTo = input.bills_to ?? "icai_monthly";
   // An overseas chapter trip always gets its AED reminder, checklist asked
   // for or not: that invoice is raised once or twice a year and forgetting it
   // is the stated risk. Everything else only arrives when he asks for it.
@@ -120,9 +136,10 @@ export async function createTrip(
         start_date: input.start_date ?? null,
         end_date: input.end_date ?? null,
         bills_to: billsTo,
-        cities: input.cities ?? [],
-        hotel_arrangement: input.hotel_arrangement ?? null,
+        cities: stripHomeCity(input.cities ?? []),
+        hotel_arrangement: hotel,
         work_stream_id: input.work_stream_id,
+        stream_name: client,
       },
       input.with_checklist ? "all" : "aed_only"
     );
@@ -156,6 +173,8 @@ export async function seedTripChecklist(
     cities: string[];
     hotel_arrangement?: HotelArrangement | null;
     work_stream_id: string;
+    // B28: the client's name for a client-arranged session.
+    stream_name?: string | null;
   },
   // 'aed_only' seeds just the overseas-chapter invoice reminder, which is the
   // one step that must exist whether or not he wanted the travel checklist.
@@ -200,6 +219,16 @@ export async function seedTripChecklist(
   return ids;
 }
 
+// B28: a work stream's name, which is the client of a client session.
+async function streamName(supabase: Db, workStreamId: string): Promise<string | null> {
+  const { data } = await supabase
+    .from("work_streams")
+    .select("name")
+    .eq("id", workStreamId)
+    .maybeSingle();
+  return data?.name ?? null;
+}
+
 // The trip fields the checklist is derived from, read once.
 async function checklistTrip(supabase: Db, tripId: string) {
   const { data: trip } = await supabase
@@ -212,7 +241,11 @@ async function checklistTrip(supabase: Db, tripId: string) {
   if (!trip) return null;
   // cities is jsonb, so the generated type is Json: normalise it the same way
   // every other caller does.
-  return { ...trip, cities: Array.isArray(trip.cities) ? (trip.cities as string[]) : [] };
+  return {
+    ...trip,
+    cities: Array.isArray(trip.cities) ? (trip.cities as string[]) : [],
+    stream_name: await streamName(supabase, trip.work_stream_id),
+  };
 }
 
 // Adds the standard travel checklist to a trip that does not have it yet.
@@ -279,7 +312,7 @@ export async function syncTripHotelStep(
     .select("id, title, status, notes, due_ts")
     .eq("trip_id", tripId);
   const rows = tasks ?? [];
-  const hotelRow = rows.find((t) => HOTEL_STEP_TITLES.includes(t.title)) ?? null;
+  const hotelRow = rows.find((t) => isHotelStepTitle(t.title)) ?? null;
   const onwardRow = rows.find((t) => t.title === ONWARD_STEP_TITLE) ?? null;
 
   const done: string[] = [];
@@ -381,7 +414,7 @@ export async function updateTrip(
         : {}),
       ...(patch.start_date !== undefined ? { start_date: patch.start_date } : {}),
       ...(patch.end_date !== undefined ? { end_date: patch.end_date } : {}),
-      ...(patch.cities !== undefined ? { cities: patch.cities as Json } : {}),
+      ...(patch.cities !== undefined ? { cities: stripHomeCity(patch.cities) as Json } : {}),
       ...(patch.session_label !== undefined ? { session_label: patch.session_label } : {}),
       ...(patch.session_date !== undefined ? { session_date: patch.session_date } : {}),
       ...(patch.legs !== undefined ? { legs: patch.legs as unknown as Json } : {}),
@@ -391,6 +424,7 @@ export async function updateTrip(
       ...(patch.hotel_arrangement !== undefined
         ? { hotel_arrangement: patch.hotel_arrangement }
         : {}),
+      ...(patch.journey_id !== undefined ? { journey_id: patch.journey_id } : {}),
     })
     .eq("id", id);
   if (error) return { ok: false, message: error.message };
@@ -398,6 +432,28 @@ export async function updateTrip(
   // date does. Cheap enough to re-sync on any save: it is one patch call.
   await syncTripEvent(userId, id);
   return { ok: true, id };
+}
+
+// B28. "Part of the same journey as <trip>": the other trip's journey id, or a
+// fresh one written onto that trip too when it had none. Returns the id for
+// the caller to put on the trip it is writing. The other trip must be his.
+export async function resolveJourneyId(
+  supabase: Db,
+  userId: string,
+  otherTripId: string
+): Promise<{ ok: true; journey_id: string } | { ok: false; message: string }> {
+  const { data: other } = await supabase
+    .from("trips")
+    .select("id, journey_id")
+    .eq("id", otherTripId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (!other) return { ok: false, message: "The trip to share a journey with was not found." };
+  if (other.journey_id) return { ok: true, journey_id: other.journey_id };
+  const minted = crypto.randomUUID();
+  const { error } = await supabase.from("trips").update({ journey_id: minted }).eq("id", other.id);
+  if (error) return { ok: false, message: error.message };
+  return { ok: true, journey_id: minted };
 }
 
 export async function deleteTrip(
@@ -474,13 +530,25 @@ export async function addTripExpense(
 
 export async function updateTripExpense(
   supabase: Db,
-  _userId: string,
+  userId: string,
   id: string,
-  patch: Partial<Omit<ExpenseInput, "trip_id">>
+  patch: Partial<ExpenseInput>
 ): Promise<WriteResult> {
+  // B28: moving an expense to another session. The target must be one of his
+  // trips; no split, the whole expense moves.
+  if (patch.trip_id !== undefined) {
+    const { data: target } = await supabase
+      .from("trips")
+      .select("id")
+      .eq("id", patch.trip_id)
+      .eq("user_id", userId)
+      .maybeSingle();
+    if (!target) return { ok: false, message: "That trip was not found, so the expense stays where it is." };
+  }
   const { error } = await supabase
     .from("trip_expenses")
     .update({
+      ...(patch.trip_id !== undefined ? { trip_id: patch.trip_id } : {}),
       ...(patch.category !== undefined ? { category: patch.category } : {}),
       ...(patch.amount !== undefined ? { amount: patch.amount } : {}),
       ...(patch.date !== undefined ? { date: patch.date } : {}),

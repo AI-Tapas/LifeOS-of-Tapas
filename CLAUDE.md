@@ -1494,3 +1494,102 @@ additions only, nothing backfilled, RLS unchanged.
 - Tests: `npm run test:b27` (15 offline; the real read tools run against the
   b26 in-memory database and a mocked mailbox, scripts/b27-loader.mjs and
   b27-stubs.ts).
+
+## Journeys, and client (non-ICAI) training trips (B28)
+
+Two migrations, NOT applied anywhere when they were written; apply both, in
+order, before (or with) the deploy of this code, since the trips screens and
+both connectors select `journey_id`:
+`20261001000100_b28_enum_values.sql` (enum values only) and
+`20261001000200_b28_journeys.sql` (the column, its index and the home city
+clean). They are two files because Postgres refuses to use an enum value in
+the transaction that adds it; a test fails if the first ever uses one.
+
+- The problem, in his words on 1 October 2026: he also trains for Cygnet (its
+  clients), and one continuous journey serves several engagements, for example
+  Ahmedabad, Bengaluru (Cygnet, 7 Oct), Delhi (Cygnet, 8 Oct), Surat (ICAI,
+  9 Oct), home. Cygnet pays flights and hotels; he books cabs and Cygnet
+  reimburses them. He wants the journey's expenses together, each marked to
+  the engagement it belongs to.
+- Design: each engagement stays its own `trips` row (a "session" on screen);
+  sessions of one journey share `trips.journey_id` (uuid, nullable, indexed,
+  NO table and NO foreign key: a journey's title, cities and dates are derived
+  from its sessions, lib/trips/journey.ts). Every per-trip rule (month pack,
+  checklist, hotel step, cab and ticket matching, calendar entry) is
+  unchanged. A journey_id carried by one trip alone (the other was deleted, or
+  a join was undone) is just a trip: the list shows it as it always did.
+- New enum values: `trip_purpose` training ("Training (non-ICAI)"),
+  `trip_bills_to` client ("Reimbursed by the client", the client being the
+  session's WORK STREAM, no new client field), `hotel_arrangement` client
+  ("Client arranges"). Labels live in lib/trips/core.ts (purpose, moved from
+  components/trips/bits.tsx so a test can walk them), month.ts (bills_to) and
+  checklist.ts (hotel). A test walks every value of every enum in
+  lib/database.types.ts and fails on a missing label.
+- Defaults, in `createTrip` (one place, form and connector alike): a training
+  with no bills_to is `none` (travel built into his fee; `client` stays
+  selectable), and with no hotel arrangement defaults to `client` when the
+  stream is Cygnet, else `self` (a day return is still `same_day`).
+- The client hotel arrangement MEANS "the client books travel and hotel". The
+  checklist therefore drops the book-ticket and hotel steps and has exactly
+  three: "Confirm flights booked by <stream>" (7 days before the start),
+  "Confirm hotel booked by <stream>" (5 days before), "Collect cab receipts"
+  (the end date). `ChecklistTrip.stream_name` carries the client; write.ts
+  reads it from the work stream. `isHotelStepTitle` (checklist.ts) is what the
+  M6c hotel-step sync and the trip screen use, so the client wording counts as
+  app-written. Switching an existing trip TO client does not retire its old
+  "Book onward ticket" steps: the sync only handles the hotel step and the
+  onward note, as before.
+- Home city never a trip city: `stripHomeCity` (core.ts, one constant
+  HOME_CITY_PREFIXES, case-insensitive prefix match on "ahmedabad" and
+  "sabarmati") runs in createTrip, updateTrip (so also the connector and
+  undo) and the checklist; the migration cleans existing rows once. LEGS are
+  never touched.
+- Which session a date belongs to: `tripForDate` (lib/trips/ticket.ts) is the
+  one place. Among the trips holding the date (else within the slack): (1)
+  when given `places`, prefer a trip whose city (home excluded) appears in
+  them, case-insensitive; (2) else the trip whose `session_date` (its end date
+  when it has none) is nearest the date; (3) a tie goes to the later trip, the
+  one he is travelling to. Order-independent. B21 cab rides pass the RAW
+  from and to areas (so "Hotel, Delhi" still says Delhi; only the cleaned area
+  is stored), and a ride from home matches no session city, so it falls to
+  the date rule and lands on the first session. B20 ticket legs pass the leg's
+  destination. The scan's two trip queries now order by start date then id.
+  Note what the date rule alone gives on the example journey: 7 Oct is
+  Bengaluru's session day (Bengaluru), 8 Oct is Delhi's (Delhi); it is the
+  city rule that sends the Surat airport ride of 8 Oct to Surat.
+- Moving an expense between sessions: `trip_id` is part of the expense edit
+  patch (expense-edit.ts, `updateTripExpense`, the `update_trip_expense` tool).
+  The target must be one of his trips, else the write is refused and the
+  expense stays. Whole, never split. Undo restores the old trip.
+- Month pack per claim: `buildMonthPack(trips, expenses, month, claim)` and
+  `monthPackFromRows`; `claim` is "icai" (default, today's behaviour on
+  `icai_monthly`) or a work stream name, which lists that stream's sessions
+  with bills_to client, its reimbursable (billable) expenses with receipt
+  status and the gaps, headed "<Stream> reimbursables". In the ICAI view a
+  client session is excluded as "Reimbursed by <stream>", not "Not billable to
+  anyone". Same records-only text, no totals, no invoice shape (M6d stands).
+  /trips/month shows a claim chooser when a client session exists; Copy copies
+  the view shown. `lifeos_get_month_pack` takes `claim` (one string).
+- Screens: the trips list folds sessions sharing a journey_id into one card
+  (cities in travel order, dates, each session with type, stream and session
+  date) linking to `/trips/journey/<journey_id>`: every session, every leg in
+  date order, every expense of every session with a "For" dropdown (moves the
+  expense) and "+ Expense" asking "For which session?" with the nearest by
+  date preselected. The trip form has "Part of the same journey as..." (his
+  upcoming trips) and "Remove from journey". The trip screen links to its
+  journey.
+- Connector: `create_trip` and `update_trip` take `same_journey_as` (the id of
+  a trip already on the journey: the server finds that trip's journey_id, or
+  mints one and writes it onto both) and `journey_id` (an id one of his trips
+  carries, or "none" to leave); `lifeos_list_trips` returns `journey_id`
+  and its purpose filter takes training. Undo of update_trip restores
+  journey_id. Undo of a join that minted an id leaves that id on the other
+  trip, harmless (one trip alone is not a journey). Parameter census now 202,
+  131 optional, still zero unions.
+- Deferred, not built: a `journeys` table and journey tools, de-duplicating
+  trip calendar events against existing Cygnet events (a session adds one
+  harmless all-day entry), split expenses.
+- Tests: `npm run test:b28` (38 offline; the real executor and the real
+  lib/trips/write.ts run against the b26 in-memory database,
+  scripts/b28-loader.mjs and b28-stubs.ts). m6, m6c and b22 were updated for
+  the new enum values (4 hotel arrangements became 5).
