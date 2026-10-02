@@ -23,6 +23,7 @@ import {
   type Holding,
 } from "../money/investments.ts";
 import { unbilledBriefLine, type UnbilledSummary } from "../billing/unbilled.ts";
+import { hoursBriefLine, type WeekHours } from "../hours/month.ts";
 import {
   RECOVERY_ADVICE,
   recoveryLine,
@@ -113,6 +114,8 @@ export interface ComposeBriefInput {
   // B30: finished client work with no invoice (lib/billing/unbilled.ts). Used
   // on a Monday only, and only when there is some: stream names, no clients.
   unbilled?: UnbilledSummary | null;
+  // B32: billable hours last week, Monday only, one line after the unbilled one.
+  hours?: WeekHours | null;
   // B20: one-line housekeeping notes from the night, e.g. "3 closed windows
   // dropped." and "1 ticket email did not match a trip." Not tasks. Optional
   // so older fixtures stay valid.
@@ -209,6 +212,7 @@ export function composeBrief(input: ComposeBriefInput): ComposedBrief {
 
   // B30: the weekly nudge. Monday's brief only; nothing when there is none.
   const unbilledNote = weekday === 1 ? unbilledBriefLine(input.unbilled) : null;
+  const hoursNote = hoursBriefLine(input.hours, nowMs);
 
   // Holdings past or approaching their review date. Overdue ones lead, since
   // a review he has walked past for three weeks is the one worth naming.
@@ -240,6 +244,7 @@ export function composeBrief(input: ComposeBriefInput): ComposedBrief {
     scannedTasks,
     receiptGapLine,
     unbilledNote,
+    hoursNote,
     moneyReviewLine,
     recoveryNote,
     waitingNote,
@@ -259,6 +264,7 @@ export function composeBrief(input: ComposeBriefInput): ComposedBrief {
     scannedTasks,
     receiptGapLine,
     unbilledNote,
+    hoursNote,
     moneyReviewLine,
     recoveryNote,
     waitingNote,
@@ -300,6 +306,7 @@ interface RenderInput {
   scannedTasks: BriefTask[];
   receiptGapLine: string | null;
   unbilledNote: string | null;
+  hoursNote: string | null;
   moneyReviewLine: string | null;
   recoveryNote: string | null;
   waitingNote: string | null;
@@ -462,6 +469,13 @@ function renderHtml(r: RenderInput): string {
     </td></tr>`
     : "";
 
+  const hoursBlock = r.hoursNote
+    ? `
+    <tr><td style="padding:10px 32px 0 32px;">
+      <p style="margin:0;font-size:13px;color:${COLORS.todayText};font-family:${FONT};">${esc(r.hoursNote)}</p>
+    </td></tr>`
+    : "";
+
   const recoveryBlock = r.recoveryNote
     ? `
     <tr><td style="padding:16px 32px 0 32px;">
@@ -551,6 +565,7 @@ function renderHtml(r: RenderInput): string {
       </td></tr>
       ${receiptBlock}
       ${unbilledBlock}
+      ${hoursBlock}
       ${moneyBlock}
       ${approvalsBlock}
       ${scannedBlock}
@@ -627,6 +642,10 @@ function renderText(r: RenderInput): string {
 
   if (r.unbilledNote) {
     lines.push(`${r.unbilledNote} Open Unbilled: ${r.appBaseUrl}/unbilled`, "");
+  }
+
+  if (r.hoursNote) {
+    lines.push(r.hoursNote, "");
   }
 
   if (r.moneyReviewLine) {

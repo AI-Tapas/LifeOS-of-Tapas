@@ -11,6 +11,7 @@ import PersonaPanel, {
 } from "@/components/settings/persona-panel";
 import ModelsPanel from "@/components/settings/models-panel";
 import ThemePanel from "@/components/settings/theme-panel";
+import HoursTargetPanel from "@/components/settings/hours-target-panel";
 import WorkStreamsPanel, {
   type WorkStreamView,
 } from "@/components/settings/work-streams-panel";
@@ -126,7 +127,7 @@ export default async function SettingsPage({
         .order("version", { ascending: false }),
       supabase
         .from("assistant_settings")
-        .select("scan_provider, scan_model")
+        .select("scan_provider, scan_model, monthly_hours_target")
         .maybeSingle(),
       supabase
         .from("mcp_clients")
@@ -243,6 +244,14 @@ export default async function SettingsPage({
       )}
       <div className="mt-2">
         <WorkStreamsPanel streams={(streams ?? []) as WorkStreamView[]} />
+      </div>
+
+      <h2 className="mt-8 text-base font-semibold tracking-tight">Billable hours target</h2>
+      <p className="mt-1 text-sm text-secondary">
+        The hours a month you aim to bill. Home and the Monday brief compare your logged hours with it.
+      </p>
+      <div className="mt-2">
+        <HoursTargetPanel target={modelSettings?.monthly_hours_target ?? 85} />
       </div>
 
       <h2 className="mt-8 text-base font-semibold tracking-tight">Mail scan model</h2>

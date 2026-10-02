@@ -34,6 +34,9 @@ import {
   recoveryTrips,
   type RecoveryTrip,
 } from "@/lib/health/recovery";
+import { loadMonthHours } from "@/lib/hours/load";
+import { homeHoursLine, missingHoursLine, HOURS_HREF_MISSING } from "@/lib/hours/month";
+import { formatHours } from "@/lib/hours/parse";
 
 export const dynamic = "force-dynamic";
 
@@ -183,6 +186,18 @@ export default async function DashboardPage() {
     // B19: work that cannot start yet is counted, never listed or urgent.
     waiting_count: bandsRaw.waiting.length,
   };
+  // B32: billable hours this month against the target. A failed read (the
+  // migration not yet applied, say) leaves the card out and never breaks Home.
+  const hours = await (async () => {
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      return user ? await loadMonthHours(supabase, user.id, nowMs) : null;
+    } catch {
+      return null;
+    }
+  })();
   // B26: agent results waiting on him, over every open task (trip steps too).
   const agentLine = needsYouLine(needsYouCount((tasks ?? []) as Row[]));
   const inboxCount = open.filter((t) => t.status === "inbox").length;
@@ -248,6 +263,28 @@ export default async function DashboardPage() {
             </>
           )}
         </p>
+      )}
+
+      {hours && (
+        <div className="mt-5 rounded-2xl border border-border bg-surface p-3.5 shadow-[var(--shadow-card)]">
+          <p className="text-sm font-medium text-foreground">{homeHoursLine(hours)}</p>
+          {hours.by_stream.length > 0 && (
+            <ul className="mt-1 space-y-0.5">
+              {hours.by_stream.map((s) => (
+                <li key={s.stream} className="text-xs text-secondary">
+                  {s.stream}: {formatHours(s.hours)}
+                </li>
+              ))}
+            </ul>
+          )}
+          {missingHoursLine(hours.missing_count) && (
+            <p className="mt-1.5 text-xs">
+              <Link href={HOURS_HREF_MISSING} className="font-medium text-accent">
+                {missingHoursLine(hours.missing_count)}
+              </Link>
+            </p>
+          )}
+        </div>
       )}
 
       {recovery && (

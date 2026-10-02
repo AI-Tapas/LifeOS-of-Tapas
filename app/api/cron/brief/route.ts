@@ -25,6 +25,8 @@ import { cronAuthorized, alreadyRanToday } from "@/lib/cron/guard";
 import { addDays, civilKey, civilToday, civilWeekday, istInstant } from "@/lib/datetime";
 import { loadUnbilled } from "@/lib/billing/load";
 import { summarise, type UnbilledSummary } from "@/lib/billing/unbilled";
+import { loadLastWeekHours } from "@/lib/hours/load";
+import type { WeekHours } from "@/lib/hours/month";
 import type { Json } from "@/lib/database.types";
 
 export const runtime = "nodejs";
@@ -214,11 +216,18 @@ export async function GET(req: Request): Promise<Response> {
     // B30: the Monday nudge about finished work with no invoice. Read on a
     // Monday only; a failure to read never stops the brief.
     let unbilled: UnbilledSummary | null = null;
+    // B32: billable hours last week, also Monday only and also never fatal.
+    let hours: WeekHours | null = null;
     if (civilWeekday(today) === 1) {
       try {
         unbilled = summarise(await loadUnbilled(supabase, userId));
       } catch {
         unbilled = null;
+      }
+      try {
+        hours = await loadLastWeekHours(supabase, userId);
+      } catch {
+        hours = null;
       }
     }
 
@@ -299,6 +308,7 @@ export async function GET(req: Request): Promise<Response> {
       })),
       pendingApprovalsCount: pendingCount ?? 0,
       unbilled,
+      hours,
       accountsNeedingReconnect,
       appBaseUrl,
       housekeeping,

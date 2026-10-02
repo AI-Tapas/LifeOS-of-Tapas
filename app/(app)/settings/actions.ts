@@ -498,6 +498,28 @@ export async function setWorkStreamRateAction(
   return { ok: true };
 }
 
+// B32: the monthly billable hours target. A whole number of hours, 1 to 400.
+// Upsert on user_id so it works before the settings row exists; the scan model
+// columns are not in the payload, so they are left alone.
+export async function setMonthlyHoursTargetAction(
+  hours: number
+): Promise<{ ok: boolean; message?: string }> {
+  const { supabase, user } = await requireUser("/settings");
+  if (!Number.isInteger(hours) || hours < 1 || hours > 400) {
+    return { ok: false, message: "Enter a whole number of hours from 1 to 400." };
+  }
+  const { error } = await supabase
+    .from("assistant_settings")
+    .upsert(
+      { user_id: user.id, monthly_hours_target: hours, updated_at: new Date().toISOString() },
+      { onConflict: "user_id" }
+    );
+  if (error) return { ok: false, message: error.message };
+  revalidatePath("/settings");
+  revalidatePath("/");
+  return { ok: true };
+}
+
 // B30: whether a stream's finished tasks count as work to invoice. Ticked by
 // Tapas for client streams; no stream is seeded as billable. It records a
 // flag: no amount, no invoice.
