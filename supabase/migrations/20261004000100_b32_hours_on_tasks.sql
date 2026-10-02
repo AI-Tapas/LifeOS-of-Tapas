@@ -16,9 +16,14 @@
 alter table tasks
   add column if not exists hours_spent numeric(5,2);
 
-alter table tasks
-  add constraint tasks_hours_spent_range
-    check (hours_spent is null or (hours_spent >= 0 and hours_spent <= 500));
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'tasks_hours_spent_range') then
+    alter table tasks
+      add constraint tasks_hours_spent_range
+        check (hours_spent is null or (hours_spent >= 0 and hours_spent <= 500));
+  end if;
+end $$;
 
 comment on column tasks.hours_spent is
   'Hours Tapas spent on the task, in hundredths, 0 to 500. Null means not logged. His own record: written from the task drawer, or by an agent only when he says so in an instruction.';
@@ -26,9 +31,14 @@ comment on column tasks.hours_spent is
 alter table assistant_settings
   add column if not exists monthly_hours_target integer not null default 85;
 
-alter table assistant_settings
-  add constraint assistant_settings_monthly_hours_target_range
-    check (monthly_hours_target between 1 and 400);
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'assistant_settings_monthly_hours_target_range') then
+    alter table assistant_settings
+      add constraint assistant_settings_monthly_hours_target_range
+        check (monthly_hours_target between 1 and 400);
+  end if;
+end $$;
 
 comment on column assistant_settings.monthly_hours_target is
   'Billable hours he aims for each month. Edited in Settings under the work stream rates. Hours and a target only: no amount is derived from it.';

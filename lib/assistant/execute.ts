@@ -708,7 +708,7 @@ const performers: Record<string, Performer> = {
         : {}),
       is_billable: input.billable === true,
       // B32: his own record; the tool says to write it only when he said so.
-      ...(typeof input.hours_spent === "number" ? { hours_spent: input.hours_spent } : {}),
+      ...(input.hours_spent !== undefined ? { hours_spent: input.hours_spent as number | null } : {}),
       ...(extras.patch.project_id ? { project_id: extras.patch.project_id } : {}),
       ...(extras.patch.recurring_rule ? { recurring_rule: extras.patch.recurring_rule } : {}),
       source: "assistant",
@@ -751,7 +751,8 @@ const performers: Record<string, Performer> = {
     if (s(input.not_before)) patch.not_before = s(input.not_before);
     if (s(input.trip_id)) patch.trip_id = s(input.trip_id);
     if (isReminderMode(input.reminder_mode)) patch.reminder_mode = input.reminder_mode;
-    if (typeof input.hours_spent === "number") patch.hours_spent = input.hours_spent;
+    // B32: string, number or null all go to parseHours, which refuses a bad one and lets null clear.
+    if (input.hours_spent !== undefined) patch.hours_spent = input.hours_spent as number | null;
     const r = await updateTask(supabase, _userId, taskId, patch, "assistant");
     if (!r.ok) throw new Error(r.message);
     return {

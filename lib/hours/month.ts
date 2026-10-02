@@ -117,6 +117,7 @@ export function missingHoursIds(tasks: HoursTask[], nowMs: number): Set<string> 
 export interface WeekHours {
   total: number;
   pace: number;
+  missing: number; // finished billable tasks last week with no hours
 }
 
 // Hours on billable tasks completed in the previous Monday to Sunday (IST).
@@ -127,16 +128,20 @@ export function lastWeekHours(tasks: HoursTask[], target: number, nowMs: number)
   const from = civilKey(addDays(thisMon, -7));
   const to = civilKey(thisMon); // exclusive
   let total = 0;
+  let missing = 0;
   for (const t of tasks) {
     if (t.status !== "done" || !t.completed_at || !effectiveBillable(t, t.stream_billable)) continue;
     const k = civilKey(istCivil(t.completed_at));
-    if (k >= from && k < to) total += t.hours_spent ?? 0;
+    if (k < from || k >= to) continue;
+    if (t.hours_spent === null || t.hours_spent === undefined) missing++;
+    else total += t.hours_spent;
   }
-  return { total: r2(total), pace: Math.round((target * 12) / 52) };
+  return { total: r2(total), pace: Math.round((target * 12) / 52), missing };
 }
 
 // Monday's brief only; null on any other weekday.
 export function hoursBriefLine(w: WeekHours | null | undefined, nowMs: number): string | null {
   if (!w || civilWeekday(civilToday(nowMs)) !== 1) return null;
-  return `Billable hours last week: ${formatHours(w.total)} (target pace ${w.pace}).`;
+  const unlogged = w.missing > 0 ? `, ${w.missing} ${w.missing === 1 ? "task" : "tasks"} unlogged` : "";
+  return `Billable hours last week: ${formatHours(w.total)} (target pace ${w.pace}${unlogged}).`;
 }

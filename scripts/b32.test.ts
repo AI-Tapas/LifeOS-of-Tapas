@@ -132,7 +132,7 @@ function brief(nowMs: number) {
     pendingApprovalsCount: 0,
     accountsNeedingReconnect: [],
     appBaseUrl: "https://example.test",
-    hours: { total: 18, pace: 20 },
+    hours: { total: 18, pace: 20, missing: 0 },
   });
 }
 
@@ -158,7 +158,7 @@ test("last week is the previous Monday to Sunday in IST, pace is target over 52/
     85,
     MON_12_OCT
   );
-  assert.deepEqual(w, { total: 18, pace: 20 });
+  assert.deepEqual(w, { total: 18, pace: 20, missing: 0 });
 });
 
 // The in-memory database: connector writes and the undo.
@@ -260,4 +260,28 @@ test("no B32 file multiplies hours by a rate or shows a rupee amount", () => {
   for (const f of ["lib/assistant/mcp-api.ts", "app/(app)/page.tsx", "lib/brief/compose.ts"]) {
     assert.ok(!/hours[^\n]*hourly_rate|hourly_rate[^\n]*hours/i.test(src(f)), `${f}: hours never meet the rate`);
   }
+});
+
+test("last week counts unlogged tasks and the brief line says so", () => {
+  const wed = new Date(Date.UTC(2026, 9, 7, 6)).toISOString();
+  const w = lastWeekHours(
+    [task({ id: "1", completed_at: wed, hours_spent: 4 }), task({ id: "2", completed_at: wed, hours_spent: null }), task({ id: "3", completed_at: wed, hours_spent: null })],
+    85,
+    MON_12_OCT
+  );
+  assert.equal(w.missing, 2);
+  assert.equal(hoursBriefLine(w, MON_12_OCT), "Billable hours last week: 4 (target pace 20, 2 tasks unlogged).");
+  assert.equal(hoursBriefLine({ ...w, missing: 1 }, MON_12_OCT), "Billable hours last week: 4 (target pace 20, 1 task unlogged).");
+  assert.equal(hoursBriefLine({ ...w, missing: 0 }, MON_12_OCT), "Billable hours last week: 4 (target pace 20).");
+});
+
+test("hours_spent as a string is parsed, a bad string is refused, null clears", async () => {
+  resetDb();
+  const t = addTask({ hours_spent: 2 });
+  await executeToolCall("update_task", { task_id: t.id, hours_spent: "1.5" });
+  assert.equal(t.hours_spent, 1.5);
+  await assert.rejects(() => executeToolCall("update_task", { task_id: t.id, hours_spent: "abc" }), /Enter hours/);
+  assert.equal(t.hours_spent, 1.5, "unchanged after a refusal");
+  await executeToolCall("update_task", { task_id: t.id, hours_spent: null });
+  assert.equal(t.hours_spent, null, "null clears");
 });

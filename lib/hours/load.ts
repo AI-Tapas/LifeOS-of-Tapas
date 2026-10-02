@@ -18,13 +18,20 @@ export async function loadTarget(supabase: Db, userId: string): Promise<number> 
 }
 
 // Done tasks completed since `sinceIso`, shaped for the pure functions.
-export async function loadHoursTasks(supabase: Db, userId: string, sinceIso: string): Promise<HoursTask[]> {
-  const { data, error } = await supabase
+export async function loadHoursTasks(
+  supabase: Db,
+  userId: string,
+  sinceIso: string,
+  untilIso?: string
+): Promise<HoursTask[]> {
+  let q = supabase
     .from("tasks")
     .select("id, status, completed_at, hours_spent, billable, recurring_rule, trip_id, work_streams(name, billable)")
     .eq("user_id", userId)
     .eq("status", "done")
     .gte("completed_at", sinceIso);
+  if (untilIso) q = q.lte("completed_at", untilIso);
+  const { data, error } = await q;
   if (error) throw new Error(error.message);
   return (data ?? []).map((t) => {
     const s = t.work_streams as { name: string; billable: boolean } | null;
@@ -49,9 +56,16 @@ function sinceFor(nowMs: number, month?: string): string {
   return new Date(Math.min(start, nowMs - 9 * 86400000)).toISOString();
 }
 
+// A named month ends two days after its last day (IST slack); the current
+// month needs no cap.
+function untilFor(month?: string): string | undefined {
+  const m = month && /^(\d{4})-(\d{2})$/.exec(month);
+  return m ? new Date(Date.UTC(Number(m[1]), Number(m[2]), 3)).toISOString() : undefined;
+}
+
 export async function loadMonthHours(supabase: Db, userId: string, nowMs: number = Date.now(), month?: string): Promise<MonthHours> {
   const [tasks, target] = await Promise.all([
-    loadHoursTasks(supabase, userId, sinceFor(nowMs, month)),
+    loadHoursTasks(supabase, userId, sinceFor(nowMs, month), untilFor(month)),
     loadTarget(supabase, userId),
   ]);
   return monthHours(tasks, target, nowMs, month);
