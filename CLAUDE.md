@@ -1857,3 +1857,56 @@ hand-rolled). Type shim in lib/push/web-push.d.ts.
 - One deliberate exception to quiet hours: the Settings "Send a test alert"
   button passes `ignoreQuietHours` (Tapas is holding the phone). No automatic
   source ever does, and b31.test.ts is the place to keep that true.
+
+## Hours on tasks, against the monthly target (B32)
+
+Migration `20261004000100_b32_hours_on_tasks.sql`. NOT applied anywhere when it
+was written; apply it before (or with) the deploy of this code, since the Tasks
+page, Home, /unbilled, the Monday brief, Settings and both connectors select its
+columns. Nullable or defaulted additions only, RLS unchanged.
+
+- Why: Tapas's goal is about 85 billable hours a month and he had no view of the
+  hours he puts in. He logs them on the task himself. No timer, no calendar
+  import.
+- NO MONEY, as in M6d and B4: Life OS stores hours and a target and nothing
+  else. No rupee amount, no hours times rate, no earnings figure anywhere.
+  scripts/b32.test.ts fails if a B32 file mentions the rate column or a rupee
+  amount.
+- Columns: `tasks.hours_spent` numeric(5,2), nullable (null is not logged), check
+  0 to 500. `assistant_settings.monthly_hours_target` integer, default 85, check
+  1 to 400, edited in Settings ("Billable hours target", below the work stream
+  rates) through `setMonthlyHoursTargetAction` (an upsert on user_id, so it works
+  before the settings row exists).
+- One parser, `parseHours` (lib/hours/parse.ts, pure): "1.5", "1:30" and "0:15"
+  give 1.5, 1.5 and 0.25; blank means not logged; negative, non-numeric and above
+  500 are refused. `createTask` and `updateTask` (lib/tasks/write.ts) run it for
+  every origin, so the drawer, the connectors and undo share one rule.
+- Task drawer: an "Hours spent" field (1.5 or 1:30). When the status is done and
+  the field is empty a light line asks "Hours spent?", optional, never blocking
+  Save. His drawer saves are not audited, like every other drawer field; the
+  assistant path (update_task) is audited and undoable as before, and
+  `TASK_UNDO_COLUMNS` and `taskUndoPatch` carry `hours_spent` so undo restores
+  the previous value, including "not logged".
+- Month summary, pure in lib/hours/month.ts `monthHours`: done tasks completed in
+  the IST month that are effectively billable (B30 `effectiveBillable`, imported,
+  not copied). Returns total, hours by work stream, the target, the count and ids
+  of done billable tasks with no hours, and the pace: target times Monday to
+  Saturday days elapsed over those in the month (Sundays count for nothing; a
+  past month is fully elapsed, a future one not begun). `lib/hours/load.ts` is
+  the one query for Home, the Tasks filter, the brief and the connector.
+- Home card: "Billable hours, October: 32.5 of 85 (on pace 38)", a line per
+  stream, and "4 finished billable tasks have no hours" linking to
+  `/tasks?hours=missing` (this month's finished billable tasks with no hours).
+  A failed read leaves the card out and never breaks Home. /unbilled rows show
+  their hours when logged.
+- Monday brief: one line after the unbilled line, "Billable hours last week: 18
+  (target pace 20)". Monday only (`hoursBriefLine`), read on a Monday only, never
+  fatal, no new cron. Last week is the previous Monday to Sunday in IST; the
+  weekly pace is the target times 12 over 52, rounded.
+- Connector: `create_task` and `update_task` take an optional `hours_spent` (one
+  number type). The description says it is his own record, to be written only
+  when he says the hours in an instruction; there is no database guard.
+  `lifeos_list_tasks` returns `hours_spent`; `lifeos_list_unbilled` rows carry it;
+  `lifeos_get_hours` (read, optional `month` as YYYY-MM, disclosure `app_data`)
+  returns the month summary.
+- Tests: `npm run test:b32` (offline, 13).
