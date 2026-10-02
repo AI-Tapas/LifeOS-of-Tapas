@@ -574,6 +574,9 @@ test("no tool quotes, invoices or tracks time on the back of the rate", () => {
       (t.input_schema as { properties?: Record<string, unknown> }).properties ?? {}
     );
     for (const p of props) {
+      // B32: hours_spent (his own record of hours, no rate) is allowed on the
+      // two task tools and nowhere else.
+      if (p === "hours_spent" && (t.name === "create_task" || t.name === "update_task")) continue;
       assert.doesNotMatch(
         p,
         /^(hourly_rate|rate_per_hour|hours|quote)/i,
