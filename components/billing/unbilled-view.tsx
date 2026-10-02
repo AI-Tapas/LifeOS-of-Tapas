@@ -1,5 +1,6 @@
 "use client";
 
+import { formatHours } from "@/lib/hours/parse";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Card, Empty, SectionLabel, btnGhost, btnPrimary, inputCls } from "@/components/ui";
@@ -90,6 +91,7 @@ export default function UnbilledView({ groups }: { groups: UnbilledGroup[] }) {
                   <p className="mt-0.5 text-sm text-secondary">
                     {r.project ? `${r.project}, ` : ""}finished {r.completed}, {r.days_since}{" "}
                     {r.days_since === 1 ? "day" : "days"} ago
+                    {r.hours_spent != null ? `, ${formatHours(r.hours_spent)} h` : ""}
                   </p>
                   {r.billing_state === "estimate_drafted" && (
                     <p className="mt-1 text-sm text-waiting">

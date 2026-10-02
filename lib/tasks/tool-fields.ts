@@ -63,7 +63,7 @@ export function resolveTaskExtras(
 // Every column update_task can change, read before the change, so undo can
 // put each one back.
 export const TASK_UNDO_COLUMNS =
-  "title, notes, status, priority, priority_source, priority_reason, due_ts, not_before, lapses_on, work_stream_id, remind_offsets, reminder_mode, trip_id, is_billable, project_id, recurring_rule";
+  "title, notes, status, priority, priority_source, priority_reason, due_ts, not_before, lapses_on, work_stream_id, remind_offsets, reminder_mode, trip_id, is_billable, project_id, recurring_rule, hours_spent";
 
 // The patch that restores a snapshot. A snapshot written before a column was
 // added (B19, B20, B22) has no key for it, and then the column is left alone
@@ -84,6 +84,9 @@ export function taskUndoPatch(prev: Record<string, unknown>): Partial<TaskInput>
     reminder_mode: isReminderMode(prev.reminder_mode) ? prev.reminder_mode : undefined,
     trip_id: (prev.trip_id as string | null | undefined) ?? null,
     ...("is_billable" in prev ? { is_billable: prev.is_billable === true } : {}),
+    ...("hours_spent" in prev
+      ? { hours_spent: prev.hours_spent === null || prev.hours_spent === undefined ? null : Number(prev.hours_spent) }
+      : {}),
     ...("project_id" in prev ? { project_id: (prev.project_id as string | null) ?? null } : {}),
     ...("recurring_rule" in prev
       ? { recurring_rule: (prev.recurring_rule as string | null) ?? null }

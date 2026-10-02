@@ -16,7 +16,7 @@ export async function loadUnbilled(
   const { data, error } = await supabase
     .from("tasks")
     .select(
-      "id, title, status, completed_at, billable, billing_state, billing_ref, recurring_rule, trip_id, agent_instructions, work_streams(name, billable), projects(name)"
+      "id, title, status, completed_at, billable, billing_state, billing_ref, recurring_rule, trip_id, agent_instructions, hours_spent, work_streams(name, billable), projects(name)"
     )
     .eq("user_id", userId)
     .eq("status", "done")
@@ -38,6 +38,7 @@ export async function loadUnbilled(
       stream_billable: stream?.billable === true,
       project_name: (t.projects as { name: string } | null)?.name ?? null,
       agent_instructions: t.agent_instructions,
+      hours_spent: t.hours_spent === null ? null : Number(t.hours_spent),
     };
   });
   return unbilledGroups(rows, nowMs);

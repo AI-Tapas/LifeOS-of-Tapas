@@ -6,6 +6,7 @@ import TasksView, {
 } from "@/components/tasks/tasks-view";
 import { loadTripSteps } from "@/lib/tasks/trip-steps";
 import { isPendingInstruction } from "@/lib/tasks/agent-instructions";
+import { missingHoursIds, type HoursTask } from "@/lib/hours/month";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +24,9 @@ export default async function TasksPage({
   // B26: ?agent=needs_you (the Home line) shows only the tasks agents have
   // asked him about.
   const agentFilter = (Array.isArray(sp.agent) ? sp.agent[0] : sp.agent) === "needs_you";
+  // B32: ?hours=missing (the Home line) lists this month's finished billable
+  // tasks that have no hours logged.
+  const hoursFilter = (Array.isArray(sp.hours) ? sp.hours[0] : sp.hours) === "missing";
   const supabase = await createClient();
   const now = new Date();
   const keepFrom = new Date(now.getTime() - 90 * 86400000).toISOString();
@@ -31,7 +35,7 @@ export default async function TasksPage({
       supabase
         .from("tasks")
         .select(
-          "id, title, notes, status, priority, priority_source, priority_reason, due_ts, not_before, work_stream_id, project_id, trip_id, recurring_rule, is_billable, billable, billing_state, billing_ref, remind_offsets, reminder_mode, agent_instructions, agent_instructions_at, agent_status, agent_result, agent_result_at, agent_done_hash"
+          "id, title, notes, status, priority, priority_source, priority_reason, due_ts, completed_at, not_before, work_stream_id, project_id, trip_id, recurring_rule, is_billable, hours_spent, billable, billing_state, billing_ref, remind_offsets, reminder_mode, agent_instructions, agent_instructions_at, agent_status, agent_result, agent_result_at, agent_done_hash"
         )
         // Open work, plus what he finished in the last 90 days for the Done
         // column. The page used to load every task ever created and filter
@@ -47,14 +51,32 @@ export default async function TasksPage({
         .order("name"),
       supabase
         .from("work_streams")
-        .select("id, name")
+        .select("id, name, billable")
         .eq("active", true)
         .order("name"),
     ]);
 
   // Pending is derived on the server (it needs the hash, which the browser
   // bundle must not carry): a boolean rides down with each row.
+  const streamById = new Map((streams ?? []).map((s) => [s.id, s]));
+  const missingIds = hoursFilter
+    ? missingHoursIds(
+        ((tasks ?? []) as unknown as (TaskRow & { completed_at?: string | null })[]).map((t): HoursTask => ({
+          id: t.id,
+          status: t.status,
+          completed_at: t.completed_at ?? null,
+          hours_spent: t.hours_spent === null || t.hours_spent === undefined ? null : Number(t.hours_spent),
+          billable: t.billable,
+          recurring_rule: t.recurring_rule,
+          trip_id: t.trip_id,
+          stream_name: streamById.get(t.work_stream_id)?.name ?? "",
+          stream_billable: streamById.get(t.work_stream_id)?.billable === true,
+        })),
+        now.getTime()
+      )
+    : null;
   const rows = ((tasks ?? []) as TaskRow[])
+    .filter((t) => !missingIds || missingIds.has(t.id))
     .map((t) => ({ ...t, agent_pending: isPendingInstruction(t) }))
     .filter(
       (t) =>
@@ -66,10 +88,11 @@ export default async function TasksPage({
     <main>
       <TasksView
         agentFilter={agentFilter}
+        hoursFilter={hoursFilter}
         tasks={rows}
         tripSteps={tripSteps}
         projects={(projects ?? []) as ProjectRow[]}
-        workStreams={(streams ?? []) as WorkStreamRow[]}
+        workStreams={(streams ?? []).map((s) => ({ id: s.id, name: s.name })) as WorkStreamRow[]}
         openTaskId={rawTask}
         nowIso={now.toISOString()}
       />

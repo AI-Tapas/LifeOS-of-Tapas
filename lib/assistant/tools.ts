@@ -182,6 +182,7 @@ export const TOOLS: ToolDef[] = [
       trip_id: strOrNull(
         "Attach the task to a trip as a checklist step, using a trip id from lifeos_list_trips. The Tasks screen then shows one line for the trip instead of a row per step. Use it for travel admin (booking, hotel, receipts), never for client work."
       ),
+      hours_spent: numOrNull("Hours Tapas spent on the task, as a number from 0 to 500 (1.5 is an hour and a half). It is his own record: set it ONLY when he has told you the hours in an instruction, never estimate or infer it from dates, titles or mail."),
       reminder_mode: enumOrNull(
         ["calendar", "in_app"],
         "Whether this task interrupts him on the Google Calendar. 'calendar' writes one calendar event with its reminders and is the default. 'in_app' writes no calendar event: the task still ranks on Home and still appears in the morning brief. Use 'in_app' for routine admin (booking a ticket, a standing monthly job) and keep 'calendar' for work where missing the date has a real consequence, such as a client deadline or a statutory filing."
@@ -222,6 +223,7 @@ export const TOOLS: ToolDef[] = [
       billable: boolOrNull("Whether the work is billable. Omit to keep the current value."),
       project_id: strOrNull(PROJECT_ID_DESC + " Omit to keep the current project."),
       recurring_rule: strOrNull(RECURRING_RULE_DESC + " Omit to keep the current rule."),
+      hours_spent: numOrNull("Hours Tapas spent on the task, as a number from 0 to 500 (1.5 is an hour and a half). It is his own record: set it ONLY when he has told you the hours in an instruction, never estimate or infer it from dates, titles or mail."),
       reminder_mode: enumOrNull(
         ["calendar", "in_app"],
         "Whether this task interrupts him on the Google Calendar. 'calendar' writes one calendar event with its reminders and is the default. 'in_app' writes no calendar event: the task still ranks on Home and still appears in the morning brief. Use 'in_app' for routine admin (booking a ticket, a standing monthly job) and keep 'calendar' for work where missing the date has a real consequence, such as a client deadline or a statutory filing."
@@ -1204,6 +1206,8 @@ export const MCP_READ_TOOLS = [
   "lifeos_list_agent_instructions",
   // B30.
   "lifeos_list_unbilled",
+  // B32.
+  "lifeos_get_hours",
 ] as const;
 
 export type McpReadTool = (typeof MCP_READ_TOOLS)[number];
@@ -1259,6 +1263,8 @@ export const READ_TOOL_DISCLOSURES: Record<McpReadTool, ToolDisclosure> = {
   lifeos_list_agent_instructions: "app_data",
   // B30. Finished task rows Life OS owns, plus Tapas's own instruction text.
   lifeos_list_unbilled: "app_data",
+  // B32. His own hours and a target, rows Life OS owns.
+  lifeos_get_hours: "app_data",
 };
 
 export function mcpWriteTools(): ToolDef[] {

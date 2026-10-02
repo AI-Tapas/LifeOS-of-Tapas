@@ -36,6 +36,7 @@ import {
 import { setBillingStateAction } from "@/app/(app)/unbilled/actions";
 import { REF_MAX, type BillingState } from "@/lib/billing/unbilled";
 import type { TaskInput } from "@/lib/tasks/write";
+import { parseHours, formatHours } from "@/lib/hours/parse";
 
 export interface TaskRow {
   id: string;
@@ -64,6 +65,8 @@ export interface TaskRow {
   // stream), and where this task's billing stands. Optional so the dev-preview
   // fixtures stay small.
   billable?: boolean | null;
+  // B32. Hours he spent; null or absent means not logged.
+  hours_spent?: number | null;
   billing_state?: string | null;
   billing_ref?: string | null;
   remind_offsets: number[];
@@ -127,6 +130,8 @@ interface TasksViewProps {
   openTaskId?: string;
   // B26. Arrived from the Home line: only tasks agents have asked him about.
   agentFilter?: boolean;
+  // B32: show only this month's finished billable tasks with no hours.
+  hoursFilter?: boolean;
 }
 
 export default function TasksView({
@@ -147,8 +152,9 @@ function TasksBody({
   workStreams,
   openTaskId,
   agentFilter,
+  hoursFilter,
 }: TasksViewProps) {
-  const [tab, setTab] = useState<Tab>(agentFilter ? "board" : "overview");
+  const [tab, setTab] = useState<Tab>(agentFilter || hoursFilter ? "board" : "overview");
   const [editing, setEditing] = useState<TaskRow | "new" | null>(
     () => tasks.find((t) => t.id === openTaskId) ?? null
   );
@@ -194,6 +200,15 @@ function TasksBody({
       {agentFilter && (
         <p className="mt-2 rounded-lg border border-border bg-surface p-2 text-xs text-secondary">
           Showing only the tasks where agents need you.{" "}
+          <Link href="/tasks" className="font-medium text-accent">
+            Show all
+          </Link>
+        </p>
+      )}
+
+      {hoursFilter && (
+        <p className="mt-2 rounded-lg border border-border bg-surface p-2 text-xs text-secondary">
+          Showing this month&apos;s finished billable tasks with no hours logged. Open one to add them.{" "}
           <Link href="/tasks" className="font-medium text-accent">
             Show all
           </Link>
@@ -990,6 +1005,8 @@ interface FormFields {
   recurInterval: string;
   // B30: follow the stream, billable, or not billable.
   billableChoice: "follow" | "yes" | "no";
+  // B32. As typed: 1.5 or 1:30. Blank means not logged.
+  hoursSpent: string;
   offsets: number[];
   onCalendar: boolean;
   // YYYY-MM-DD from the date input, or "" for "can start now".
@@ -1017,6 +1034,7 @@ function taskToFields(t: TaskRow | null, workStreams: WorkStreamRow[]): FormFiel
     recurFreq: (rec[0] as FormFields["recurFreq"]) || "",
     recurInterval: rec[1] ?? "1",
     billableChoice: t?.billable === true ? "yes" : t?.billable === false ? "no" : "follow",
+    hoursSpent: t?.hours_spent != null ? formatHours(t.hours_spent) : "",
     offsets: t?.remind_offsets ?? [7, 3, 1, 0],
     // A new task interrupts him on the calendar unless he says otherwise,
     // which is what every task did before M7a.
@@ -1205,6 +1223,12 @@ function TaskForm({
       setErr("A title is required.");
       return;
     }
+    const hrs = parseHours(f.hoursSpent);
+    if (!hrs.ok) {
+      setErr(hrs.message);
+      return;
+    }
+    input.hours_spent = hrs.value;
     startTransition(async () => {
       const r = isEdit
         ? await updateTaskAction(task!.id, input)
@@ -1429,6 +1453,19 @@ function TaskForm({
             <option value="no">Not billable</option>
           </select>
         </Field>
+        <Field label="Hours spent">
+          <input
+            value={f.hoursSpent}
+            onChange={(e) => setF({ ...f, hoursSpent: e.target.value })}
+            inputMode="decimal"
+            step={0.25}
+            placeholder="1.5 or 1:30"
+            className={inputCls}
+          />
+        </Field>
+        {f.status === "done" && f.hoursSpent.trim() === "" && (
+          <p className="-mt-1 text-xs text-secondary">Hours spent? Optional: skip it and save as usual.</p>
+        )}
         {task && task.status === "done" && <BillingBox task={task} />}
         <Field label="Notes">
           <textarea

@@ -46,6 +46,8 @@ export interface UnbilledInput extends BillableFields {
   project_name?: string | null;
   // Tapas's B26 instruction, handed to agents on the connector only.
   agent_instructions?: string | null;
+  // B32. Hours he logged, shown on the row. Hours only, no amount.
+  hours_spent?: number | null;
 }
 
 export interface UnbilledRow {
@@ -58,6 +60,7 @@ export interface UnbilledRow {
   billing_state: "estimate_drafted" | null;
   billing_ref: string | null; // the estimate ref, if one was drafted
   instructions_for_agents: string | null;
+  hours_spent: number | null;
 }
 
 export interface UnbilledGroup {
@@ -99,6 +102,7 @@ export function unbilledGroups(rows: UnbilledInput[], nowMs: number): UnbilledGr
       billing_state: t.billing_state === "estimate_drafted" ? "estimate_drafted" : null,
       billing_ref: t.billing_state === "estimate_drafted" ? (t.billing_ref ?? null) : null,
       instructions_for_agents: t.agent_instructions?.trim() ? t.agent_instructions : null,
+      hours_spent: t.hours_spent ?? null,
     };
     const key = t.stream_name;
     groups.set(key, [...(groups.get(key) ?? []), row]);

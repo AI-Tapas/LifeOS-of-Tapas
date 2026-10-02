@@ -18,6 +18,7 @@ import { syncTaskReminder, removeTaskReminder } from "@/lib/reminders/writer";
 import type { ReminderMode } from "@/lib/reminders/core";
 import { nextOccurrence, isValidRecurringRule } from "@/lib/tasks/recurring";
 import { startDateProblem } from "@/lib/tasks/triage";
+import { parseHours } from "@/lib/hours/parse";
 import { INSTRUCTION_MAX, isBlank } from "@/lib/tasks/agent-instructions";
 import { runStatusTransition, type TransitionOutcome } from "@/lib/tasks/transitions";
 import {
@@ -59,6 +60,9 @@ export interface TaskInput {
   // declares it, so an agent cannot hide finished work by marking it not
   // billable.
   billable?: boolean | null;
+  // B32. Hours he spent, 0 to 500, null for not logged. His own record: the
+  // drawer writes it, and an agent only when he said so in an instruction.
+  hours_spent?: number | null;
   remind_offsets?: number[];
   // Whether this task interrupts him on the calendar (M7a). 'calendar' is the
   // default and today's behaviour: one Google Calendar event with the task's
@@ -141,6 +145,8 @@ export async function createTask(
   }
   const instruction = instructionFor(origin, input.agent_instructions);
   if (!instruction.ok) return { ok: false, message: instruction.message };
+  const hours = parseHours(input.hours_spent);
+  if (!hours.ok) return { ok: false, message: hours.message };
   const decision = decidePriorityWrite(origin, input, null);
   if (decision.kind === "refuse") return { ok: false, message: decision.message };
   const priorityFields =
@@ -164,6 +170,7 @@ export async function createTask(
       recurring_rule: input.recurring_rule ?? null,
       is_billable: input.is_billable ?? false,
       ...(origin === "app" && input.billable !== undefined ? { billable: input.billable } : {}),
+      ...(input.hours_spent !== undefined ? { hours_spent: hours.value } : {}),
       remind_offsets: input.remind_offsets ?? [7, 3, 1, 0],
       reminder_mode: input.reminder_mode ?? "calendar",
       source: input.source ?? "manual",
@@ -202,6 +209,8 @@ export async function updateTask(
   }
   const instruction = instructionFor(origin, patch.agent_instructions);
   if (!instruction.ok) return { ok: false, message: instruction.message };
+  const hours = parseHours(patch.hours_spent);
+  if (!hours.ok) return { ok: false, message: hours.message };
   // A start date is judged against the due date the row will END UP with, so
   // when only one of the two is in the patch the other is read first. One
   // small read, only when either date is changing.
@@ -256,6 +265,7 @@ export async function updateTask(
         ? { recurring_rule: patch.recurring_rule }
         : {}),
       ...(patch.is_billable !== undefined ? { is_billable: patch.is_billable } : {}),
+      ...(patch.hours_spent !== undefined ? { hours_spent: hours.value } : {}),
       ...(origin === "app" && patch.billable !== undefined ? { billable: patch.billable } : {}),
       ...(patch.remind_offsets !== undefined
         ? { remind_offsets: patch.remind_offsets }
