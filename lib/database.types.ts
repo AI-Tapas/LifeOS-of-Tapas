@@ -196,6 +196,7 @@ export type Database = {
         Row: {
           chat_model: string | null
           chat_provider: string | null
+          monthly_hours_target: number
           scan_model: string | null
           scan_provider: string | null
           updated_at: string
@@ -204,6 +205,7 @@ export type Database = {
         Insert: {
           chat_model?: string | null
           chat_provider?: string | null
+          monthly_hours_target?: number
           scan_model?: string | null
           scan_provider?: string | null
           updated_at?: string
@@ -212,6 +214,7 @@ export type Database = {
         Update: {
           chat_model?: string | null
           chat_provider?: string | null
+          monthly_hours_target?: number
           scan_model?: string | null
           scan_provider?: string | null
           updated_at?: string
@@ -938,6 +941,7 @@ export type Database = {
           external_ref: string | null
           external_thread: string | null
           id: string
+          hours_spent: number | null
           is_billable: boolean
           lapses_on: string | null
           agent_instructions: string | null
@@ -974,6 +978,7 @@ export type Database = {
           external_ref?: string | null
           external_thread?: string | null
           id?: string
+          hours_spent?: number | null
           is_billable?: boolean
           lapses_on?: string | null
           agent_instructions?: string | null
@@ -1010,6 +1015,7 @@ export type Database = {
           external_ref?: string | null
           external_thread?: string | null
           id?: string
+          hours_spent?: number | null
           is_billable?: boolean
           lapses_on?: string | null
           agent_instructions?: string | null
