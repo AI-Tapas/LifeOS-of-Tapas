@@ -26,6 +26,8 @@ import {
   deleteEventAction,
 } from "@/app/(app)/calendar/actions";
 import type { AppEventInput } from "@/lib/events/payload";
+import { dayHeading, eventDayKeys, keyToCivil } from "@/lib/calendar/grid";
+import TimeGrid from "./time-grid";
 
 export type CalView = "day" | "week" | "month";
 
@@ -60,30 +62,6 @@ export interface WritableAccount {
   label: string;
 }
 
-function keyToCivil(key: string): CivilDate {
-  const [y, m, d] = key.split("-").map(Number);
-  return { y, m, d };
-}
-
-// Day keys an event covers (start..end inclusive), for month/week placement.
-function eventDayKeys(e: CalEvent): string[] {
-  const startKey = istDayKey(e.start_ts);
-  if (!e.end_ts) return [startKey];
-  // All-day end is exclusive; step back a day so a one-day all-day event maps to
-  // a single cell.
-  const endMs = new Date(e.end_ts).getTime() - (e.all_day ? 60000 : 0);
-  const endKey = istDayKey(new Date(endMs).toISOString());
-  const keys: string[] = [];
-  let c = keyToCivil(startKey);
-  for (let i = 0; i < 60; i++) {
-    const k = civilKey(c);
-    keys.push(k);
-    if (k === endKey) break;
-    c = addDays(c, 1);
-  }
-  return keys.length ? keys : [startKey];
-}
-
 export default function CalendarView({
   view,
   anchorKey,
@@ -108,6 +86,7 @@ export default function CalendarView({
   const [notice, setNotice] = useState<string | null>(null);
 
   const anchor = keyToCivil(anchorKey);
+  const byDay = useMemo(() => groupByDay(events), [events]);
   const accountById = useMemo(
     () => new Map(accounts.map((a) => [a.id, a])),
     [accounts]
@@ -168,7 +147,7 @@ export default function CalendarView({
 
   const title =
     view === "day"
-      ? formatDateIST(istInstant(anchor, 12, 0))
+      ? dayHeading(anchorKey)
       : view === "week"
         ? weekTitle(anchor)
         : formatMonthYear(anchor);
@@ -282,22 +261,42 @@ export default function CalendarView({
           />
         )}
         {view === "week" && (
-          <WeekAgenda
-            anchor={anchor}
-            todayKey={todayKey}
-            events={events}
-            accountById={accountById}
-            onEvent={setSelected}
-            onAddDay={(d) => openCreate(d)}
-          />
+          <>
+            {/* A seven-column grid is too cramped at phone width, so phones
+                keep the day-by-day list and the grid starts at md. */}
+            <div className="hidden md:block">
+              <TimeGrid
+                mode="week"
+                anchorKey={anchorKey}
+                todayKey={todayKey}
+                byDay={byDay}
+                accountById={accountById}
+                onEvent={setSelected}
+                onAddAt={(k, h) => openCreate(keyToCivil(k), h)}
+                onOpenDay={(k) => go("day", keyToCivil(k))}
+              />
+            </div>
+            <div className="md:hidden">
+              <WeekAgenda
+                anchor={anchor}
+                todayKey={todayKey}
+                byDay={byDay}
+                accountById={accountById}
+                onEvent={setSelected}
+                onAddDay={(d) => openCreate(d)}
+              />
+            </div>
+          </>
         )}
         {view === "day" && (
-          <DayGrid
-            anchor={anchor}
-            events={events}
+          <TimeGrid
+            mode="day"
+            anchorKey={anchorKey}
+            todayKey={todayKey}
+            byDay={byDay}
             accountById={accountById}
             onEvent={setSelected}
-            onAddHour={(h) => openCreate(anchor, h)}
+            onAddAt={(k, h) => openCreate(keyToCivil(k), h)}
           />
         )}
       </div>
@@ -420,25 +419,25 @@ function MonthGrid({
 }
 
 // ---------------------------------------------------------------------------
-// Week agenda (mobile-first: a readable 7-day list, not a tiny time grid)
+// Week agenda (phone only since B33: a readable 7-day list; wider screens get
+// the time grid)
 // ---------------------------------------------------------------------------
 function WeekAgenda({
   anchor,
   todayKey,
-  events,
+  byDay,
   accountById,
   onEvent,
   onAddDay,
 }: {
   anchor: CivilDate;
   todayKey: string;
-  events: CalEvent[];
+  byDay: Map<string, CalEvent[]>;
   accountById: Map<string, CalAccount>;
   onEvent: (e: CalEvent) => void;
   onAddDay: (d: CivilDate) => void;
 }) {
   const start = startOfWeek(anchor);
-  const byDay = groupByDay(events);
   const days = Array.from({ length: 7 }, (_, i) => addDays(start, i));
   return (
     <div className="space-y-3">
@@ -478,76 +477,6 @@ function WeekAgenda({
           </section>
         );
       })}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Day grid (hour rows; tap an empty hour to create)
-// ---------------------------------------------------------------------------
-function DayGrid({
-  anchor,
-  events,
-  accountById,
-  onEvent,
-  onAddHour,
-}: {
-  anchor: CivilDate;
-  events: CalEvent[];
-  accountById: Map<string, CalAccount>;
-  onEvent: (e: CalEvent) => void;
-  onAddHour: (h: number) => void;
-}) {
-  const key = civilKey(anchor);
-  const byDay = groupByDay(events);
-  const dayEvents = byDay.get(key) ?? [];
-  const allDay = dayEvents.filter((e) => e.all_day);
-  const timed = dayEvents.filter((e) => !e.all_day);
-  const byHour = new Map<number, CalEvent[]>();
-  for (const e of timed) {
-    const h = istHour(e.start_ts);
-    const list = byHour.get(h) ?? [];
-    list.push(e);
-    byHour.set(h, list);
-  }
-
-  return (
-    <div>
-      {allDay.length > 0 && (
-        <div className="mb-2 space-y-1">
-          <p className="text-[11px] uppercase tracking-wide text-neutral-400">All day</p>
-          {allDay.map((e) => (
-            <EventRow
-              key={e.id}
-              event={e}
-              account={accountById.get(e.account_id ?? "")}
-              onClick={() => onEvent(e)}
-            />
-          ))}
-        </div>
-      )}
-      <div className="divide-y divide-border">
-        {Array.from({ length: 24 }, (_, h) => h).map((h) => (
-          <div key={h} className="flex gap-2 py-1">
-            <button
-              onClick={() => onAddHour(h)}
-              className="w-12 shrink-0 pt-1 text-right text-[11px] text-neutral-400 active:text-accent"
-            >
-              {hourLabel(h)}
-            </button>
-            <div className="min-h-6 min-w-0 flex-1 space-y-1">
-              {(byHour.get(h) ?? []).map((e) => (
-                <EventRow
-                  key={e.id}
-                  event={e}
-                  account={accountById.get(e.account_id ?? "")}
-                  onClick={() => onEvent(e)}
-                />
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
@@ -962,12 +891,6 @@ function hmFromIso(iso: string): string {
   let h = parseInt(m[1], 10) % 12;
   if (/pm/i.test(m[3])) h += 12;
   return `${String(h).padStart(2, "0")}:${m[2]}`;
-}
-
-function hourLabel(h: number): string {
-  const ampm = h < 12 ? "am" : "pm";
-  const hr = h % 12 === 0 ? 12 : h % 12;
-  return `${hr} ${ampm}`;
 }
 
 function weekTitle(anchor: CivilDate): string {
