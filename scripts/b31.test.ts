@@ -146,31 +146,37 @@ test("notify is registered: autonomous, app_data, not undoable, on the connector
 test("notify refuses long text, links, credentials, figures and a task that is not his; collapses newlines", async () => {
   resetDb();
   addDevice();
-  const refuses = async (input: Record<string, unknown>, pattern: RegExp) => {
-    await assert.rejects(() => executeToolCall("notify", input), pattern);
-  };
-  await refuses({ title: "x".repeat(61), body: "ok" }, /limit is 60/);
-  await refuses({ title: "ok", body: "y".repeat(141) }, /limit is 140/);
-  await refuses({ title: "ok", body: "see https://example.com/x" }, /link/);
-  await refuses({ title: "ok", body: "open www.example.com now" }, /link/);
-  await refuses({ title: "ok", body: "go to tinyurl.com/abc" }, /link/);
-  await refuses({ title: "ok", body: "password: hunter22" }, /password|key|token/);
-  await refuses({ title: "ok", body: "pay Rs 45,000 today" }, /lock screen/);
-  await refuses({ title: "ok", body: "PNR 4521896307 changed" }, /lock screen/);
-  await refuses({ title: "ok", body: "fine", task_id: "not-mine" }, /not one of Tapas's tasks/);
-  addTask({ id: "foreign", user_id: "someone-else" });
-  await refuses({ title: "ok", body: "fine", task_id: "foreign" }, /not one of Tapas's tasks/);
-  assert.equal(push.calls.length, 0, "no refused call sent anything");
+  // Pinned to 10:00 IST so the quiet-hours rule does not depend on the real clock.
+  mock.timers.enable({ apis: ["Date"], now: DAYTIME });
+  try {
+    const refuses = async (input: Record<string, unknown>, pattern: RegExp) => {
+      await assert.rejects(() => executeToolCall("notify", input), pattern);
+    };
+    await refuses({ title: "x".repeat(61), body: "ok" }, /limit is 60/);
+    await refuses({ title: "ok", body: "y".repeat(141) }, /limit is 140/);
+    await refuses({ title: "ok", body: "see https://example.com/x" }, /link/);
+    await refuses({ title: "ok", body: "open www.example.com now" }, /link/);
+    await refuses({ title: "ok", body: "go to tinyurl.com/abc" }, /link/);
+    await refuses({ title: "ok", body: "password: hunter22" }, /password|key|token/);
+    await refuses({ title: "ok", body: "pay Rs 45,000 today" }, /lock screen/);
+    await refuses({ title: "ok", body: "PNR 4521896307 changed" }, /lock screen/);
+    await refuses({ title: "ok", body: "fine", task_id: "not-mine" }, /not one of Tapas's tasks/);
+    addTask({ id: "foreign", user_id: "someone-else" });
+    await refuses({ title: "ok", body: "fine", task_id: "foreign" }, /not one of Tapas's tasks/);
+    assert.equal(push.calls.length, 0, "no refused call sent anything");
 
-  // Newlines are collapsed, not refused.
-  const mine = addTask({ id: "mine" });
-  const out = await executeToolCall("notify", { title: "Line one\nline two", body: "Decide\n\nthe thing", task_id: mine.id });
-  assert.match(out.reply, /Alert sent to 1 device/);
-  const sent = JSON.parse(push.calls[0].payload);
-  assert.deepEqual([sent.title, sent.body, sent.url], ["Line one line two", "Decide the thing", "/tasks?task=mine"]);
-  // The queue row keeps lengths, not words.
-  const row = db.assistant_actions.find((a) => a.kind === "notify")!;
-  assert.doesNotMatch(JSON.stringify(row.payload), /Decide|Line one/);
+    // Newlines are collapsed, not refused.
+    const mine = addTask({ id: "mine" });
+    const out = await executeToolCall("notify", { title: "Line one\nline two", body: "Decide\n\nthe thing", task_id: mine.id });
+    assert.match(out.reply, /Alert sent to 1 device/);
+    const sent = JSON.parse(push.calls[0].payload);
+    assert.deepEqual([sent.title, sent.body, sent.url], ["Line one line two", "Decide the thing", "/tasks?task=mine"]);
+    // The queue row keeps lengths, not words.
+    const row = db.assistant_actions.find((a) => a.kind === "notify")!;
+    assert.doesNotMatch(JSON.stringify(row.payload), /Decide|Line one/);
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 test("notify refuses the 21st alert in 24 hours and says why", async () => {
