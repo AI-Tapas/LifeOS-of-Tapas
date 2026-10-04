@@ -769,6 +769,16 @@ export default async function DevPreviewPage() {
         writableAccounts={[{ id: "a2", slot: "ca_tapasnr", label: "ca.tapasnr@gmail.com" }]}
         stale={false}
       />
+      <p className="mb-4 mt-8 rounded bg-amber-100 p-1 text-center text-xs">dev preview: calendar day</p>
+      <CalendarView
+        view="day"
+        anchorKey="2026-08-11"
+        todayKey="2026-08-13"
+        events={events}
+        accounts={accounts}
+        writableAccounts={[{ id: "a2", slot: "ca_tapasnr", label: "ca.tapasnr@gmail.com" }]}
+        stale={false}
+      />
       <hr className="my-8" />
       <p className="mb-4 rounded bg-amber-100 p-1 text-center text-xs">dev preview: tasks</p>
       <TasksView
