@@ -1348,7 +1348,7 @@ No migration. Decided 29 September 2026 after the 3 AM scan failed every night
 from 21 September (the AI key was refused, 401) and nobody noticed for 8 days.
 
 - THE AI KEY IS FOR THE NIGHTLY SCAN ONLY (task triage, ticket PDFs, cab
-  receipts). Thinking and chatting happen in Claude (phone app, Superman
+  receipts). Thinking and chatting happen in Claude (phone app, Clark Kent
   routines) through the connector. The in-app chat is gone: the chat route,
   chat.tsx, chat-store.ts, chat-history.ts, the chat server actions, the
   Settings chat model choice, the health route's chat role and the

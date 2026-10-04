@@ -288,7 +288,7 @@ connected and disconnects it.
 ## Assistant (Milestone 4)
 
 Since 29 September 2026 (B24) the app has no chat of its own. Conversation
-happens in Claude (phone app, Superman routines) through the connector above,
+happens in Claude (phone app, Clark Kent routines) through the connector above,
 and the app's own AI key is used only by the nightly mail scan (task triage,
 ticket PDFs, cab receipts). The Assistant tab now opens on the approval Queue,
 with History and Audit beside it. The tool set is the same one the connector
