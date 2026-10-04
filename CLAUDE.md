@@ -1193,7 +1193,9 @@ stream name that never overwrite a hint already written. Health gets none.
   merge is by message id, newest first; an extra that fails `mayReadMailContent`
   is dropped, a failed targeted fetch is ignored, and `mayReadMailContent` and
   the task pass are unchanged. The scan audit row gains `targeted_read` (a
-  count). Tests: `npm run test:b34` (9 offline).
+  count) and `targeted_failed` (a flag, with a scan note when true). Graph cannot
+  filter on the sender, so its targeted list is the same window, metadata only, 3x the
+  cap deep, and the sender match is client-side. Tests: `npm run test:b34` (10 offline).
 
 ## Cab receipts on AICA trips (B21)
 

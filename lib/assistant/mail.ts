@@ -62,9 +62,9 @@ const NIGHTLY_WINDOW: MailWindow = { days: NIGHTLY_DAYS, messages: PER_ACCOUNT_M
 // id are read once; only messages a content-readable sender sent can come in
 // through the targeted list (the sender filter is a hint, this is the rule);
 // newest first.
-function mergeTargeted(main: MailMeta[], extra: MailMeta[]): MailMeta[] {
+function mergeTargeted(main: MailMeta[], extra: MailMeta[], cap: number): MailMeta[] {
   const seen = new Set(main.map((m) => m.id));
-  const added = extra.filter((m) => !seen.has(m.id) && mayReadMailContent(m.from));
+  const added = extra.filter((m) => !seen.has(m.id) && mayReadMailContent(m.from)).slice(0, cap);
   if (!added.length) return main;
   const key = (m: MailMeta) => Date.parse(m.date) || 0;
   return [...main, ...added.map((m) => ({ ...m, targeted: true }))].sort((a, b) => key(b) - key(a));
@@ -72,7 +72,8 @@ function mergeTargeted(main: MailMeta[], extra: MailMeta[]): MailMeta[] {
 
 export async function listRecentGmail(
   accountId: string,
-  window: MailWindow = NIGHTLY_WINDOW
+  window: MailWindow = NIGHTLY_WINDOW,
+  onTargetedFailure?: () => void
 ): Promise<MailMeta[]> {
   const main = await gmailList(accountId, `newer_than:${window.days}d in:inbox`, window.messages);
   // The targeted fetch is extra reach, never a reason to fail the scan.
@@ -81,8 +82,11 @@ export async function listRecentGmail(
     accountId,
     `newer_than:${window.days}d in:inbox from:(${mailReadSenders().join(" OR ")})`,
     targetedCap(window.days)
-  ).catch(() => []);
-  return mergeTargeted(main, extra);
+  ).catch(() => {
+    onTargetedFailure?.();
+    return [];
+  });
+  return mergeTargeted(main, extra, targetedCap(window.days));
 }
 
 async function gmailList(accountId: string, q: string, max: number): Promise<MailMeta[]> {
@@ -137,20 +141,20 @@ async function gmailList(accountId: string, q: string, max: number): Promise<Mai
 
 export async function listRecentGraph(
   accountId: string,
-  window: MailWindow = NIGHTLY_WINDOW
+  window: MailWindow = NIGHTLY_WINDOW,
+  onTargetedFailure?: () => void
 ): Promise<MailMeta[]> {
   const since = new Date(Date.now() - window.days * 86400000).toISOString();
   const main = await graphList(accountId, `receivedDateTime ge ${since}`, window.messages);
-  // B34: the same sender list, as a Graph filter built from the constants.
-  const senders = mailReadSenders()
-    .map((s) => `contains(from/emailAddress/address,'${s}')`)
-    .join(" or ");
-  const extra = await graphList(
-    accountId,
-    `receivedDateTime ge ${since} and (${senders})`,
-    targetedCap(window.days)
-  ).catch(() => []);
-  return mergeTargeted(main, extra);
+  // B34: Graph cannot filter on the sender address cheaply, so the targeted
+  // list is a deeper metadata-only page of the same window (3x the cap); the
+  // sender match is mergeTargeted's mayReadMailContent gate, client-side.
+  const cap = targetedCap(window.days);
+  const extra = await graphList(accountId, `receivedDateTime ge ${since}`, cap * 3).catch(() => {
+    onTargetedFailure?.();
+    return [];
+  });
+  return mergeTargeted(main, extra, cap);
 }
 
 async function graphList(accountId: string, filter: string, top: number): Promise<MailMeta[]> {

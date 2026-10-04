@@ -31,13 +31,15 @@ const TICKET_FROM = "ICAI Travel Desk <traveldesk@icai.in>";
 
 // --- fake Gmail and Graph -----------------------------------------------------
 const net = {
-  lists: [] as { kind: "gmail" | "graph"; q: string; max: number }[],
+  lists: [] as { kind: "gmail" | "graph"; q: string; max: number; orderby?: string; select?: string }[],
+  graphCalls: 0,
   fullReads: [] as string[],
   failTargeted: false,
   graphOnly: [] as { id: string; from: string; subject: string; date: string }[],
 };
 function resetNet() {
   net.lists = [];
+  net.graphCalls = 0;
   net.fullReads = [];
   net.failTargeted = false;
 }
@@ -80,10 +82,17 @@ const fakeFetch = async (input: RequestInfo | URL): Promise<Response> => {
   if (url.hostname === "graph.microsoft.com") {
     const filter = url.searchParams.get("$filter") ?? "";
     const max = Number(url.searchParams.get("$top"));
-    net.lists.push({ kind: "graph", q: filter, max });
-    const targeted = filter.includes("contains(");
-    if (targeted && net.failTargeted) return json({}, 500);
-    const rows = byNewest(net.graphOnly).filter((m) => !targeted || mayReadMailContent(m.from));
+    net.lists.push({
+      kind: "graph",
+      q: filter,
+      max,
+      orderby: url.searchParams.get("$orderby") ?? "",
+      select: url.searchParams.get("$select") ?? "",
+    });
+    net.graphCalls += 1;
+    // The second Graph call of a scan is the targeted one.
+    if (net.graphCalls === 2 && net.failTargeted) return json({}, 500);
+    const rows = byNewest(net.graphOnly);
     return json({
       value: rows.slice(0, max).map((m) => ({
         id: m.id,
@@ -217,37 +226,27 @@ test("sender list: the query's senders equal the allowlists, with no second copy
   assert.ok(src("lib/assistant/mail.ts").includes("mailReadSenders()"));
 });
 
-test("a mail from a sender outside the allowlists is never merged in, whatever the server returned", async () => {
+test("Graph: non-allowlisted senders in the deeper page are dropped, allowlisted ones kept, at most the cap", async () => {
   resetState();
   resetNet();
-  state.mails = circulars(3);
   net.graphOnly = [
-    { id: "g1", from: "someone@example.test", subject: "Plain mail", date: stamp(1000) },
-    { id: "g2", from: "x@notirctc.co.in.example.test", subject: "Lookalike", date: stamp(2000) },
+    ...circulars(15).map((m) => ({ id: m.id, from: `p${m.id}@example.test`, subject: m.subject, date: m.date })),
+    { id: "g1", from: "someone@example.test", subject: "Plain mail", date: stamp(DAY) },
+    { id: "g2", from: "x@notirctc.co.in.example.test", subject: "Lookalike", date: stamp(DAY + 1000) },
+    { id: "g-ok", from: "etickets@sharpmail.in", subject: "E-ticket", date: stamp(2 * DAY) },
+    ...Array.from({ length: 14 }, (_, i) => ({
+      id: `g-uber${i}`,
+      from: "Uber <noreply@uber.com>",
+      subject: `Trip ${i}`,
+      date: stamp(3 * DAY + i * 1000),
+    })),
   ];
-  // A server that ignores the sender filter, as a loose contains() could.
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const url = new URL(String(input));
-    if (url.hostname === "graph.microsoft.com" && (url.searchParams.get("$filter") ?? "").includes("contains(")) {
-      return new Response(
-        JSON.stringify({
-          value: net.graphOnly.map((m) => ({
-            id: m.id,
-            from: { emailAddress: { address: m.from } },
-            subject: m.subject,
-            receivedDateTime: new Date(m.date).toISOString(),
-          })),
-        })
-      );
-    }
-    return fakeFetch(input);
-  }) as typeof fetch;
-  try {
-    const out = await listRecentGraph("acc-alt");
-    assert.ok(!out.some((m) => m.targeted), "nothing outside the allowlists comes in");
-  } finally {
-    globalThis.fetch = fakeFetch as typeof fetch;
-  }
+  const out = await listRecentGraph("acc-alt");
+  const extras = out.filter((m) => m.targeted);
+  assert.ok(extras.every((m) => mayReadMailContent(m.from)), "only allowlisted senders come in");
+  assert.ok(!out.some((m) => m.id === "g1" || m.id === "g2"), "plain and lookalike senders are dropped");
+  assert.ok(extras.some((m) => m.id === "g-ok"));
+  assert.equal(extras.length, 10, "at most the cap of 10 extras");
 });
 
 test("catch-up: with days 10 the targeted cap scales and never exceeds 50", async () => {
@@ -278,7 +277,7 @@ test("catch-up: with days 10 the targeted cap scales and never exceeds 50", asyn
   assert.deepEqual(net.lists.map((l) => l.max), [15, 10]);
 });
 
-test("altechon: the Graph path does the same", async () => {
+test("altechon: the Graph path does the same, with a server filter on date only", async () => {
   resetState();
   resetNet();
   net.graphOnly = [
@@ -290,15 +289,16 @@ test("altechon: the Graph path does the same", async () => {
   assert.ok(out.some((m) => m.id === "g-ticket" && m.targeted));
   const [main, targeted] = net.lists;
   assert.equal(main.max, 15);
-  assert.equal(targeted.max, 10);
-  assert.ok(!main.q.includes("contains("));
-  for (const s of mailReadSenders()) {
-    assert.ok(targeted.q.includes(`contains(from/emailAddress/address,'${s}')`), `Graph filter names ${s}`);
+  assert.equal(targeted.max, 30, "three times the targeted cap");
+  for (const l of [main, targeted]) {
+    assert.match(l.q, /^receivedDateTime ge \S+$/, "no sender clause on the server");
+    assert.equal(l.orderby, "receivedDateTime desc");
+    assert.equal(l.select, "id,conversationId,subject,from,receivedDateTime,bodyPreview", "metadata only");
   }
-  // Catch-up scales the same way.
+  // Catch-up scales the same way (3 x 50).
   resetNet();
   await listRecentGraph("acc-alt", { days: 10, messages: 150 });
-  assert.deepEqual(net.lists.map((l) => l.max), [150, 50]);
+  assert.deepEqual(net.lists.map((l) => l.max), [150, 150]);
 });
 
 test("a failed targeted fetch leaves the newest-15 list intact and never fails the scan", async () => {
@@ -309,8 +309,31 @@ test("a failed targeted fetch leaves the newest-15 list intact and never fails t
   const out = await listRecentGmail("acc-icai");
   assert.equal(out.length, 15);
   net.graphOnly = circulars(4).map((m) => ({ id: m.id, from: "a@example.test", subject: m.subject, date: m.date }));
-  const g = await listRecentGraph("acc-alt");
+  net.graphCalls = 0;
+  let flagged = 0;
+  const g = await listRecentGraph("acc-alt", undefined, () => (flagged += 1));
   assert.equal(g.length, 4);
+  assert.equal(flagged, 1, "the Graph failure is reported to the caller");
+});
+
+test("a failed targeted fetch is recorded: targeted_failed in the audit row and a scan note", async () => {
+  resetState();
+  resetNet();
+  watchModel();
+  state.mails = circulars(5);
+  net.failTargeted = true;
+  const summary = await runMailScan(OWNER, { account: "icai" });
+  assert.equal(lastScanAudit().targeted_failed, true);
+  assert.equal(lastScanAudit().targeted_read, 0);
+  assert.ok(summary.notes.some((n) => n.startsWith("icai:") && n.includes("check failed")));
+
+  resetState();
+  resetNet();
+  watchModel();
+  state.mails = circulars(5);
+  const ok = await runMailScan(OWNER, { account: "icai" });
+  assert.equal(lastScanAudit().targeted_failed, false, "a flag only, false when it worked");
+  assert.ok(!ok.notes.some((n) => n.includes("check failed")));
 });
 
 test("the content rule is untouched: mayReadMailContent is still the two allowlists and nothing else", () => {

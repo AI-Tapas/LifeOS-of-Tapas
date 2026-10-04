@@ -157,16 +157,23 @@ export async function runMailScan(actor?: Actor, options: ScanOptions = {}): Pro
       email: account.email,
     };
     let mails: MailMeta[];
+    let targetedFailed = false;
+    const onTargetedFailure = () => {
+      targetedFailed = true;
+    };
     try {
       mails =
         account.provider === "google"
-          ? await listRecentGmail(account.id, limits)
-          : await listRecentGraph(account.id, limits);
+          ? await listRecentGmail(account.id, limits, onTargetedFailure)
+          : await listRecentGraph(account.id, limits, onTargetedFailure);
     } catch (e) {
       summary.notes.push(
         `${account.slot}: ${e instanceof Error ? e.message : "mail fetch failed"}`
       );
       continue;
+    }
+    if (targetedFailed) {
+      summary.notes.push(`${account.slot}: the ticket and receipt mail check failed; only the newest ${limits.messages} were read`);
     }
     if (!mails.length) continue;
     summary.scanned += mails.length;
@@ -252,6 +259,7 @@ export async function runMailScan(actor?: Actor, options: ScanOptions = {}): Pro
         scanned: fetched,
         // B34. A count only, never an address.
         targeted_read: targetedRead,
+        targeted_failed: targetedFailed,
         proposed: tasks.proposed,
         rejected: tasks.rejected,
         // B20. Counts and matched filter phrases only, never mail text.
