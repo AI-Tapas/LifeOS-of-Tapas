@@ -13,6 +13,11 @@ export const PER_ACCOUNT_MESSAGES = 15;
 export const DAILY_TASK_CAP = 5;
 export const MAX_SCAN_DAYS = 14;
 export const MAX_SCAN_MESSAGES = 150;
+// B34: the second, targeted list per mailbox (allowlisted ticket and cab
+// receipt senders only), so a busy day of circulars cannot push a ticket out
+// of the newest-15 window. Scales with days the way the message cap does.
+export const TARGETED_MESSAGES = 10;
+export const MAX_TARGETED_MESSAGES = 50;
 
 export interface ScanOptions {
   // Look-back window in days, 1 to 14. Absent means the nightly 3.
@@ -40,6 +45,12 @@ export function scanLimits(days?: number): ScanLimits {
     messages: Math.min(d * PER_ACCOUNT_MESSAGES, MAX_SCAN_MESSAGES),
     task_cap: DAILY_TASK_CAP * d,
   };
+}
+
+export function targetedCap(days: number): number {
+  return days <= NIGHTLY_DAYS
+    ? TARGETED_MESSAGES
+    : Math.min(days * TARGETED_MESSAGES, MAX_TARGETED_MESSAGES);
 }
 
 // The tool boundary. A model or a connector supplies these, so they are

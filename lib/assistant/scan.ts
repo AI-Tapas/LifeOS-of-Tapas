@@ -171,6 +171,8 @@ export async function runMailScan(actor?: Actor, options: ScanOptions = {}): Pro
     if (!mails.length) continue;
     summary.scanned += mails.length;
     const fetched = mails.length;
+    // B34: messages that came only from the targeted ticket/receipt fetch.
+    const targetedRead = mails.filter((m) => m.targeted).length;
 
     // Calendar invitations are the calendar's business, not the task list's:
     // the event already syncs into the app, so a task would duplicate it.
@@ -248,6 +250,8 @@ export async function runMailScan(actor?: Actor, options: ScanOptions = {}): Pro
       meta: {
         slot: account.slot,
         scanned: fetched,
+        // B34. A count only, never an address.
+        targeted_read: targetedRead,
         proposed: tasks.proposed,
         rejected: tasks.rejected,
         // B20. Counts and matched filter phrases only, never mail text.

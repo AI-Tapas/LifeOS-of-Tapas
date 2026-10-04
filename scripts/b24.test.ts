@@ -323,8 +323,8 @@ test("running the same 10 day mail set twice creates its tasks once only", async
 test("the real listers take the window from the caller", () => {
   const mail = src("lib/assistant/mail.ts");
   assert.ok(mail.includes("newer_than:${window.days}d in:inbox"));
-  assert.ok(mail.includes("maxResults: String(window.messages)"));
-  assert.ok(mail.includes("$top: String(window.messages)"));
+  assert.ok(mail.includes("`newer_than:${window.days}d in:inbox`, window.messages"));
+  assert.ok(mail.includes("`receivedDateTime ge ${since}`, window.messages"));
   assert.ok(mail.includes("Date.now() - window.days * 86400000"));
   assert.ok(!/LOOKBACK_DAYS|PER_ACCOUNT\b/.test(mail));
 });

@@ -1183,6 +1183,17 @@ stream name that never overwrite a hint already written. Health gets none.
   restores it.
 - Tests: `npm run test:b20` (38 offline, synthetic ticket texts, and one real
   unpdf extraction of a hand-built PDF).
+- B34 (5 October 2026), no migration: each mailbox is listed twice. Beside the
+  newest 15 (`PER_ACCOUNT_MESSAGES`) the scan fetches the same window
+  restricted to the ticket and cab receipt senders, up to 10 messages
+  (`targetedCap` in scan-args.ts: days x 10, at most 50 on a catch-up), so a busy
+  day of circulars cannot push a ticket or receipt out of reach. The sender list
+  is `mailReadSenders()` in scan-filters.ts, built from the two allowlists and
+  never copied; the Gmail `q` and the Graph `$filter` use constants only. The
+  merge is by message id, newest first; an extra that fails `mayReadMailContent`
+  is dropped, a failed targeted fetch is ignored, and `mayReadMailContent` and
+  the task pass are unchanged. The scan audit row gains `targeted_read` (a
+  count). Tests: `npm run test:b34` (9 offline).
 
 ## Cab receipts on AICA trips (B21)
 

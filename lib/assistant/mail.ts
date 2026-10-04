@@ -10,7 +10,8 @@
 
 import { withResourceAuth } from "@/lib/oauth/tokens";
 import type { MailRequest } from "@/lib/assistant/mailbox";
-import { NIGHTLY_DAYS, PER_ACCOUNT_MESSAGES } from "@/lib/assistant/scan-args";
+import { NIGHTLY_DAYS, PER_ACCOUNT_MESSAGES, targetedCap } from "@/lib/assistant/scan-args";
+import { mailReadSenders, mayReadMailContent } from "@/lib/assistant/scan-filters";
 
 // B18: the authorised request the pure mailbox module (inbox, thread, reply
 // draft) is handed. Same withResourceAuth path as every other resource call,
@@ -43,6 +44,9 @@ export interface MailMeta {
   // B20: Gmail threadId, Graph conversationId. An id, used only to drop a
   // mail whose thread already has a task.
   threadId?: string;
+  // B34: true when the message came only from the targeted sender fetch, not
+  // the newest-N list. Counted in the scan's audit row.
+  targeted?: boolean;
 }
 
 // B24: the nightly scan reads 3 days and 15 messages a mailbox. A hand-run
@@ -54,16 +58,40 @@ export interface MailWindow {
 }
 const NIGHTLY_WINDOW: MailWindow = { days: NIGHTLY_DAYS, messages: PER_ACCOUNT_MESSAGES };
 
+// B34: merge the newest-N list with the targeted sender list. Duplicates by
+// id are read once; only messages a content-readable sender sent can come in
+// through the targeted list (the sender filter is a hint, this is the rule);
+// newest first.
+function mergeTargeted(main: MailMeta[], extra: MailMeta[]): MailMeta[] {
+  const seen = new Set(main.map((m) => m.id));
+  const added = extra.filter((m) => !seen.has(m.id) && mayReadMailContent(m.from));
+  if (!added.length) return main;
+  const key = (m: MailMeta) => Date.parse(m.date) || 0;
+  return [...main, ...added.map((m) => ({ ...m, targeted: true }))].sort((a, b) => key(b) - key(a));
+}
+
 export async function listRecentGmail(
   accountId: string,
   window: MailWindow = NIGHTLY_WINDOW
 ): Promise<MailMeta[]> {
+  const main = await gmailList(accountId, `newer_than:${window.days}d in:inbox`, window.messages);
+  // The targeted fetch is extra reach, never a reason to fail the scan.
+  // The query is built from the constant allowlists only.
+  const extra = await gmailList(
+    accountId,
+    `newer_than:${window.days}d in:inbox from:(${mailReadSenders().join(" OR ")})`,
+    targetedCap(window.days)
+  ).catch(() => []);
+  return mergeTargeted(main, extra);
+}
+
+async function gmailList(accountId: string, q: string, max: number): Promise<MailMeta[]> {
   const listRes = await withResourceAuth(accountId, (token) =>
     fetch(
       "https://gmail.googleapis.com/gmail/v1/users/me/messages?" +
         new URLSearchParams({
-          q: `newer_than:${window.days}d in:inbox`,
-          maxResults: String(window.messages),
+          q,
+          maxResults: String(max),
         }),
       { headers: { authorization: `Bearer ${token}` } }
     )
@@ -112,14 +140,28 @@ export async function listRecentGraph(
   window: MailWindow = NIGHTLY_WINDOW
 ): Promise<MailMeta[]> {
   const since = new Date(Date.now() - window.days * 86400000).toISOString();
+  const main = await graphList(accountId, `receivedDateTime ge ${since}`, window.messages);
+  // B34: the same sender list, as a Graph filter built from the constants.
+  const senders = mailReadSenders()
+    .map((s) => `contains(from/emailAddress/address,'${s}')`)
+    .join(" or ");
+  const extra = await graphList(
+    accountId,
+    `receivedDateTime ge ${since} and (${senders})`,
+    targetedCap(window.days)
+  ).catch(() => []);
+  return mergeTargeted(main, extra);
+}
+
+async function graphList(accountId: string, filter: string, top: number): Promise<MailMeta[]> {
   const res = await withResourceAuth(accountId, (token) =>
     fetch(
       "https://graph.microsoft.com/v1.0/me/mailFolders/inbox/messages?" +
         new URLSearchParams({
-          $top: String(window.messages),
+          $top: String(top),
           $orderby: "receivedDateTime desc",
           $select: "id,conversationId,subject,from,receivedDateTime,bodyPreview",
-          $filter: `receivedDateTime ge ${since}`,
+          $filter: filter,
         }),
       { headers: { authorization: `Bearer ${token}` } }
     )

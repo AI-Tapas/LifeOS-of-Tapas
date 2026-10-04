@@ -291,6 +291,17 @@ export function mayReadMailContent(from: string): boolean {
   return isTicketSender(from) || isCabReceiptSender(from);
 }
 
+// B34. Every sender whose mail may be read past the metadata, as one list
+// built from the two allowlists above (addresses and domains), for the scan's
+// targeted second fetch. Never keep a second copy of these.
+export function mailReadSenders(): string[] {
+  return [
+    ...TICKET_SENDER_ADDRESSES,
+    ...TICKET_SENDER_DOMAINS,
+    ...CAB_RECEIPT_SENDERS.map((s) => s.match),
+  ];
+}
+
 // ---------------------------------------------------------------------------
 // B20. Thread and resend dedupe, before the model sees anything.
 // ---------------------------------------------------------------------------
