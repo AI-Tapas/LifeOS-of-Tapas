@@ -55,6 +55,8 @@ interface CalendarRow {
   account_id: string;
   ext_calendar_id: string;
   sync_token: string | null;
+  sync_enabled: boolean;
+  is_family_travel: boolean | null;
 }
 
 export interface AccountSyncResult {
@@ -347,13 +349,28 @@ async function syncAccount(
   }
   const { data: cals } = await svc
     .from("calendars")
-    .select("id, account_id, ext_calendar_id, sync_token")
-    .eq("account_id", account.id)
-    .eq("sync_enabled", true);
+    .select("id, account_id, ext_calendar_id, sync_token, sync_enabled, is_family_travel")
+    .eq("account_id", account.id);
 
   let upserted = 0;
   let deleted = 0;
   for (const cal of (cals ?? []) as CalendarRow[]) {
+    // B33: the family travel calendar is written by Life OS for his spouse
+    // (B29) and must never come back as his own events, or every flight shows
+    // twice. It is never read from Google, and any copy already in the events
+    // table is removed. The Google events themselves are left alone.
+    if (cal.is_family_travel === true) {
+      const { error } = await svc
+        .from("events")
+        .delete()
+        .eq("calendar_id", cal.id)
+        .eq("source", "synced");
+      if (error) {
+        return { slot: account.slot, status: account.status, upserted, deleted, error: "family calendar copies could not be removed" };
+      }
+      continue;
+    }
+    if (!cal.sync_enabled) continue;
     try {
       const r = await syncOneCalendar(svc, account, cal, userId);
       upserted += r.upserted;

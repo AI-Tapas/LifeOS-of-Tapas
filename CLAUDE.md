@@ -1687,8 +1687,8 @@ Additive only.
 - Not built: a lock against two syncs in the same second (one user; the
   duplicate would show and the next repair pass would not remove it, add a row
   lock if it ever does), de-duplicating against events already on the family
-  calendar by hand, and hiding the family calendar from his own synced calendar
-  view.
+  calendar by hand. Hiding the family calendar from his own calendar view was
+  built in B33 (see that section).
 - Tests: `npm run test:b29` (offline, two files; the calendar is an in-memory
   stand-in, the tools run through the real executor and the real
   lib/trips/write.ts against the b26 in-memory database via
@@ -1910,3 +1910,43 @@ columns. Nullable or defaulted additions only, RLS unchanged.
   `lifeos_get_hours` (read, optional `month` as YYYY-MM, disclosure `app_data`)
   returns the month summary.
 - Tests: `npm run test:b32` (offline, 13).
+
+## Calendar view fixes (B33)
+
+No migration. Four complaints from 4 October 2026, all confirmed in the live
+data.
+
+- Weekday: the day view heads with "Friday, 23 October 2026" (`dayHeading`);
+  week columns read "Mon 5" with today marked (`weekHeads`); the month view
+  already carried Mon to Sun heads.
+- Time grid (components/calendar/time-grid.tsx): day and week views draw hours
+  down the side (7 am to 11 pm, widened when an event sits outside that), a
+  timed event as a block from start to end, overlapping events side by side,
+  and all-day events in a strip above. It opens scrolled to the first timed
+  event, or to now when there is none and today is shown. Clicking an empty
+  stretch starts a new event at that hour; clicking an event opens the same
+  drawer as before. The week grid starts at the `md` breakpoint; on a phone the
+  week view keeps the day-by-day list, because seven columns do not fit 375 px.
+  The month view is unchanged. All geometry is pure in lib/calendar/grid.ts
+  (`sliceForDay`, `blockBox`, `layoutColumns`, `gridHours`); no new dependency.
+- Overnight events: `eventDayKeys` moved from calendar-view.tsx into
+  lib/calendar/grid.ts (a .tsx file cannot be imported by the offline tests).
+  A timed event is placed only on the day it starts, unless it lasts 24 hours
+  or more; all-day events still span their days, end exclusive. Every view
+  reads this one function. An end before the start no longer loops.
+- The family travel calendar is never shown in Life OS. lib/events/sync.ts
+  skips any calendar with `is_family_travel` true (it is not even read from
+  Google) and deletes that calendar's `events` rows with source 'synced' on
+  every sync, so a calendar chosen earlier is cleaned on the next run even if
+  its sync switch is off. `setFamilyTravelCalendarAction` does the same delete
+  the moment a calendar is chosen. Only the `events` table is touched: the
+  Google events belong to B29 and are never changed here. B29 writes through
+  its own `family_travel_events` table and never reads `events`
+  (scripts/b33.test.ts checks this), so nothing in B29 changed.
+- Readers of `events` (calendar page, Home, 7 AM brief, assistant context,
+  `lifeos_list_events`) got no filter of their own: the rows are gone, so they
+  cannot show family events. If a family row ever reappears, the cause is a
+  sync path that bypasses syncAccount.
+- Tests: `npm run test:b33` (16 offline: day placement, grid geometry,
+  weekday labels, and the real sync against an in-memory stand-in via
+  scripts/b33-sync-loader.mjs).

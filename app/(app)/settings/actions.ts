@@ -247,6 +247,14 @@ export async function setFamilyTravelCalendarAction(
       return { ok: false, message: "Only a calendar on the ca.tapasnr account can be the family calendar." };
     }
   }
+  // B33: Life OS's own synced copies of this calendar must not show in his
+  // calendar. Only the events table rows go; the Google events are B29's.
+  await supabase
+    .from("events")
+    .delete()
+    .eq("calendar_id", target.id)
+    .eq("source", "synced");
+  revalidatePath("/calendar");
   const synced = await syncFamilyTravel(user.id);
   revalidatePath("/settings");
   return {

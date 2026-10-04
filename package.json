@@ -36,6 +36,7 @@
     "test:b30": "node --test scripts/b30.test.ts",
     "test:b31": "node --test scripts/b31.test.ts",
     "test:b32": "node --test scripts/b32.test.ts",
+    "test:b33": "node --test scripts/b33.test.ts",
     "test:b29": "node --test scripts/b29.test.ts scripts/b29-sync.test.ts",
     "report:premature": "node --env-file=.env.local scripts/report-premature-tasks.ts",
     "report:lapsed": "node --env-file=.env.local scripts/report-lapsed-tasks.ts"
