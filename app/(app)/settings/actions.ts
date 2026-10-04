@@ -249,11 +249,12 @@ export async function setFamilyTravelCalendarAction(
   }
   // B33: Life OS's own synced copies of this calendar must not show in his
   // calendar. Only the events table rows go; the Google events are B29's.
-  await supabase
+  const { error: purgeErr } = await supabase
     .from("events")
     .delete()
     .eq("calendar_id", target.id)
     .eq("source", "synced");
+  if (purgeErr) note += " Old copies of its events could not be removed from your calendar yet; the next sync removes them.";
   revalidatePath("/calendar");
   const synced = await syncFamilyTravel(user.id);
   revalidatePath("/settings");

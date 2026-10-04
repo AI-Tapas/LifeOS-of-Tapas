@@ -71,6 +71,8 @@ test("a late-night event is clipped at midnight and keeps a visible height", () 
   const s = sliceForDay({ id: "t", ...timed(at(2026, 10, 23, 23, 55), at(2026, 10, 24, 0, 55)) }, "2026-10-23")!;
   assert.equal(s.endMin, 1440);
   assert.ok(blockBox(s, 7, 48).height >= 24, "short slices are drawn at least half an hour tall");
+  const box = blockBox(s, 7, 48);
+  assert.ok(box.top + box.height <= (24 - 7) * 48, "the block never runs past the bottom of the grid");
   assert.deepEqual(gridHours([s]), { startHour: 7, endHour: 24 });
 });
 
@@ -147,6 +149,7 @@ function seed() {
 
 test("the family calendar is skipped and its synced copies are removed", async () => {
   seed();
+  world.tables.calendars[1].sync_token = "old-cursor";
   const r = await syncAllEvents(USER);
   assert.equal(r[0].error, undefined);
   assert.equal(world.fetched.length, 1, "only the main calendar is read");

@@ -79,9 +79,12 @@ export function sliceForDay(
   const startMs = new Date(e.start_ts).getTime();
   const rawEnd = e.end_ts ? new Date(e.end_ts).getTime() : startMs + 60 * MINUTE_MS;
   const endMs = rawEnd > startMs ? rawEnd : startMs + MIN_BLOCK_MINUTES * MINUTE_MS;
-  const startMin = Math.max(0, (startMs - dayStartMs) / MINUTE_MS);
+  const rawStart = Math.max(0, (startMs - dayStartMs) / MINUTE_MS);
   const endMin = Math.min(1440, (endMs - dayStartMs) / MINUTE_MS);
-  if (endMin <= 0 || startMin >= 1440) return null;
+  if (endMin <= 0 || rawStart >= 1440) return null;
+  // Keep the minimum-height block inside the day so it cannot overflow the
+  // bottom of the grid.
+  const startMin = Math.min(rawStart, 1440 - MIN_BLOCK_MINUTES);
   return { id: e.id, startMin, endMin: Math.max(endMin, startMin + 1) };
 }
 

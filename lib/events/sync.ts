@@ -354,6 +354,7 @@ async function syncAccount(
 
   let upserted = 0;
   let deleted = 0;
+  let purgeError: string | undefined;
   for (const cal of (cals ?? []) as CalendarRow[]) {
     // B33: the family travel calendar is written by Life OS for his spouse
     // (B29) and must never come back as his own events, or every flight shows
@@ -365,9 +366,10 @@ async function syncAccount(
         .delete()
         .eq("calendar_id", cal.id)
         .eq("source", "synced");
-      if (error) {
-        return { slot: account.slot, status: account.status, upserted, deleted, error: "family calendar copies could not be removed" };
-      }
+      // No cursor kept, so if the flag is ever moved off, the next sync is a
+      // full resync rather than a delta that misses the purged rows.
+      await svc.from("calendars").update({ sync_token: null }).eq("id", cal.id);
+      if (error) purgeError = "family calendar copies could not be removed";
       continue;
     }
     if (!cal.sync_enabled) continue;
@@ -396,7 +398,7 @@ async function syncAccount(
       };
     }
   }
-  return { slot: account.slot, status: account.status, upserted, deleted };
+  return { slot: account.slot, status: account.status, upserted, deleted, error: purgeError };
 }
 
 // Public entry: sync all of a user's connected accounts, then run the reminder

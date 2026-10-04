@@ -266,6 +266,7 @@ export default function CalendarView({
                 keep the day-by-day list and the grid starts at md. */}
             <div className="hidden md:block">
               <TimeGrid
+                key={anchorKey}
                 mode="week"
                 anchorKey={anchorKey}
                 todayKey={todayKey}
@@ -290,6 +291,7 @@ export default function CalendarView({
         )}
         {view === "day" && (
           <TimeGrid
+            key={anchorKey}
             mode="day"
             anchorKey={anchorKey}
             todayKey={todayKey}
