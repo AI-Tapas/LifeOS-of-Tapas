@@ -1963,3 +1963,25 @@ data.
 - Tests: `npm run test:b33` (16 offline: day placement, grid geometry,
   weekday labels, and the real sync against an in-memory stand-in via
   scripts/b33-sync-loader.mjs).
+
+## Kanban board (B35)
+
+Migration `20261007000100_task_board_position.sql`. NOT applied anywhere when
+it was written; apply it before (or with) the deploy of this code, since the
+Tasks page selects the column.
+
+- The Board tab is a real kanban: Unsorted, To do, Doing and Done side by
+  side (horizontal scroll on a phone). Drag a card by its grip to another
+  column or up and down inside one. Arrow keys on the grip do the same.
+  Pointer events, so mouse and touch share one path; no new dependency.
+- `tasks.board_position` (integer, nullable): his order inside a column, 0 at
+  the top. Null cards (never placed) sit on top, newest first. Any status
+  change clears it in `setTaskStatus` (lib/tasks/write.ts), so a card that
+  changes column some other way lands on top of its new one.
+- `placeCard` and `columnCards` (lib/tasks/board.ts, pure) decide what a drop
+  means and which positions changed; `moveTaskOnBoardAction` changes the
+  status through `setTaskStatus` (reminders, completion and recurring spawns
+  as everywhere else) and then writes only the changed positions.
+- No connector or tool reads or writes the position. Overview and Home keep
+  ranking by triage; the board order is his alone.
+- Tests: `npm run test:board` (5 offline).

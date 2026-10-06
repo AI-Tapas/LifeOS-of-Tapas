@@ -35,7 +35,7 @@ export default async function TasksPage({
       supabase
         .from("tasks")
         .select(
-          "id, title, notes, status, priority, priority_source, priority_reason, due_ts, completed_at, not_before, work_stream_id, project_id, trip_id, recurring_rule, is_billable, hours_spent, billable, billing_state, billing_ref, remind_offsets, reminder_mode, agent_instructions, agent_instructions_at, agent_status, agent_result, agent_result_at, agent_done_hash"
+          "id, title, notes, status, priority, priority_source, priority_reason, due_ts, completed_at, not_before, work_stream_id, project_id, trip_id, recurring_rule, is_billable, hours_spent, billable, billing_state, billing_ref, remind_offsets, reminder_mode, agent_instructions, agent_instructions_at, agent_status, agent_result, agent_result_at, agent_done_hash, board_position"
         )
         // Open work, plus what he finished in the last 90 days for the Done
         // column. The page used to load every task ever created and filter

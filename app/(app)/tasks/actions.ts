@@ -15,6 +15,7 @@ import {
 } from "@/lib/tasks/write";
 import type { Database } from "@/lib/database.types";
 import { requireUser } from "@/lib/auth/require-user";
+import { BOARD_STATUSES, type BoardStatus, type PositionWrite } from "@/lib/tasks/board";
 
 // NOTE: never re-export types from a "use server" module. Next.js treats
 // every export here as a server action and emits registerServerReference
@@ -52,6 +53,43 @@ export async function setTaskStatusAction(
   if (!t.ok) return { ok: false, message: t.message ?? "Could not update the task." };
   revalidatePath("/tasks");
   return { ok: true, id, reminderNote: t.reminderNote };
+}
+
+// Kanban drop: the card's new column (through setTaskStatus, so reminders,
+// completion and recurring spawns behave as on every other path), then the
+// positions the drop changed. The browser works the positions out with
+// placeCard (lib/tasks/board.ts); RLS keeps every write to his own rows.
+export async function moveTaskOnBoardAction(
+  id: string,
+  status: BoardStatus,
+  writes: PositionWrite[]
+): Promise<TaskResult> {
+  const { supabase, user } = await requireUser("/tasks");
+  if (!BOARD_STATUSES.includes(status)) return { ok: false, message: "Unknown column." };
+  if (
+    !Array.isArray(writes) ||
+    writes.length > 1000 ||
+    !writes.every((w) => typeof w.id === "string" && Number.isInteger(w.board_position) && w.board_position >= 0)
+  )
+    return { ok: false, message: "Could not read the new order." };
+
+  const { data: cur } = await supabase.from("tasks").select("status").eq("id", id).single();
+  if (!cur) return { ok: false, message: "That task no longer exists." };
+  let reminderNote: string | undefined;
+  if (cur.status !== status) {
+    const t = await setTaskStatus(supabase, user.id, id, status);
+    if (!t.ok) return { ok: false, message: t.message ?? "Could not move the task." };
+    reminderNote = t.reminderNote;
+  }
+  const results = await Promise.all(
+    writes.map((w) =>
+      supabase.from("tasks").update({ board_position: w.board_position }).eq("id", w.id)
+    )
+  );
+  revalidatePath("/tasks");
+  const failed = results.find((r) => r.error);
+  if (failed) return { ok: false, message: "Moved, but the order did not save. Try again." };
+  return { ok: true, id, reminderNote };
 }
 
 export async function deleteTaskAction(

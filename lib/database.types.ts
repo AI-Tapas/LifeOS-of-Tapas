@@ -950,6 +950,7 @@ export type Database = {
           billing_ref: string | null
           billing_state: string | null
           billing_updated_at: string | null
+          board_position: number | null
           agent_status: string | null
           agent_result: string | null
           agent_result_at: string | null
@@ -987,6 +988,7 @@ export type Database = {
           billing_ref?: string | null
           billing_state?: string | null
           billing_updated_at?: string | null
+          board_position?: number | null
           agent_status?: string | null
           agent_result?: string | null
           agent_result_at?: string | null
@@ -1024,6 +1026,7 @@ export type Database = {
           billing_ref?: string | null
           billing_state?: string | null
           billing_updated_at?: string | null
+          board_position?: number | null
           agent_status?: string | null
           agent_result?: string | null
           agent_result_at?: string | null

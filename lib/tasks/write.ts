@@ -315,6 +315,8 @@ export async function setTaskStatus(
           .from("tasks")
           .update({
             status: next,
+            // A card that changes column lands on top until he places it.
+            board_position: null,
             ...(completedAt !== undefined ? { completed_at: completedAt } : {}),
           })
           .eq("id", taskId)

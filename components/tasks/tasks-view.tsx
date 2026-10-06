@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useMemo, useState, useTransition } from "react";
+import { createContext, useContext, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -32,7 +32,9 @@ import {
   createProjectAction,
   updateProjectAction,
   deleteProjectAction,
+  moveTaskOnBoardAction,
 } from "@/app/(app)/tasks/actions";
+import { BOARD_STATUSES, columnCards, placeCard, type BoardStatus } from "@/lib/tasks/board";
 import { setBillingStateAction } from "@/app/(app)/unbilled/actions";
 import { REF_MAX, type BillingState } from "@/lib/billing/unbilled";
 import type { TaskInput } from "@/lib/tasks/write";
@@ -82,6 +84,8 @@ export interface TaskRow {
   agent_result?: string | null;
   agent_result_at?: string | null;
   agent_pending?: boolean;
+  // His order inside a board column; null or absent means not placed by hand.
+  board_position?: number | null;
 }
 export interface ProjectRow {
   id: string;
@@ -102,7 +106,7 @@ type Tab = "overview" | "inbox" | "board" | "projects";
 const TAB_HINTS: Record<Tab, string> = {
   overview: "Ranked the way you asked: urgent and important, then important, then urgent.",
   inbox: "Newly captured, not yet sorted. Move each one to To do, or edit it.",
-  board: "Everything you are working through: unsorted, to do, doing, done.",
+  board: "Drag a card by its grip to another column, or up and down to set your own order.",
   projects: "Related tasks grouped together. A task can sit in any status.",
 };
 
@@ -286,6 +290,7 @@ function TaskItem({
   onEdit,
   onNotice,
   extraActions,
+  wrapTitle,
 }: {
   task: TaskRow;
   wsById: Map<string, string>;
@@ -293,6 +298,8 @@ function TaskItem({
   onEdit: (t: TaskRow) => void;
   onNotice: (s: string | null) => void;
   extraActions?: React.ReactNode;
+  // Board columns are narrow: two lines of title beat one cut-off word.
+  wrapTitle?: boolean;
 }) {
   const router = useRouter();
   const nowIso = useContext(NowContext);
@@ -347,7 +354,13 @@ function TaskItem({
             style={{ backgroundColor: PRIORITY_DOT[task.priority] }}
             title={`${task.priority} priority`}
           />
-          <span className={"truncate text-sm " + (done ? "line-through text-neutral-400" : "")}>
+          <span
+            className={
+              (wrapTitle ? "line-clamp-2 " : "truncate ") +
+              "text-sm " +
+              (done ? "line-through text-neutral-400" : "")
+            }
+          >
             {task.title}
           </span>
           {agentMarker(task) && (
@@ -678,8 +691,14 @@ function BoardTab({
   onNotice: (s: string | null) => void;
 }) {
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
-  const columns: { key: TaskRow["status"]; label: string; note?: string }[] = [
+  const [, startTransition] = useTransition();
+  // A drop shows at once and gives way to the server's list when it arrives.
+  const [local, setLocal] = useState<{ base: TaskRow[]; rows: TaskRow[] } | null>(null);
+  const rows = local && local.base === tasks ? local.rows : tasks;
+  const [drag, setDrag] = useState<{ id: string; title: string; x: number; y: number } | null>(null);
+  const [target, setTarget] = useState<{ status: BoardStatus; index: number } | null>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  const columns: { key: BoardStatus; label: string; note?: string }[] = [
     {
       key: "inbox",
       label: "Unsorted",
@@ -689,80 +708,165 @@ function BoardTab({
     { key: "doing", label: "Doing" },
     { key: "done", label: "Done" },
   ];
-  function move(task: TaskRow, status: TaskRow["status"]) {
+
+  function drop(id: string, status: BoardStatus, index: number) {
+    const r = placeCard(rows, id, status, index);
+    if (!r) return;
+    setLocal({ base: tasks, rows: r.tasks });
     startTransition(async () => {
-      const r = await setTaskStatusAction(task.id, status);
-      if (r.ok && r.reminderNote) onNotice(r.reminderNote);
+      const res = await moveTaskOnBoardAction(id, status, r.writes);
+      if (!res.ok) {
+        onNotice(res.message);
+        setLocal(null);
+      } else if (res.reminderNote) onNotice(res.reminderNote);
       router.refresh();
     });
   }
 
+  // The column and slot under the pointer, counting cards without the one
+  // being dragged.
+  function targetAt(x: number, y: number, dragId: string) {
+    const col = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-col]");
+    if (!col) return null;
+    const cards = Array.from(col.querySelectorAll<HTMLElement>("[data-card]")).filter(
+      (c) => c.dataset.card !== dragId
+    );
+    const index = cards.filter((c) => {
+      const b = c.getBoundingClientRect();
+      return b.top + b.height / 2 < y;
+    }).length;
+    return { status: col.dataset.col as BoardStatus, index };
+  }
+
+  function stopDrag() {
+    setDrag(null);
+    setTarget(null);
+  }
+
+  // Pointer events cover mouse, touch and pen alike. The grip is touch-none,
+  // so dragging it on a phone moves the card instead of scrolling the page.
+  function gripHandlers(t: TaskRow) {
+    return {
+      onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => {
+        e.currentTarget.setPointerCapture(e.pointerId);
+        setDrag({ id: t.id, title: t.title, x: e.clientX, y: e.clientY });
+        setTarget(targetAt(e.clientX, e.clientY, t.id));
+      },
+      onPointerMove: (e: React.PointerEvent<HTMLButtonElement>) => {
+        if (drag?.id !== t.id) return;
+        setDrag({ ...drag, x: e.clientX, y: e.clientY });
+        setTarget(targetAt(e.clientX, e.clientY, t.id));
+        // Near the board's edge, scroll it so far columns are reachable on a phone.
+        const el = scroller.current;
+        const box = el?.getBoundingClientRect();
+        if (el && box && e.clientX > box.right - 40) el.scrollLeft += 12;
+        if (el && box && e.clientX < box.left + 40) el.scrollLeft -= 12;
+      },
+      onPointerUp: () => {
+        if (drag?.id === t.id && target) drop(t.id, target.status, target.index);
+        stopDrag();
+      },
+      onPointerCancel: stopDrag,
+      // Keyboard: up and down reorder, left and right change column.
+      onKeyDown: (e: React.KeyboardEvent<HTMLButtonElement>) => {
+        const status = t.status as BoardStatus;
+        const i = columnCards(rows, status).findIndex((c) => c.id === t.id);
+        const ci = BOARD_STATUSES.indexOf(status);
+        if (e.key === "ArrowUp") drop(t.id, status, i - 1);
+        else if (e.key === "ArrowDown") drop(t.id, status, i + 1);
+        else if (e.key === "ArrowLeft" && ci > 0) drop(t.id, BOARD_STATUSES[ci - 1], 0);
+        else if (e.key === "ArrowRight" && ci < BOARD_STATUSES.length - 1)
+          drop(t.id, BOARD_STATUSES[ci + 1], 0);
+        else return;
+        e.preventDefault();
+      },
+    };
+  }
+
+  const marker = <div className="h-1 rounded-full bg-accent" aria-hidden />;
+
   return (
-    <div className="space-y-5">
-      {columns.map((col) => {
-        const items = tasks.filter((t) => t.status === col.key);
-        return (
-          <section key={col.key}>
-            <h3 className="text-sm font-medium text-neutral-500">
-              {col.label} ({items.length})
-            </h3>
-            {col.note && items.length > 0 && (
-              <p className="mb-2 text-xs text-neutral-400">{col.note}</p>
-            )}
-            {(!col.note || items.length === 0) && <div className="mb-2" />}
-            {items.length === 0 ? (
-              <p className="text-xs text-neutral-400">Nothing here.</p>
-            ) : (
-              <div className="space-y-2">
-                {items.map((t) => (
-                  <TaskItem
-                    key={t.id}
-                    task={t}
-                    wsById={wsById}
-                    projById={projById}
-                    onEdit={onEdit}
-                    onNotice={onNotice}
-                    extraActions={
-                      <div className="flex shrink-0 flex-col gap-1">
-                        {col.key !== "todo" && col.key !== "inbox" && (
-                          <button
-                            onClick={() => move(t, col.key === "done" ? "doing" : "todo")}
-                            disabled={pending}
-                            className="press min-h-11 rounded-lg border border-border-strong px-2.5 text-xs font-medium disabled:opacity-50"
-                          >
-                            Back
-                          </button>
-                        )}
-                        {col.key !== "done" && (
-                          <button
-                            onClick={() =>
-                              move(
-                                t,
-                                col.key === "inbox"
-                                  ? "todo"
-                                  : col.key === "todo"
-                                    ? "doing"
-                                    : "done"
-                              )
-                            }
-                            disabled={pending}
-                            className="press min-h-11 rounded-lg border border-border-strong px-2.5 text-xs font-medium disabled:opacity-50"
-                          >
-                            {col.key === "inbox" ? "To do" : col.key === "todo" ? "Start" : "Done"}
-                          </button>
-                        )}
+    <>
+      <div ref={scroller} className="-mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-3">
+        {columns.map((col) => {
+          const items = columnCards(rows, col.key);
+          const here = target?.status === col.key ? target.index : -1;
+          let k = 0;
+          return (
+            <section
+              key={col.key}
+              data-col={col.key}
+              className={
+                "w-64 shrink-0 snap-start rounded-xl border p-2 " +
+                (here >= 0 ? "border-accent bg-accent-soft" : "border-border bg-surface-2")
+              }
+            >
+              <h3 className="px-1 text-sm font-medium text-neutral-500">
+                {col.label} ({items.length})
+              </h3>
+              {col.note && items.length > 0 && (
+                <p className="mb-2 px-1 text-xs text-neutral-400">{col.note}</p>
+              )}
+              {(!col.note || items.length === 0) && <div className="mb-2" />}
+              <div className="min-h-16 space-y-2">
+                {items.map((t) => {
+                  const dragged = drag?.id === t.id;
+                  const showMarker = !dragged && k === here;
+                  if (!dragged) k++;
+                  return (
+                    <div key={t.id}>
+                      {showMarker && <div className="mb-2">{marker}</div>}
+                      <div data-card={t.id} className={dragged ? "opacity-40" : ""}>
+                        <TaskItem
+                          task={t}
+                          wsById={wsById}
+                          projById={projById}
+                          onEdit={onEdit}
+                          onNotice={onNotice}
+                          wrapTitle
+                          extraActions={
+                            <button
+                              {...gripHandlers(t)}
+                              aria-label={`Move ${t.title}. Arrow keys move it up, down or to another column.`}
+                              title="Drag to move"
+                              className="flex h-11 w-7 shrink-0 cursor-grab touch-none items-center justify-center rounded text-neutral-400 hover:text-secondary active:cursor-grabbing"
+                            >
+                              <svg width="10" height="16" viewBox="0 0 10 16" fill="currentColor" aria-hidden>
+                                <circle cx="2" cy="2" r="1.5" />
+                                <circle cx="8" cy="2" r="1.5" />
+                                <circle cx="2" cy="8" r="1.5" />
+                                <circle cx="8" cy="8" r="1.5" />
+                                <circle cx="2" cy="14" r="1.5" />
+                                <circle cx="8" cy="14" r="1.5" />
+                              </svg>
+                            </button>
+                          }
+                        />
                       </div>
-                    }
-                  />
-                ))}
+                    </div>
+                  );
+                })}
+                {here >= 0 && here >= k && marker}
+                {items.length === 0 && here < 0 && (
+                  <p className="px-1 text-xs text-neutral-400">Nothing here.</p>
+                )}
               </div>
-            )}
-          </section>
-        );
-      })}
-    </div>
+            </section>
+          );
+        })}
+      </div>
+      {drag && (
+        <div
+          className="pointer-events-none fixed z-50 max-w-60 truncate rounded-lg border border-accent bg-surface px-3 py-2 text-sm shadow-lg"
+          style={{ left: drag.x + 8, top: drag.y + 8 }}
+        >
+          {drag.title}
+        </div>
+      )}
+    </>
   );
 }
+
 
 function ProjectsTab({
   tasks,
