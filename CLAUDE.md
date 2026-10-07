@@ -1982,6 +1982,13 @@ Tasks page selects the column.
   means and which positions changed; `moveTaskOnBoardAction` changes the
   status through `setTaskStatus` (reminders, completion and recurring spawns
   as everywhere else) and then writes only the changed positions.
+- Each column header collapses it to a thin strip (still a drop target; a
+  card dropped there goes on top). Which columns are collapsed is a per-device
+  choice in localStorage (`life_os_board_collapsed`), like the theme. Open
+  columns share the width, so one open column plus three strips fits 375 px.
+- Board cards (`wrapTitle` on TaskItem) show the full title, put the due and
+  agent badges on their own line and have no tick button: the Done column is
+  how a board card is finished, and the room goes to the title.
 - No connector or tool reads or writes the position. Overview and Home keep
   ranking by triage; the board order is his alone.
 - Tests: `npm run test:board` (5 offline).

@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useMemo, useRef, useState, useTransition } from "react";
+import { createContext, useContext, useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -298,7 +298,7 @@ function TaskItem({
   onEdit: (t: TaskRow) => void;
   onNotice: (s: string | null) => void;
   extraActions?: React.ReactNode;
-  // Board columns are narrow: two lines of title beat one cut-off word.
+  // Board card: title wraps, badges drop below it, no tick button.
   wrapTitle?: boolean;
 }) {
   const router = useRouter();
@@ -323,6 +323,18 @@ function TaskItem({
   }
 
   const done = task.status === "done" || justDone;
+  const badges = (
+    <>
+      {agentMarker(task) && (
+        <span className="shrink-0 rounded-full bg-waiting-soft px-2 py-0.5 text-[10px] font-semibold text-waiting">
+          {agentMarker(task)}
+        </span>
+      )}
+      <span className={wrapTitle ? "" : "ml-auto pl-1"}>
+        <DueBadge dueTs={task.due_ts} nowIso={nowIso} flagMissing={task.priority === "high" && !done} />
+      </span>
+    </>
+  );
   return (
     <div
       className={
@@ -330,25 +342,32 @@ function TaskItem({
         (justDone ? " settle-done" : "")
       }
     >
-      <button
-        onClick={complete}
-        disabled={pending || done}
-        className={
-          "press flex h-11 w-11 shrink-0 items-center justify-center rounded-full disabled:opacity-60 " +
-          (done ? "pop-done" : "")
-        }
-        aria-label="Mark done"
-        title="Mark done"
-      >
-        <span
+      {/* Board cards skip the tick: the Done column does that job, and a
+          phone-width column needs the room for the title. */}
+      {!wrapTitle && (
+        <button
+          onClick={complete}
+          disabled={pending || done}
           className={
-            "h-5 w-5 rounded-full border-2 " +
-            (done ? "border-ok bg-ok" : "border-border-strong")
+            "press flex h-11 w-11 shrink-0 items-center justify-center rounded-full disabled:opacity-60 " +
+            (done ? "pop-done" : "")
           }
-        />
-      </button>
-      <button onClick={() => onEdit(task)} className="min-w-0 flex-1 py-1.5 text-left">
-        <div className="flex items-center gap-2">
+          aria-label="Mark done"
+          title="Mark done"
+        >
+          <span
+            className={
+              "h-5 w-5 rounded-full border-2 " +
+              (done ? "border-ok bg-ok" : "border-border-strong")
+            }
+          />
+        </button>
+      )}
+      <button
+        onClick={() => onEdit(task)}
+        className={"min-w-0 flex-1 py-1.5 text-left" + (wrapTitle ? " pl-1.5" : "")}
+      >
+        <div className={wrapTitle ? "flex items-baseline gap-2" : "flex items-center gap-2"}>
           <span
             className="inline-block h-2 w-2 shrink-0 rounded-full"
             style={{ backgroundColor: PRIORITY_DOT[task.priority] }}
@@ -356,26 +375,17 @@ function TaskItem({
           />
           <span
             className={
-              (wrapTitle ? "line-clamp-2 " : "truncate ") +
+              (wrapTitle ? "break-words " : "truncate ") +
               "text-sm " +
               (done ? "line-through text-neutral-400" : "")
             }
           >
             {task.title}
           </span>
-          {agentMarker(task) && (
-            <span className="shrink-0 rounded-full bg-waiting-soft px-2 py-0.5 text-[10px] font-semibold text-waiting">
-              {agentMarker(task)}
-            </span>
-          )}
-          <span className="ml-auto pl-1">
-            <DueBadge
-              dueTs={task.due_ts}
-              nowIso={nowIso}
-              flagMissing={task.priority === "high" && !done}
-            />
-          </span>
+          {!wrapTitle && badges}
         </div>
+        {/* Narrow board cards: the badges get their own line so the title keeps the width. */}
+        {wrapTitle && <div className="mt-1 flex flex-wrap items-center gap-1.5">{badges}</div>}
         <div className="mt-0.5 flex flex-wrap gap-x-2 text-[11px] text-neutral-500">
           <span>{wsById.get(task.work_stream_id) ?? "No stream"}</span>
           {task.project_id && <span>{projById.get(task.project_id)}</span>}
@@ -677,6 +687,37 @@ function InboxTab({
   );
 }
 
+// Which board columns are collapsed: a per-device view choice, so it lives
+// in localStorage (like the theme), read through useSyncExternalStore.
+const COLLAPSED_KEY = "life_os_board_collapsed";
+let collapsedMem: string | null = null;
+const collapsedListeners = new Set<() => void>();
+function readCollapsed(): string {
+  if (collapsedMem === null) {
+    try {
+      collapsedMem = localStorage.getItem(COLLAPSED_KEY) ?? "";
+    } catch {
+      collapsedMem = "";
+    }
+  }
+  return collapsedMem;
+}
+function subscribeCollapsed(cb: () => void) {
+  collapsedListeners.add(cb);
+  return () => collapsedListeners.delete(cb);
+}
+function toggleCollapsed(key: string) {
+  const set = new Set(readCollapsed().split(",").filter(Boolean));
+  if (!set.delete(key)) set.add(key);
+  collapsedMem = [...set].join(",");
+  try {
+    localStorage.setItem(COLLAPSED_KEY, collapsedMem);
+  } catch {
+    // Private mode: the choice holds until the page reloads.
+  }
+  collapsedListeners.forEach((cb) => cb());
+}
+
 function BoardTab({
   tasks,
   wsById,
@@ -783,26 +824,57 @@ function BoardTab({
     };
   }
 
+  const collapsed = new Set(
+    useSyncExternalStore(subscribeCollapsed, readCollapsed, () => "").split(",").filter(Boolean)
+  );
+
   const marker = <div className="h-1 rounded-full bg-accent" aria-hidden />;
 
   return (
     <>
-      <div ref={scroller} className="-mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-3">
+      <div ref={scroller} className="-mx-4 flex snap-x gap-2 overflow-x-auto px-4 pb-3">
         {columns.map((col) => {
           const items = columnCards(rows, col.key);
           const here = target?.status === col.key ? target.index : -1;
           let k = 0;
+          const tone = here >= 0 ? "border-accent bg-accent-soft" : "border-border bg-surface-2";
+          // Collapsed: a thin strip that still takes a dropped card (on top).
+          if (collapsed.has(col.key))
+            return (
+              <section
+                key={col.key}
+                data-col={col.key}
+                className={"w-9 shrink-0 rounded-xl border " + tone}
+              >
+                <button
+                  onClick={() => toggleCollapsed(col.key)}
+                  aria-expanded={false}
+                  aria-label={`Show ${col.label}, ${items.length} tasks`}
+                  className="press flex h-full min-h-48 w-full flex-col items-center gap-2 py-3 text-sm font-medium text-neutral-500"
+                >
+                  <span aria-hidden>&rsaquo;</span>
+                  <span className="[writing-mode:vertical-rl]">
+                    {col.label} ({items.length})
+                  </span>
+                </button>
+              </section>
+            );
           return (
             <section
               key={col.key}
               data-col={col.key}
-              className={
-                "w-64 shrink-0 snap-start rounded-xl border p-2 " +
-                (here >= 0 ? "border-accent bg-accent-soft" : "border-border bg-surface-2")
-              }
+              className={"min-w-52 flex-1 snap-start rounded-xl border p-1.5 " + tone}
             >
-              <h3 className="px-1 text-sm font-medium text-neutral-500">
-                {col.label} ({items.length})
+              <h3>
+                <button
+                  onClick={() => toggleCollapsed(col.key)}
+                  aria-expanded
+                  title="Collapse this column"
+                  className="press flex min-h-9 w-full items-center gap-1.5 rounded-lg px-1 text-left text-sm font-medium text-neutral-500"
+                >
+                  <span aria-hidden>&lsaquo;</span>
+                  {col.label} ({items.length})
+                </button>
               </h3>
               {col.note && items.length > 0 && (
                 <p className="mb-2 px-1 text-xs text-neutral-400">{col.note}</p>
