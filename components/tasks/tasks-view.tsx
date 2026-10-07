@@ -1,6 +1,15 @@
 "use client";
 
-import { createContext, useContext, useMemo, useRef, useState, useSyncExternalStore, useTransition } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  useTransition,
+} from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -828,11 +837,28 @@ function BoardTab({
     useSyncExternalStore(subscribeCollapsed, readCollapsed, () => "").split(",").filter(Boolean)
   );
 
+  // After a collapse or expand, bring that column fully into view: on a
+  // phone the board scrolls sideways, and a strip left off-screen cannot be
+  // tapped open again.
+  // Runs after React has redrawn the column at its new width; scrolling
+  // before that aims at the old size and can leave a strip off-screen.
+  const [shown, setShown] = useState<{ key: string } | null>(null);
+  useEffect(() => {
+    if (!shown) return;
+    scroller.current
+      ?.querySelector(`[data-col="${shown.key}"]`)
+      ?.scrollIntoView({ inline: "nearest", block: "nearest" });
+  }, [shown]);
+  function toggleColumn(key: string) {
+    toggleCollapsed(key);
+    setShown({ key }); // a fresh object, so the same column twice still scrolls
+  }
+
   const marker = <div className="h-1 rounded-full bg-accent" aria-hidden />;
 
   return (
     <>
-      <div ref={scroller} className="-mx-4 flex snap-x gap-2 overflow-x-auto px-4 pb-3">
+      <div ref={scroller} className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-3">
         {columns.map((col) => {
           const items = columnCards(rows, col.key);
           const here = target?.status === col.key ? target.index : -1;
@@ -847,10 +873,10 @@ function BoardTab({
                 className={"w-9 shrink-0 rounded-xl border " + tone}
               >
                 <button
-                  onClick={() => toggleCollapsed(col.key)}
+                  onClick={() => toggleColumn(col.key)}
                   aria-expanded={false}
                   aria-label={`Show ${col.label}, ${items.length} tasks`}
-                  className="press flex h-full min-h-48 w-full flex-col items-center gap-2 py-3 text-sm font-medium text-neutral-500"
+                  className="flex h-full min-h-48 w-full touch-manipulation flex-col items-center gap-2 py-3 text-sm font-medium text-neutral-500"
                 >
                   <span aria-hidden>&rsaquo;</span>
                   <span className="[writing-mode:vertical-rl]">
@@ -863,11 +889,11 @@ function BoardTab({
             <section
               key={col.key}
               data-col={col.key}
-              className={"min-w-52 flex-1 snap-start rounded-xl border p-1.5 " + tone}
+              className={"min-w-52 flex-1 rounded-xl border p-1.5 " + tone}
             >
               <h3>
                 <button
-                  onClick={() => toggleCollapsed(col.key)}
+                  onClick={() => toggleColumn(col.key)}
                   aria-expanded
                   title="Collapse this column"
                   className="press flex min-h-9 w-full items-center gap-1.5 rounded-lg px-1 text-left text-sm font-medium text-neutral-500"

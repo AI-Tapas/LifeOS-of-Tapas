@@ -1986,6 +1986,11 @@ Tasks page selects the column.
   card dropped there goes on top). Which columns are collapsed is a per-device
   choice in localStorage (`life_os_board_collapsed`), like the theme. Open
   columns share the width, so one open column plus three strips fits 375 px.
+  NO scroll snap on the board (removed 7 Oct 2026): strips are not snap
+  points, so snapping slid a just-collapsed Unsorted strip off-screen, and on
+  iOS a tap during the snap settle is eaten, so strips needed several taps.
+  After a toggle an effect scrolls that column into view (after the redraw,
+  not in the click handler, which still measures the old width).
 - Board cards (`wrapTitle` on TaskItem) show the full title, put the due and
   agent badges on their own line and have no tick button: the Done column is
   how a board card is finished, and the room goes to the title.
