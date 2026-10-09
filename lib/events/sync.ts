@@ -198,11 +198,14 @@ async function applyEvents(
   const sourceByExt = new Map<string, string>();
   for (let i = 0; i < ids.length; i += 300) {
     const chunk = ids.slice(i, i + 300);
-    const { data } = await svc
+    const { data, error } = await svc
       .from("events")
       .select("ext_event_id, source")
       .eq("calendar_id", ctx.calendarId)
       .in("ext_event_id", chunk);
+    // A failed lookup must stop the batch: an empty map would rewrite every
+    // app-made event as 'synced' and lock it against editing in the app.
+    if (error) throw new Error(error.message);
     for (const row of data ?? []) {
       if (row.ext_event_id && (row.source === "app" || row.source === "reminder")) {
         sourceByExt.set(row.ext_event_id, row.source);
