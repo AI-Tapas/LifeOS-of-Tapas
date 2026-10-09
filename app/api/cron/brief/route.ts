@@ -21,6 +21,7 @@ import { setTaskStatus } from "@/lib/tasks/write";
 import type { MonthExpense } from "@/lib/trips/month";
 import type { Holding } from "@/lib/money/investments";
 import { syncFamilyTravel } from "@/lib/family/sync";
+import { syncAllEvents } from "@/lib/events/sync";
 import { cronAuthorized, alreadyRanToday } from "@/lib/cron/guard";
 import { addDays, civilKey, civilToday, civilWeekday, istInstant } from "@/lib/datetime";
 import { overlapsFrom } from "@/lib/events/window";
@@ -55,6 +56,10 @@ export async function GET(req: Request): Promise<Response> {
 
   // B29: the daily repair pass for the family travel calendar. It never throws
   // and a failure here never stops the brief.
+  // Pull the calendars first: until now they refreshed only when he opened
+  // the Calendar screen, so a brief after a few days away read a stale week.
+  // syncAllEvents never throws; a slow provider is reported, never fatal.
+  await syncAllEvents(userId);
   await syncFamilyTravel(userId);
 
   try {
