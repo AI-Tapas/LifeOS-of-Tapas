@@ -35,8 +35,8 @@ export async function buildAppContext(supabase: Db): Promise<string> {
 
   const [
     { data: streams },
-    { data: tasks },
-    { data: events },
+    { data: tasks, error: tasksError },
+    { data: events, error: eventsError },
     { data: pending },
     { data: accounts },
     { data: recentTrips },
@@ -78,6 +78,9 @@ export async function buildAppContext(supabase: Db): Promise<string> {
           `session_date.eq.${yesterdayKey},end_date.eq.${yesterdayKey},session_date.eq.${todayKey},end_date.eq.${todayKey}`
         ),
     ]);
+  // The agent must hear "the read failed", never an empty, healthy-looking day.
+  if (tasksError) throw new Error(`tasks read failed: ${tasksError.message}`);
+  if (eventsError) throw new Error(`events read failed: ${eventsError.message}`);
 
   const lines: string[] = [];
   lines.push(

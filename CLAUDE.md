@@ -1997,3 +1997,38 @@ Tasks page selects the column.
 - No connector or tool reads or writes the position. Overview and Home keep
   ranking by triage; the board order is his alone.
 - Tests: `npm run test:board` (5 offline).
+
+## Calendar and cron dependability pass (9 October 2026)
+
+Found while reviewing why the 8 October brief called a session day a rest
+day (sessions on the 7th, 8th and 9th). Do not regress any of these:
+
+- lib/health/recovery.ts recoveryTrips says nothing when today is itself a
+  session day. Home, the brief cron and the assistant context fetch today's
+  trips as well as yesterday's so the guard has what it needs.
+- Every "today" or "next 7 days" events query uses lib/events/window.ts
+  overlapsFrom (started before the window ends AND still running when it
+  starts), never start_ts >= window start: all-day rows start at 18:30Z the
+  previous day and multi-day sessions vanished. lifeos_list_events and the
+  context default to the start of today in IST, not this instant.
+- The brief cron runs syncAllEvents before composing; until then the events
+  table refreshed only when the Calendar screen was opened.
+- lib/cron/guard.ts alreadyRanToday treats a *_started row younger than
+  RUNNING_MINUTES as "running", so a redelivered tick cannot send two briefs
+  or scan twice. Both crons stamp a started row first and query both actions.
+- The brief sends a phone alert (briefNotSentAlert) when it is composed but
+  not emailed (ca_tapasnr needs reconnecting, send failed) or fails outright.
+  Fixed text only; no error message reaches the lock screen.
+- Google and Graph reads retry once on 429 or 5xx after Retry-After
+  (fetchWithRetry in lib/events/sync.ts), and the on-open sync shows the same
+  skipped-accounts notice the Refresh button shows.
+- The first sync of each IST month drops the provider cursor
+  (needsFullResync in lib/events/window.ts): a syncToken or deltaLink pins
+  the window of the first full fetch, so the 12-month horizon never moved and
+  the 60-day tail never purged. No new column.
+- Home, the brief and the assistant context throw on a failed tasks or
+  events read instead of rendering an empty, healthy-looking day. The
+  event sync throws on a failed source lookup rather than relabelling
+  app-made events as synced.
+- Tests: scripts/m7c.test.ts (recovery), m5 (guard), b33 (retry, monthly
+  resync, needsFullResync).

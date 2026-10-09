@@ -19,12 +19,23 @@ export function cronAuthorized(header: string | null): boolean {
 // with meta.ist_date on success and checks for one before doing real work.
 // A failed prior attempt does not stamp this, so a retry after a failure is
 // still allowed to run.
+//
+// Two ticks a few seconds apart both passed that check, because the success
+// row is written last. So a *_started row for today counts as "running" while
+// it is younger than RUNNING_MINUTES (longer than either route's time limit);
+// older than that it was cut off, and a re-run is allowed.
+export const RUNNING_MINUTES = 10;
+
 export function alreadyRanToday(
-  auditRows: Array<{ meta: unknown }>,
-  istDate: string
+  auditRows: Array<{ meta: unknown; action?: string; ts?: string }>,
+  istDate: string,
+  nowMs: number = Date.now()
 ): boolean {
   return auditRows.some((r) => {
     const meta = r.meta as { ist_date?: string } | null;
-    return meta?.ist_date === istDate;
+    if (meta?.ist_date !== istDate) return false;
+    if (!r.action?.endsWith("_started")) return true;
+    const age = nowMs - Date.parse(r.ts ?? "");
+    return Number.isFinite(age) && age < RUNNING_MINUTES * 60000;
   });
 }

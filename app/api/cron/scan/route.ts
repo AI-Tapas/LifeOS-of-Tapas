@@ -32,9 +32,9 @@ export async function GET(req: Request): Promise<Response> {
 
   const { data: recent } = await actor.supabase
     .from("audit_log")
-    .select("meta")
+    .select("action, ts, meta")
     .eq("user_id", actor.userId)
-    .eq("action", "cron_scan")
+    .in("action", ["cron_scan", "cron_scan_started"])
     .gte("ts", new Date(Date.now() - 36 * 3600 * 1000).toISOString());
   if (alreadyRanToday(recent ?? [], istDate)) {
     return Response.json({ skipped: true, reason: "already ran today" });
@@ -42,8 +42,9 @@ export async function GET(req: Request): Promise<Response> {
 
   // B24: stamped before any work, so the 7 AM brief can tell "never ran"
   // from "started and was cut off" (a Vercel timeout writes nothing else).
-  // The already-ran check above reads cron_scan rows only, so this row, like
-  // a cron_scan_failed row, never blocks a same-day manual re-run.
+  // The already-ran check above treats this row as "running" only while it is
+  // younger than RUNNING_MINUTES, so a cut-off run or a cron_scan_failed row
+  // never blocks a same-day manual re-run after that.
   await actor.supabase.from("audit_log").insert({
     user_id: actor.userId,
     actor: "assistant",

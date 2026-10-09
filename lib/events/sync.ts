@@ -8,6 +8,7 @@
 // needs_reauth (handled here as a graceful skip, never a raw 500).
 
 import { withResourceAuth } from "@/lib/oauth/tokens";
+import { needsFullResync } from "@/lib/events/window";
 import { createServiceClient } from "@/lib/supabase/service";
 import { TokenRevokedError } from "@/lib/oauth/core";
 import { parseGoogleEvent, parseGraphEvent, type ParsedEvent } from "@/lib/events/payload";
@@ -57,6 +58,22 @@ interface CalendarRow {
   sync_token: string | null;
   sync_enabled: boolean;
   is_family_travel: boolean | null;
+  last_synced_at: string | null;
+}
+
+// One retry on a rate limit or a provider-side error, after Retry-After (or
+// two seconds, never more than ten). A single blip used to fail the whole
+// account and, from the on-open sync, silently.
+async function fetchWithRetry(
+  accountId: string,
+  request: (token: string) => Promise<Response>
+): Promise<Response> {
+  const res = await withResourceAuth(accountId, request);
+  if (res.status !== 429 && res.status < 500) return res;
+  const after = Number(res.headers.get("retry-after"));
+  const waitMs = Math.min(after > 0 ? after * 1000 : 2000, 10000);
+  await new Promise((r) => setTimeout(r, waitMs));
+  return withResourceAuth(accountId, request);
 }
 
 export interface AccountSyncResult {
@@ -103,7 +120,7 @@ async function fetchGooglePages(
     }
     first = false;
 
-    const res = await withResourceAuth(accountId, (token) =>
+    const res = await fetchWithRetry(accountId, (token) =>
       fetch(`${base}?${p.toString()}`, {
         headers: { authorization: `Bearer ${token}` },
       })
@@ -155,7 +172,7 @@ async function fetchGraphPages(
   let deltaLink: string | null = null;
 
   for (let guard = 0; guard < 100; guard++) {
-    const res = await withResourceAuth(accountId, (token) =>
+    const res = await fetchWithRetry(accountId, (token) =>
       fetch(url, {
         headers: {
           authorization: `Bearer ${token}`,
@@ -293,11 +310,14 @@ async function syncOneCalendar(
   const { timeMin, timeMax } = windowRange();
   let parsed: ParsedEvent[] = [];
   let newCursor: string | null = null;
-  let fullResync = !cal.sync_token;
+  // First sync of the month drops the cursor so the window moves forward and
+  // the tail is purged (needsFullResync explains why).
+  const cursor = needsFullResync(cal.sync_token, cal.last_synced_at) ? null : cal.sync_token;
+  let fullResync = !cursor;
 
   if (account.provider === "google") {
     let page = await fetchGooglePages(account.id, cal.ext_calendar_id, {
-      syncToken: cal.sync_token,
+      syncToken: cursor,
       timeMin,
       timeMax,
     });
@@ -311,7 +331,7 @@ async function syncOneCalendar(
     newCursor = page.nextSyncToken;
   } else {
     let page = await fetchGraphPages(account.id, cal.ext_calendar_id, {
-      deltaLink: cal.sync_token,
+      deltaLink: cursor,
       timeMin,
       timeMax,
     });
@@ -352,7 +372,7 @@ async function syncAccount(
   }
   const { data: cals } = await svc
     .from("calendars")
-    .select("id, account_id, ext_calendar_id, sync_token, sync_enabled, is_family_travel")
+    .select("id, account_id, ext_calendar_id, sync_token, sync_enabled, is_family_travel, last_synced_at")
     .eq("account_id", account.id);
 
   let upserted = 0;

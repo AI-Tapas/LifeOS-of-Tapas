@@ -24,6 +24,7 @@ import {
   createEventAction,
   updateEventAction,
   deleteEventAction,
+  type SyncResult,
 } from "@/app/(app)/calendar/actions";
 import type { AppEventInput } from "@/lib/events/payload";
 import { dayHeading, eventDayKeys, keyToCivil } from "@/lib/calendar/grid";
@@ -103,7 +104,7 @@ export default function CalendarView({
     if (!stale) return;
     startTransition(async () => {
       try {
-        await syncEventsAction();
+        setNotice(noticeFor(await syncEventsAction()));
       } catch {
         setNotice(
           "Could not refresh from your calendars just now. Showing what was last synced. Use Refresh to try again."
@@ -123,19 +124,23 @@ export default function CalendarView({
     else if (view === "week") go("week", addDays(anchor, dir * 7));
     else go("month", addMonths(anchor, dir));
   }
+  // The same words for the automatic sync on open and the Refresh button:
+  // an account that failed used to be reported only by the button.
+  function noticeFor(r: SyncResult): string | null {
+    if (!r.ok) return "The sync did not finish. Your existing events are unchanged.";
+    if (r.skipped.length) {
+      return (
+        "Synced. Some accounts were skipped: " +
+        r.skipped.map((s) => `${s.slot ?? "account"} (${s.reason})`).join(", ")
+      );
+    }
+    return null;
+  }
   function manualRefresh() {
     setNotice(null);
     startTransition(async () => {
       try {
-        const r = await syncEventsAction();
-        if (!r.ok) {
-          setNotice("The sync did not finish. Your existing events are unchanged.");
-        } else if (r.skipped.length) {
-          setNotice(
-            "Synced. Some accounts were skipped: " +
-              r.skipped.map((s) => `${s.slot ?? "account"} (${s.reason})`).join(", ")
-          );
-        }
+        setNotice(noticeFor(await syncEventsAction()));
       } catch {
         setNotice(
           "Could not reach your calendars. Your existing events are unchanged."

@@ -337,6 +337,22 @@ test("alreadyRanToday", () => {
   assert.equal(alreadyRanToday([{ meta: {} }, { meta: null }], "2026-08-29"), false);
 });
 
+test("a fresh started row blocks a second tick; a stale one does not", () => {
+  const now = Date.parse("2026-08-29T01:31:00Z");
+  const started = (ts: string) => ({ action: "cron_brief_started", ts, meta: { ist_date: "2026-08-29" } });
+  assert.equal(alreadyRanToday([started("2026-08-29T01:30:30Z")], "2026-08-29", now), true, "running 30 s ago");
+  assert.equal(alreadyRanToday([started("2026-08-29T01:10:00Z")], "2026-08-29", now), false, "cut off 21 min ago");
+  assert.equal(
+    alreadyRanToday(
+      [started("2026-08-29T01:10:00Z"), { action: "cron_brief", ts: "2026-08-29T01:10:50Z", meta: { ist_date: "2026-08-29" } }],
+      "2026-08-29",
+      now
+    ),
+    true,
+    "a finished run blocks the rest of the day"
+  );
+});
+
 // --- IST date maths at the day boundary ------------------------------------
 
 test("civilToday resolves the IST calendar day, not the UTC one, across the midnight boundary", () => {

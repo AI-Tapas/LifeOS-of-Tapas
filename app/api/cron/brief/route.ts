@@ -13,7 +13,7 @@ import { ticketBriefLine } from "@/lib/trips/ticket";
 import { cabBriefLine } from "@/lib/trips/cab";
 import { SCAN_HEALTH_ACTIONS, scanHealthWarning } from "@/lib/brief/scan-health";
 import { keepBrief } from "@/lib/brief/store";
-import { scanFailedAlert } from "@/lib/push/core";
+import { briefNotSentAlert, scanFailedAlert } from "@/lib/push/core";
 import { sendPushQuietly } from "@/lib/push/send";
 import { briefStoreFor } from "@/lib/brief/store-db";
 import { loadTripSteps } from "@/lib/tasks/trip-steps";
@@ -46,13 +46,22 @@ export async function GET(req: Request): Promise<Response> {
 
   const { data: recent } = await supabase
     .from("audit_log")
-    .select("meta")
+    .select("action, ts, meta")
     .eq("user_id", userId)
-    .eq("action", "cron_brief")
+    .in("action", ["cron_brief", "cron_brief_started"])
     .gte("ts", new Date(Date.now() - 36 * 3600 * 1000).toISOString());
   if (alreadyRanToday(recent ?? [], istDate)) {
     return Response.json({ skipped: true, reason: "already ran today" });
   }
+  // Stamped before any work: a second tick within RUNNING_MINUTES sees it and
+  // stops, so a redelivered cron cannot send two briefs.
+  await supabase.from("audit_log").insert({
+    user_id: userId,
+    actor: "assistant",
+    action: "cron_brief_started",
+    entity: "cron",
+    meta: { ist_date: istDate } as Json,
+  });
 
   // B29: the daily repair pass for the family travel calendar. It never throws
   // and a failure here never stops the brief.
@@ -67,7 +76,7 @@ export async function GET(req: Request): Promise<Response> {
     const dayStart = istInstant(today, 0, 0).toISOString();
     const dayEnd = istInstant(today, 23, 59).toISOString();
 
-    const [{ data: tasks }, tripSteps, { data: streams }, { data: events }, { count: pendingCount }, { data: needsReauth }, { data: briefAccount }, { data: reminderRows }, { data: expenseRows }, { data: holdingRows }, { data: recentTripRows }] =
+    const [{ data: tasks, error: tasksError }, tripSteps, { data: streams }, { data: events, error: eventsError }, { count: pendingCount }, { data: needsReauth }, { data: briefAccount }, { data: reminderRows }, { data: expenseRows }, { data: holdingRows }, { data: recentTripRows }] =
       await Promise.all([
         supabase
           .from("tasks")
@@ -128,6 +137,9 @@ export async function GET(req: Request): Promise<Response> {
             `session_date.eq.${civilKey(addDays(today, -1))},end_date.eq.${civilKey(addDays(today, -1))},session_date.eq.${civilKey(today)},end_date.eq.${civilKey(today)}`
           ),
       ]);
+    // A failed read is a failed brief, never an empty day that looks healthy.
+    if (tasksError) throw new Error(`tasks read failed: ${tasksError.message}`);
+    if (eventsError) throw new Error(`events read failed: ${eventsError.message}`);
 
     // B20, beside the trip-step sweep: an open task whose window closed
     // before today (lapses_on) is dropped, never deleted, in ONE undoable
@@ -344,6 +356,7 @@ export async function GET(req: Request): Promise<Response> {
         entity: "cron",
         meta: { ist_date: istDate, reason: "ca_tapasnr not connected" } as Json,
       });
+      await sendPushQuietly(supabase, userId, briefNotSentAlert("reconnect"));
       return Response.json({ skipped: true, reason: "ca_tapasnr not connected" });
     }
 
@@ -366,6 +379,7 @@ export async function GET(req: Request): Promise<Response> {
         entity: "cron",
         meta: { ist_date: istDate, reason: message } as Json,
       });
+      await sendPushQuietly(supabase, userId, briefNotSentAlert("send_failed"));
       return Response.json({ skipped: true, reason: message });
     }
   } catch (e) {
@@ -377,6 +391,7 @@ export async function GET(req: Request): Promise<Response> {
       entity: "cron",
       meta: { ist_date: istDate, message } as Json,
     });
+    await sendPushQuietly(supabase, userId, briefNotSentAlert("failed"));
     return Response.json({ ok: false, error: message }, { status: 500 });
   }
 }

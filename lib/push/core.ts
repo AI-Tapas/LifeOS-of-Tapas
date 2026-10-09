@@ -93,6 +93,23 @@ export function scanFailedAlert(line: string): PushMessage {
   return shapePush({ title: "Mail scan problem", body: line, url: "/" });
 }
 
+// The brief was composed but not emailed, or failed outright. Until now the
+// only trace was an audit row nothing reads. The body is fixed text: a raw
+// error could carry an address or a provider message.
+export function briefNotSentAlert(reason: "reconnect" | "send_failed" | "failed"): PushMessage {
+  const body =
+    reason === "reconnect"
+      ? "Reconnect ca_tapasnr in Settings, then open Home for today's plan."
+      : reason === "send_failed"
+        ? "The email could not be sent. Open Home for today's plan."
+        : "The brief failed before it was composed. Open Home for today's plan.";
+  return shapePush({
+    title: "Morning brief not sent",
+    body,
+    url: reason === "reconnect" ? "/settings" : "/",
+  });
+}
+
 // ---------------------------------------------------------------------------
 // lifeos_notify validation
 // ---------------------------------------------------------------------------

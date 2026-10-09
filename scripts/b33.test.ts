@@ -18,6 +18,7 @@ import {
   weekHeads,
 } from "../lib/calendar/grid.ts";
 import { istInstant } from "../lib/datetime.ts";
+import { needsFullResync } from "../lib/events/window.ts";
 
 register("./b33-sync-loader.mjs", import.meta.url);
 const { syncAllEvents } = await import("../lib/events/sync.ts");
@@ -193,4 +194,45 @@ test("the B29 sync never reads or writes the events table", () => {
     const src = readFileSync(new URL(`../lib/family/${f}`, import.meta.url), "utf8");
     assert.ok(!/from\(\s*"events"\s*\)/.test(src), f);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Dependability: retry on a rate limit, and a monthly full resync
+// ---------------------------------------------------------------------------
+test("a 429 from Google is retried once and the sync still completes", async () => {
+  seed();
+  world.tables.calendars[1].is_family_travel = null;
+  let calls = 0;
+  const good = globalThis.fetch;
+  globalThis.fetch = (async (url: string) => {
+    calls++;
+    if (calls === 1) return new Response("slow down", { status: 429, headers: { "retry-after": "0" } });
+    return good(url);
+  }) as typeof fetch;
+  const r = await syncAllEvents(USER);
+  assert.equal(r[0].error, undefined, "the account did not fail");
+  assert.ok(calls >= 3, "the first call was retried");
+});
+
+test("the first sync of a new month drops the cursor and fetches the full window", async () => {
+  seed();
+  world.tables.calendars[1].is_family_travel = null;
+  world.tables.calendars[0].sync_token = "old-cursor";
+  world.tables.calendars[0].last_synced_at = new Date(Date.now() - 40 * 86400000).toISOString();
+  world.tables.calendars[1].sync_token = "fresh-cursor";
+  world.tables.calendars[1].last_synced_at = new Date().toISOString();
+  await syncAllEvents(USER);
+  const main = world.fetched.find((u) => u.includes("/calendars/main/"))!;
+  const fam = world.fetched.find((u) => u.includes("/calendars/family/"))!;
+  assert.ok(!main.includes("syncToken=") && main.includes("timeMin="), "stale cursor dropped, window sent");
+  assert.ok(fam.includes("syncToken=fresh-cursor"), "a cursor from this month is kept");
+});
+
+test("needsFullResync: no cursor, no date, or a different IST month", () => {
+  const now = Date.parse("2026-10-09T05:00:00Z");
+  assert.equal(needsFullResync(null, "2026-10-08T05:00:00Z", now), true);
+  assert.equal(needsFullResync("tok", null, now), true);
+  assert.equal(needsFullResync("tok", "2026-10-01T05:00:00Z", now), false);
+  assert.equal(needsFullResync("tok", "2026-09-30T18:00:00Z", now), true, "30 Sept 23:30 IST is last month");
+  assert.equal(needsFullResync("tok", "2026-09-30T18:30:00Z", now), false, "1 Oct 00:00 IST is this month");
 });

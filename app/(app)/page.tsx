@@ -91,8 +91,8 @@ export default async function DashboardPage() {
   // embedded join cost about 870ms where two plain queries cost about 390ms
   // in total, and this runs on the first screen of every visit.
   const [
-    { data: events },
-    { data: tasks },
+    { data: events, error: eventsError },
+    { data: tasks, error: tasksError },
     tripSteps,
     { data: streams },
     { count: pendingCount },
@@ -139,6 +139,10 @@ export default async function DashboardPage() {
           `session_date.eq.${yesterdayKey},end_date.eq.${yesterdayKey},session_date.eq.${todayKey},end_date.eq.${todayKey}`
         ),
     ]);
+  // A failed read must not render as "Nothing urgent right now". The error
+  // boundary in error.tsx shows it and offers a reload.
+  if (eventsError) throw new Error(`events read failed: ${eventsError.message}`);
+  if (tasksError) throw new Error(`tasks read failed: ${tasksError.message}`);
 
   type Row = NonNullable<typeof tasks>[number];
   // Checklist steps come out of the flat list and go back in as one row per
