@@ -23,6 +23,7 @@ import type { Holding } from "@/lib/money/investments";
 import { syncFamilyTravel } from "@/lib/family/sync";
 import { cronAuthorized, alreadyRanToday } from "@/lib/cron/guard";
 import { addDays, civilKey, civilToday, civilWeekday, istInstant } from "@/lib/datetime";
+import { overlapsFrom } from "@/lib/events/window";
 import { loadUnbilled } from "@/lib/billing/load";
 import { summarise, type UnbilledSummary } from "@/lib/billing/unbilled";
 import { loadLastWeekHours } from "@/lib/hours/load";
@@ -76,8 +77,8 @@ export async function GET(req: Request): Promise<Response> {
           .from("events")
           .select("id, title, start_ts, all_day, ext_event_id, accounts(slot, label)")
           .eq("user_id", userId)
-          .gte("start_ts", dayStart)
           .lte("start_ts", dayEnd)
+          .or(overlapsFrom(dayStart))
           .order("start_ts"),
         supabase
           .from("assistant_actions")
@@ -119,7 +120,7 @@ export async function GET(req: Request): Promise<Response> {
           .select("id, title, status, session_label, session_date, end_date, cities")
           .eq("user_id", userId)
           .or(
-            `session_date.eq.${civilKey(addDays(today, -1))},end_date.eq.${civilKey(addDays(today, -1))}`
+            `session_date.eq.${civilKey(addDays(today, -1))},end_date.eq.${civilKey(addDays(today, -1))},session_date.eq.${civilKey(today)},end_date.eq.${civilKey(today)}`
           ),
       ]);
 

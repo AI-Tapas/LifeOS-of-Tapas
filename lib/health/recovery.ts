@@ -46,9 +46,13 @@ export function sessionLabel(t: RecoveryTrip): string {
 // Cancelled trips never count: he did not stand up anywhere.
 export function recoveryTrips(trips: RecoveryTrip[], today: CivilDate): RecoveryTrip[] {
   const yesterday = civilKey(addDays(today, -1));
-  return trips.filter(
-    (t) => t.status !== "cancelled" && sessionDayKey(t) === yesterday
-  );
+  const todayKey = civilKey(today);
+  const live = trips.filter((t) => t.status !== "cancelled");
+  // A back-to-back run (sessions on the 7th, 8th and 9th) has no recovery day
+  // in the middle: the day after a session that is itself a session day is a
+  // working day, and calling it a rest day was wrong on 8 October 2026.
+  if (live.some((t) => sessionDayKey(t) === todayKey)) return [];
+  return live.filter((t) => sessionDayKey(t) === yesterday);
 }
 
 // One plain line, in the weekend guard's voice. Null when there is nothing to

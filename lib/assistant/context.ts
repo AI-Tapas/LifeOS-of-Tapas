@@ -10,7 +10,9 @@ import {
   formatDateIST,
   formatDateTimeIST,
   formatWeekdayIST,
+  istInstant,
 } from "@/lib/datetime";
+import { overlapsFrom } from "@/lib/events/window";
 import { taskContextLines } from "./context-tasks";
 import { streamRateLine, type StreamRate } from "@/lib/money/rates";
 import {
@@ -29,6 +31,7 @@ export async function buildAppContext(supabase: Db): Promise<string> {
   const weekAhead = new Date(now.getTime() + 7 * 86400000).toISOString();
   const today = civilToday(now.getTime());
   const yesterdayKey = civilKey(addDays(today, -1));
+  const todayKey = civilKey(today);
 
   const [
     { data: streams },
@@ -54,8 +57,8 @@ export async function buildAppContext(supabase: Db): Promise<string> {
       supabase
         .from("events")
         .select("title, start_ts, all_day, accounts(slot)")
-        .gte("start_ts", now.toISOString())
         .lte("start_ts", weekAhead)
+        .or(overlapsFrom(istInstant(today, 0, 0).toISOString()))
         .order("start_ts")
         .limit(15),
       supabase
@@ -71,7 +74,9 @@ export async function buildAppContext(supabase: Db): Promise<string> {
       supabase
         .from("trips")
         .select("id, title, status, session_label, session_date, end_date, cities")
-        .or(`session_date.eq.${yesterdayKey},end_date.eq.${yesterdayKey}`),
+        .or(
+          `session_date.eq.${yesterdayKey},end_date.eq.${yesterdayKey},session_date.eq.${todayKey},end_date.eq.${todayKey}`
+        ),
     ]);
 
   const lines: string[] = [];

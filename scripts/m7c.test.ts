@@ -471,3 +471,18 @@ test("the note tools can link a note to a task and a trip", () => {
     assert.ok(!req.includes("task_id") && !req.includes("trip_id"), "the links must stay optional");
   }
 });
+
+test("a session day in a back-to-back run is never a recovery day (8 October 2026)", () => {
+  // Sessions on the 7th, 8th and 9th: the brief on the 8th must not call it
+  // a rest day because the 7th was a session.
+  const yesterday = trip({ id: "t1", session_date: "2026-10-07", cities: ["Bengaluru"] });
+  const todayTrip = trip({ id: "t2", session_date: "2026-10-08", cities: ["Delhi"] });
+  const tomorrow = trip({ id: "t3", session_date: "2026-10-09", cities: ["Surat"] });
+  const oct8: CivilDate = { y: 2026, m: 10, d: 8 };
+  assert.equal(recoveryTrips([yesterday, todayTrip, tomorrow], oct8).length, 0);
+  // A cancelled session today does not cancel the recovery day.
+  const cancelled = trip({ id: "t2", session_date: "2026-10-08", status: "cancelled" });
+  assert.equal(recoveryTrips([yesterday, cancelled], oct8).length, 1);
+  // The 10th, with nothing on, is the recovery day after the 9th.
+  assert.equal(recoveryTrips([yesterday, todayTrip, tomorrow], { y: 2026, m: 10, d: 10 }).length, 1);
+});

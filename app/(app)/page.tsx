@@ -14,6 +14,7 @@ import {
   istInstant,
   startOfWeek,
 } from "@/lib/datetime";
+import { overlapsFrom } from "@/lib/events/window";
 import { triage, needsDeadline, weekendGuard } from "@/lib/tasks/triage";
 import { loadTripSteps } from "@/lib/tasks/trip-steps";
 import {
@@ -82,6 +83,7 @@ export default async function DashboardPage() {
   const dayStart = istInstant(today, 0, 0).toISOString();
   const dayEnd = istInstant(today, 23, 59).toISOString();
   const yesterdayKey = civilKey(addDays(today, -1));
+  const todayKey = civilKey(today);
 
   // Seven independent reads in parallel. The stream name is fetched as its own
   // small table and joined in memory rather than through an embedded
@@ -101,8 +103,8 @@ export default async function DashboardPage() {
       supabase
         .from("events")
         .select("id, title, start_ts, all_day, accounts(slot)")
-        .gte("start_ts", dayStart)
         .lte("start_ts", dayEnd)
+        .or(overlapsFrom(dayStart))
         .order("start_ts"),
       supabase
         .from("tasks")
@@ -133,7 +135,9 @@ export default async function DashboardPage() {
       supabase
         .from("trips")
         .select("id, title, status, session_label, session_date, end_date, cities")
-        .or(`session_date.eq.${yesterdayKey},end_date.eq.${yesterdayKey}`),
+        .or(
+          `session_date.eq.${yesterdayKey},end_date.eq.${yesterdayKey},session_date.eq.${todayKey},end_date.eq.${todayKey}`
+        ),
     ]);
 
   type Row = NonNullable<typeof tasks>[number];
@@ -212,7 +216,6 @@ export default async function DashboardPage() {
   ];
   const weekendRisk = weekendGuard(open, civilWeekday(today), guardKeys, nowMs);
 
-  const todayKey = civilKey(today);
   const dueReviews = reviewsDue(
     (holdings ?? []) as Holding[],
     todayKey,

@@ -84,6 +84,7 @@ import {
   formatDateTimeIST,
   istInstant,
 } from "@/lib/datetime";
+import { overlapsFrom } from "@/lib/events/window";
 import { parseLegs } from "@/lib/trips/core";
 
 export const READ_TOOL_NAMES = MCP_READ_TOOLS;
@@ -126,8 +127,11 @@ export const READ_TOOL_SCHEMAS: Record<string, Record<string, unknown>> = {
   lifeos_list_events: {
     type: "object",
     properties: {
-      from: { type: "string", description: "ISO instant to start from. Defaults to now." },
-      days: { type: "integer", description: "Window length in days, default 7." },
+      from: {
+        type: "string",
+        description: "ISO instant to start from. Defaults to the start of today in IST, so events already under way today are included.",
+      },
+      days: { type: "integer", description: "Window length in days, default 7. Events that started before the window but are still running inside it are included." },
       limit: { type: "integer", description: "1 to 100, default 25." },
       offset: { type: "integer", description: "For paging, default 0." },
     },
@@ -982,7 +986,10 @@ export async function runReadTool(
   }
 
   if (name === "lifeos_list_events") {
-    const from = typeof input.from === "string" ? input.from : new Date().toISOString();
+    // Defaults to the start of today (IST), not this instant: a brief run at
+    // 10:26 am must still see the 9:30 am session and the day's all-day rows.
+    const from =
+      typeof input.from === "string" ? input.from : istInstant(civilToday(), 0, 0).toISOString();
     const days = Number.isFinite(Number(input.days)) ? Number(input.days) : 7;
     const to = new Date(new Date(from).getTime() + days * 86400000).toISOString();
     const { data, count, error } = await supabase
@@ -990,8 +997,8 @@ export async function runReadTool(
       .select("id, title, start_ts, end_ts, all_day, location, accounts(slot)", {
         count: "exact",
       })
-      .gte("start_ts", from)
       .lte("start_ts", to)
+      .or(overlapsFrom(from))
       .order("start_ts")
       .range(offset, offset + limit - 1);
     if (error) throw new Error(error.message);
