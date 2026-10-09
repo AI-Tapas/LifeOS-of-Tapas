@@ -98,6 +98,7 @@ export default async function DashboardPage() {
     { count: pendingCount },
     { data: holdings },
     { data: recentTrips },
+    hours,
   ] =
     await Promise.all([
       supabase
@@ -138,6 +139,19 @@ export default async function DashboardPage() {
         .or(
           `session_date.eq.${yesterdayKey},end_date.eq.${yesterdayKey},session_date.eq.${todayKey},end_date.eq.${todayKey}`
         ),
+      // B32: billable hours this month against the target. A failed read (the
+      // migration not yet applied, say) leaves the card out and never breaks
+      // Home. It used to run after the batch, a second round trip on every open.
+      (async () => {
+        try {
+          const {
+            data: { user },
+          } = await supabase.auth.getUser();
+          return user ? await loadMonthHours(supabase, user.id, nowMs) : null;
+        } catch {
+          return null;
+        }
+      })(),
     ]);
   // A failed read must not render as "Nothing urgent right now". The error
   // boundary in error.tsx shows it and offers a reload.
@@ -194,18 +208,6 @@ export default async function DashboardPage() {
     // B19: work that cannot start yet is counted, never listed or urgent.
     waiting_count: bandsRaw.waiting.length,
   };
-  // B32: billable hours this month against the target. A failed read (the
-  // migration not yet applied, say) leaves the card out and never breaks Home.
-  const hours = await (async () => {
-    try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      return user ? await loadMonthHours(supabase, user.id, nowMs) : null;
-    } catch {
-      return null;
-    }
-  })();
   // B26: agent results waiting on him, over every open task (trip steps too).
   const agentLine = needsYouLine(needsYouCount((tasks ?? []) as Row[]));
   const inboxCount = open.filter((t) => t.status === "inbox").length;

@@ -24,6 +24,7 @@ import {
   shortDayLabel,
   tripDatesLabel,
   travelDiffersFromSession,
+  effectiveTripStatus,
 } from "@/lib/trips/core";
 import { foldJourneys, journeyCities, type ListEntry } from "@/lib/trips/journey";
 import {
@@ -174,7 +175,7 @@ export default function TripsView({
             <div className="space-y-2">
               {items.map((t, i) => (
                 <div key={entryKey(t)}>
-                  <EntryCard entry={t} />
+                  <EntryCard entry={t} todayKey={todayKey} />
                   <ChainHint previous={items[i]} next={items[i + 1]} />
                 </div>
               ))}
@@ -188,7 +189,7 @@ export default function TripsView({
           <SectionLabel className="mb-2">Past trips</SectionLabel>
           <div className="space-y-2">
             {past.map((t) => (
-              <EntryCard key={entryKey(t)} entry={t} />
+              <EntryCard key={entryKey(t)} entry={t} todayKey={todayKey} />
             ))}
           </div>
         </section>
@@ -217,8 +218,12 @@ function entryKey(e: Entry): string {
   return e.kind === "trip" ? e.trip.id : `journey:${e.journey_id}`;
 }
 
-function EntryCard({ entry }: { entry: Entry }) {
-  return entry.kind === "trip" ? <TripCard trip={entry.trip} /> : <JourneyCard entry={entry} />;
+function EntryCard({ entry, todayKey }: { entry: Entry; todayKey: string }) {
+  return entry.kind === "trip" ? (
+    <TripCard trip={entry.trip} todayKey={todayKey} />
+  ) : (
+    <JourneyCard entry={entry} />
+  );
 }
 
 // B28. One card for a journey: its cities in travel order, its dates, and
@@ -262,7 +267,7 @@ function JourneyCard({ entry }: { entry: Extract<Entry, { kind: "journey" }> }) 
   );
 }
 
-function TripCard({ trip }: { trip: TripRow }) {
+function TripCard({ trip, todayKey }: { trip: TripRow; todayKey: string }) {
   const session = sessionLine(trip.session_label, trip.session_date);
   // Only worth a line when it says something the session date does not: a
   // day return would just repeat itself.
@@ -321,7 +326,7 @@ function TripCard({ trip }: { trip: TripRow }) {
         </p>
       )}
       <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
-        <StatusTrail status={trip.status} />
+        <StatusTrail status={effectiveTripStatus(trip, todayKey)} />
         <span className="text-sm font-semibold">
           {trip.billable_total > 0 ? formatINR(trip.billable_total) : ""}
           {trip.expense_count === 0 && (

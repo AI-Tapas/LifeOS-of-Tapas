@@ -233,6 +233,26 @@ export function stripHomeCity(cities: string[]): string[] {
 // ---------------------------------------------------------------------------
 // Trip purpose (B28 moved the labels here so a test can walk them)
 // ---------------------------------------------------------------------------
+// What the status trail shows today. He rarely taps a trip forward, so every
+// past trip sat at "Planned" and the trail said nothing. A planned or booked
+// trip is underway from its first day and done once its last day has passed;
+// billed, done and cancelled are his own words and stand. Display only:
+// nothing is written, and a tap on the trail still records what he chose.
+export type TrailStatus = "planned" | "booked" | "underway" | "done" | "billed" | "cancelled";
+
+export function effectiveTripStatus(
+  t: { status: TrailStatus; start_date: string | null; end_date: string | null },
+  todayKey: string
+): TrailStatus {
+  if (t.status !== "planned" && t.status !== "booked") return t.status;
+  const first = t.start_date ?? t.end_date;
+  const last = t.end_date ?? t.start_date;
+  if (!first || !last) return t.status;
+  if (last < todayKey) return "done";
+  if (first <= todayKey) return "underway";
+  return t.status;
+}
+
 export const TRIP_PURPOSES = ["aica", "conference", "leisure", "other", "training"] as const;
 export type TripPurposeValue = (typeof TRIP_PURPOSES)[number];
 

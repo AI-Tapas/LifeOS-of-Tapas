@@ -2032,3 +2032,22 @@ day (sessions on the 7th, 8th and 9th). Do not regress any of these:
   app-made events as synced.
 - Tests: scripts/m7c.test.ts (recovery), m5 (guard), b33 (retry, monthly
   resync, needsFullResync).
+
+## Ease-of-use pass (9 October 2026)
+
+- Trip status advances by date on every surface (lib/trips/core.ts
+  effectiveTripStatus, tested in scripts/m6.test.ts): a planned or booked
+  trip reads Underway from its first day and Done after its last, because he
+  never tapped the trail and every past trip sat at Planned. Display only;
+  nothing is written, a tap on the trail still records his choice, and
+  lifeos_list_trips returns both status (effective) and recorded_status.
+- Home's hours card read runs inside the one parallel batch, not after it.
+- Calendar noise on a travel day was the family calendar's copies ("In
+  <city> (full day)", "Flight A to B") synced back as his own events. The
+  B33 purge removes them, but it only ran when the Calendar screen opened;
+  the brief cron now syncs daily, so the copies go by the next morning once
+  Settings marks the family calendar (is_family_travel). The trip's own
+  all-day entry, his flight event and the session event stay: three rows
+  for a travel day is the design, not noise.
+- The nine-tab bottom bar stays as it is: a "More" sheet was tried earlier
+  and rejected (components/nav.tsx says why). Revisit only if he asks.

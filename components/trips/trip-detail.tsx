@@ -31,6 +31,7 @@ import {
   TRANSPORT_MODES,
   billableTotal,
   dayLabel,
+  effectiveTripStatus,
   tripDatesLabel,
   type ExpenseCategory,
   type TransportMode,
@@ -221,7 +222,7 @@ export default function TripDetail({
       ) : null}
 
       <div className="mt-3">
-        <StatusTrail status={trip.status} onPick={setStatus} disabled={pending} />
+        <StatusTrail status={effectiveTripStatus(trip, todayKey)} onPick={setStatus} disabled={pending} />
       </div>
 
       {err && <p className="mt-3 text-sm text-overdue">{err}</p>}

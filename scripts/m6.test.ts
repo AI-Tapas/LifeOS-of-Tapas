@@ -25,6 +25,7 @@ import {
   EXPENSE_CATEGORIES,
   TRANSPORT_MODES,
   billableTotal,
+  effectiveTripStatus,
   parseLegs,
   type BillableExpense,
   sessionLine,
@@ -459,4 +460,18 @@ test("a bad or missing date never renders as junk", () => {
   for (const bad of [null, "", "not-a-date", "2026-9-4"]) {
     assert.equal(shortDayLabel(bad), "", `junk from ${String(bad)}`);
   }
+});
+
+test("a trip nobody tapped forward still reads underway, then done, by its dates", () => {
+  const t = { status: "planned" as const, start_date: "2026-10-08", end_date: "2026-10-09" };
+  assert.equal(effectiveTripStatus(t, "2026-10-07"), "planned");
+  assert.equal(effectiveTripStatus(t, "2026-10-08"), "underway");
+  assert.equal(effectiveTripStatus(t, "2026-10-09"), "underway");
+  assert.equal(effectiveTripStatus(t, "2026-10-10"), "done");
+  // His own later words stand, and a trip with no dates says nothing new.
+  assert.equal(effectiveTripStatus({ ...t, status: "billed" }, "2026-10-10"), "billed");
+  assert.equal(effectiveTripStatus({ ...t, status: "cancelled" }, "2026-10-10"), "cancelled");
+  assert.equal(effectiveTripStatus({ status: "planned", start_date: null, end_date: null }, "2026-10-10"), "planned");
+  // One date only: that day is the whole trip.
+  assert.equal(effectiveTripStatus({ status: "booked", start_date: "2026-10-09", end_date: null }, "2026-10-09"), "underway");
 });

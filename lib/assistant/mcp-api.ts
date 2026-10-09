@@ -85,7 +85,7 @@ import {
   istInstant,
 } from "@/lib/datetime";
 import { overlapsFrom } from "@/lib/events/window";
-import { parseLegs } from "@/lib/trips/core";
+import { effectiveTripStatus, parseLegs } from "@/lib/trips/core";
 
 export const READ_TOOL_NAMES = MCP_READ_TOOLS;
 
@@ -1187,7 +1187,10 @@ export async function runReadTool(
         id: t.id,
         title: t.title,
         purpose: t.purpose,
-        status: t.status,
+        // Advanced by date (underway, done) when he never tapped it forward;
+        // recorded_status is the word he actually chose.
+        status: effectiveTripStatus(t, civilKey(civilToday())),
+        recorded_status: t.status,
         // Which session this trip is for, and the day he actually teaches.
         // Writable through create_trip and update_trip, so it has to be
         // readable here: nothing writable is invisible.
