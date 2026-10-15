@@ -3,6 +3,10 @@
 Single-user PWA: executive assistant and work-life second brain for a
 practising CA in Ahmedabad, India. Sole user: tapas.tnr@gmail.com.
 
+## Security, usability and MCP handoff (15 October 2026)
+
+Read [docs/CLAUDE_HANDOFF_2026-10-15.md](docs/CLAUDE_HANDOFF_2026-10-15.md) before continuing this implementation or deploying. It maps findings to changes, explains new migrations and MCP contracts, records validation limits, and links the historical review. This section and its linked implementation notes supersede older descriptions of private offline caching, OAuth lifecycle, connector capabilities, and Undo state handling below. Existing OAuth clients must explicitly consent again after migration.
+
 ## Stack
 
 - Next.js (App Router, TypeScript, Tailwind CSS). Next 16, so builds use
@@ -2051,3 +2055,27 @@ day (sessions on the 7th, 8th and 9th). Do not regress any of these:
   for a travel day is the design, not noise.
 - The nine-tab bottom bar stays as it is: a "More" sheet was tried earlier
   and rejected (components/nav.tsx says why). Revisit only if he asks.
+
+## ICAI mailbox and Save to drafts (B36, 15 October 2026)
+
+Migrations `20261015000600_saved_as_draft_enum.sql` and
+`20261015000700_saved_as_draft_guard.sql`. NOT applied anywhere when written.
+
+- Tapas confirmed the icai.org Workspace does not block this app. The icai slot
+  now asks for the same Google scopes as ca_tapasnr (`GOOGLE_RW`) and is a
+  normal mailbox for list inbox, read thread, read attachment, save reply draft
+  and send_email (still queued for owner approval, never autonomous). It shows
+  Reconnect in Settings until regranted with `gmail.compose` and `gmail.send`.
+  This supersedes the B18 and B22 lines above that say icai is refused.
+- The ICAI CALENDAR stays read-only in code (`ReadOnlyAccountError`, the
+  calendar page filter, `add_event_solo` and `propose_event_with_invites`
+  enums). The forwarded fallback still works but is optional.
+- Save to drafts: a third button on a queued send_email (Approve send, Save to
+  drafts, Reject). `saveQueuedToDrafts` (lib/assistant/queued-draft.ts, pure)
+  makes a draft in the sending mailbox (a reply draft when the payload carries a
+  thread_id, else `saveNewDraft` in mailbox.ts, same header validation), then
+  closes the action as `saved_as_draft` (guard allows proposed -> saved_as_draft
+  only). A failed draft leaves the action queued. Owner server action only
+  (`saveToDraftsAction`); no MCP tool reaches it. History shows "Saved to
+  drafts in <mailbox>".
+- Tests: scripts/b36.test.ts and scripts/saved-as-draft-sql.test.ts.

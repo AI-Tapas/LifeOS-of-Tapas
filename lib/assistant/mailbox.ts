@@ -28,6 +28,7 @@
 
 import { addressOf, isAppGeneratedMail, mayReadMailContent } from "./scan-filters.ts";
 import { MAIL_SLOTS, disclosureOf } from "./tools.ts";
+import { checkedAddresses, checkedHeader, plainTextMime } from "./mail-headers.ts";
 
 export const LIST_INBOX_TOOL = "lifeos_list_inbox";
 export const READ_THREAD_TOOL = "lifeos_read_mail_thread";
@@ -75,9 +76,6 @@ export function reconnectMessage(slot: string): string {
 
 export function checkMailSlot(v: unknown): string {
   const slot = typeof v === "string" ? v.trim() : "";
-  if (slot === "icai") {
-    throw new Error("The icai mailbox is not open to these mail tools.");
-  }
   if (!MAIL_SLOTS.includes(slot)) {
     throw new Error(`account must be one of ${MAIL_SLOTS.join(", ")}.`);
   }
@@ -1124,6 +1122,128 @@ export async function saveReplyDraft(
     ...rec,
     subject: d.subject ?? shell.subject ?? replySubject(last.subject ?? ""),
   };
+}
+
+// B36: what a reply SEND needs from the thread, read only. Gmail: the last
+// real message's Message-ID and References. Graph: the id of its last real
+// message (the reply is made on that message). Throws notFound for a missing
+// thread. The send itself lives in execute.ts, not here.
+export interface ThreadReplyContext {
+  message_id: string;
+  references: string;
+  subject: string; // the thread's own subject, as the last message carries it
+}
+
+export async function threadReplyContext(
+  request: MailRequest,
+  account: MailAccount,
+  threadId: string
+): Promise<ThreadReplyContext> {
+  if (account.provider === "google") {
+    const res = await request(
+      `${GMAIL}/threads/${encodeURIComponent(threadId)}?` +
+        new URLSearchParams({ format: "metadata" }) +
+        ["Message-ID", "References", "Subject"].map((h) => `&metadataHeaders=${h}`).join("")
+    );
+    if (res.status === 400 || res.status === 404) throw notFound(account.slot, threadId);
+    await ensureOk(res, account.slot, "Reading the thread");
+    const t = (await res.json()) as { messages?: GmailMessage[] };
+    const last = sentMessages(t.messages).pop();
+    if (!last) throw notFound(account.slot, threadId);
+    const mid = gHeader(last.payload, "Message-ID");
+    return {
+      message_id: mid,
+      references: `${gHeader(last.payload, "References")} ${mid}`.trim(),
+      subject: gHeader(last.payload, "Subject"),
+    };
+  }
+  const msgs = await graphConversation(request, account, threadId, "id,isDraft,subject");
+  const lastMsg = msgs[msgs.length - 1];
+  return { message_id: lastMsg.id, references: "", subject: lastMsg.subject ?? "" };
+}
+
+// B36: a NEW (not reply) draft with the recipients, subject and body Tapas saw
+// in the queue. Like saveReplyDraft it only creates a draft: Gmail drafts.create
+// or Graph POST /messages (which makes a draft in Drafts). Never a send. The
+// same header validation as the send path runs first, and the draft carries no
+// X-Life-OS stamp, for the reason given at the top of this file.
+export interface NewDraftInput {
+  to: string[];
+  cc: string[];
+  subject: string;
+  body: string;
+  // Set for a reply: the draft is made in that thread, with exactly the
+  // recipients, subject and body given (never derived from the thread).
+  thread_id?: string;
+}
+
+export async function saveNewDraft(
+  request: MailRequest,
+  account: MailAccount,
+  input: NewDraftInput
+): Promise<ReplyDraftResult> {
+  const to = checkedAddresses(input.to);
+  const cc = checkedAddresses(input.cc);
+  const subject = checkedHeader(input.subject, "Subject");
+  if (!to.length) throw new Error("No recipients.");
+  if (account.provider === "google") {
+    const ctx = input.thread_id ? await threadReplyContext(request, account, input.thread_id) : null;
+    const mime = plainTextMime({
+      from: account.email, to, cc, subject, body: input.body,
+      ...(ctx ? { inReplyTo: ctx.message_id, references: ctx.references } : {}),
+    });
+    const res = await request(`${GMAIL}/drafts`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        message: { raw: Buffer.from(mime, "utf8").toString("base64url"), ...(input.thread_id ? { threadId: input.thread_id } : {}) },
+      }),
+    });
+    await ensureOk(res, account.slot, "Saving the draft");
+    const d = (await res.json()) as { id: string; message?: { id?: string } };
+    return { draft_id: d.id, version: d.message?.id ?? "", to, cc, subject };
+  }
+  if (input.thread_id) {
+    // Reply draft on the thread's last message, then the approved fields.
+    const ctx = await threadReplyContext(request, account, input.thread_id);
+    const made = await request(`${GRAPH}/messages/${encodeURIComponent(ctx.message_id)}/createReply`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    await ensureOk(made, account.slot, "Saving the draft");
+    const shell = (await made.json()) as { id: string };
+    const draftUrl = `${GRAPH}/messages/${encodeURIComponent(shell.id)}`;
+    const patched = await request(draftUrl, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        subject,
+        body: { contentType: "Text", content: input.body },
+        toRecipients: to.map((address) => ({ emailAddress: { address } })),
+        ccRecipients: cc.map((address) => ({ emailAddress: { address } })),
+      }),
+    });
+    if (!patched.ok) {
+      await request(draftUrl, { method: "DELETE" }).catch(() => undefined);
+      await ensureOk(patched, account.slot, "Writing the draft");
+    }
+    const pd = (await patched.json()) as { lastModifiedDateTime?: string };
+    return { draft_id: shell.id, version: pd.lastModifiedDateTime ?? "", to, cc, subject };
+  }
+  const res = await request(`${GRAPH}/messages`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      subject,
+      body: { contentType: "Text", content: input.body },
+      toRecipients: to.map((address) => ({ emailAddress: { address } })),
+      ccRecipients: cc.map((address) => ({ emailAddress: { address } })),
+    }),
+  });
+  await ensureOk(res, account.slot, "Saving the draft");
+  const d = (await res.json()) as { id: string; lastModifiedDateTime?: string };
+  return { draft_id: d.id, version: d.lastModifiedDateTime ?? "", to, cc, subject };
 }
 
 // Undo: delete ONLY a draft this tool created, the way delete_event removes

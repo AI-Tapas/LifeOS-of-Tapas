@@ -7,6 +7,7 @@ export interface ToolManifestEntry {
   name: string;
   description: string;
   input_schema: Record<string, unknown>;
+  output_schema?: Record<string, unknown>;
   read_only: boolean;
   queues_for_approval?: boolean;
 }
@@ -14,6 +15,8 @@ export interface ToolManifestEntry {
 export interface Manifest {
   read_tools: ToolManifestEntry[];
   write_tools: ToolManifestEntry[];
+  resources?: Array<{uri:string;name:string;description:string;mimeType:string}>;
+  prompts?: Array<{name:string;description:string}>;
 }
 
 const TIMEOUT_MS = 60_000;
@@ -64,6 +67,9 @@ export class LifeOsClient {
     return parsed as T;
   }
 
+  resource(uri: string): Promise<{contents:Array<{uri:string;mimeType:string;text:string}>}> { return this.post({op:"resource",uri}); }
+  prompt(name: string): Promise<{description:string;messages:Array<{role:"user";content:{type:"text";text:string}}>}> { return this.post({op:"prompt",name}); }
+
   manifest(): Promise<Manifest> {
     return this.post<Manifest>({ op: "manifest" });
   }
@@ -75,7 +81,7 @@ export class LifeOsClient {
   write(
     tool: string,
     input: Record<string, unknown>
-  ): Promise<{ reply: string; queued: boolean; action_id?: string }> {
+  ): Promise<Record<string, unknown>> {
     return this.post({ op: "write", tool, input });
   }
 }

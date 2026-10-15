@@ -350,7 +350,7 @@ export default function TripDetail({
                             billable
                           </span>
                         ) : (
-                          <span className="rounded-full bg-surface-2 px-2.5 py-0.5 text-[11px] text-muted">
+                          <span className="rounded-full bg-surface-2 px-2.5 py-0.5 text-[11px] text-secondary">
                             own cost
                           </span>
                         )}

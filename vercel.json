@@ -1,7 +1,15 @@
 {
-  "regions": ["bom1"],
+  "regions": [
+    "bom1"
+  ],
   "crons": [
-    { "path": "/api/cron/scan", "schedule": "30 21 * * *" },
-    { "path": "/api/cron/brief", "schedule": "30 1 * * *" }
+    {
+      "path": "/api/cron/scan",
+      "schedule": "30 21 * * *"
+    },
+    {
+      "path": "/api/cron/brief",
+      "schedule": "30 1 * * *"
+    }
   ]
 }

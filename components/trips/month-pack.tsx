@@ -197,7 +197,7 @@ export default function MonthPack({
             Add them on the trip and they appear here.
           </Empty>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto" role="region" aria-label="Monthly expenses" tabIndex={0}>
             <table className="w-full min-w-[26rem] text-left text-xs">
               <thead className="text-muted">
                 <tr>

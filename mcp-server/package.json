@@ -4,14 +4,16 @@
   "private": true,
   "description": "MCP server exposing the Life OS assistant to Claude, ChatGPT and other MCP clients.",
   "type": "module",
-  "bin": { "life-os-mcp-server": "dist/index.js" },
+  "bin": {
+    "life-os-mcp-server": "dist/index.js"
+  },
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
     "inspect": "npx @modelcontextprotocol/inspector node dist/index.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
+    "@modelcontextprotocol/sdk": "1.32.1",
     "zod": "^3.23.8"
   },
   "devDependencies": {

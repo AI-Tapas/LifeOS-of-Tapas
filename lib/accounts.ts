@@ -14,7 +14,7 @@ export interface Slot {
   expectedEmail?: string; // exact address required (consumer slot)
   expectedDomain?: string; // address must be @domain (other-org slot)
   loginHint?: string;
-  allowForwarded?: boolean; // icai only: may fall back to mail forwarding
+  allowForwarded?: boolean; // icai only: optional fallback to mail forwarding
   note?: string;
 }
 
@@ -32,12 +32,6 @@ const GOOGLE_RW = [
   "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/gmail.send",
   "https://www.googleapis.com/auth/gmail.compose",
-];
-const GOOGLE_ICAI = [
-  "openid",
-  "email",
-  "https://www.googleapis.com/auth/calendar.readonly",
-  "https://www.googleapis.com/auth/gmail.readonly",
 ];
 const MS_SCOPES = [
   "openid",
@@ -80,13 +74,13 @@ export const SLOTS: Slot[] = [
   },
   {
     key: "icai",
-    label: "icai.org (Workspace, restricted)",
+    label: "icai.org (Google Workspace)",
     provider: "google",
     oauthClient: "google_external",
-    scopes: GOOGLE_ICAI,
+    scopes: GOOGLE_RW,
     expectedDomain: "icai.org",
     allowForwarded: true,
-    note: "The org admin may block this unverified app; that is expected and falls back to mail forwarding.",
+    note: "icai.org Google Workspace on the external client. Mail is fully usable; the calendar stays read-only in the app. Mail forwarding is an optional fallback.",
   },
 ];
 
@@ -97,9 +91,8 @@ export const FORBIDDEN_EMAIL = "tapas.tnr@gmail.com";
 // save reply drafts. Settings shows a Reconnect link for exactly this case:
 // without it the only way to a new grant was Disconnect, which is not what a
 // scope upgrade should cost. Suffix match, because Microsoft may return the
-// scope bare or with its graph.microsoft.com prefix. icai never drafts.
+// scope bare or with its graph.microsoft.com prefix.
 export function lacksDraftScope(slot: Slot, granted: string[]): boolean {
-  if (slot.key === "icai") return false;
   const want = slot.provider === "google" ? "gmail.compose" : "mail.readwrite";
   return !granted.some((s) => s.toLowerCase().endsWith(want));
 }

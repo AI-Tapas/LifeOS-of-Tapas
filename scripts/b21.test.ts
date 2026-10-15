@@ -322,8 +322,9 @@ test("each ride writes through the add_trip_expense performer with its own actio
   const start = exec.indexOf("export async function logScannedCabExpense");
   const fn = exec.slice(start, exec.indexOf("\n}\n", start));
   assert.ok(fn.includes("performers.add_trip_expense("));
-  assert.ok(fn.includes('kind: "add_trip_expense"'));
-  assert.ok(fn.includes("result: { undo: done.undo }"));
+  assert.ok(fn.includes('owner, "add_trip_expense", accountId'));
+  assert.ok(fn.includes("(done) => ({ undo: done.undo })"));
+  assert.ok(fn.includes("recordScannedExecution("), "the scan persists intent before writing the expense");
   // The performer's undo is { expense_id }, and the undo case deletes exactly that.
   const perf = exec.slice(exec.indexOf("async add_trip_expense("), exec.indexOf("async add_event_solo("));
   assert.ok(perf.includes("undo: { expense_id: r.id }"));

@@ -81,14 +81,15 @@ export async function updateEventAction(
 }
 
 export async function deleteEventAction(
-  eventId: string
-): Promise<{ ok: boolean; message?: string }> {
+  eventId: string,
+  confirmed = false
+): Promise<EventActionResult> {
   const { user } = await requireUser("/calendar");
   try {
-    await deleteAppEvent(user.id, eventId);
+    await deleteAppEvent(user.id, eventId, confirmed);
     revalidatePath("/calendar");
-    return { ok: true };
+    return { ok: true, id: eventId };
   } catch (e) {
-    return { ok: false, message: e instanceof Error ? e.message : "Could not delete." };
+    return toResult(e);
   }
 }

@@ -362,7 +362,7 @@ function MonthGrid({
 
   return (
     <div>
-      <div className="grid grid-cols-7 text-center text-[11px] text-neutral-400">
+      <div className="grid grid-cols-7 text-center text-[11px] text-secondary">
         {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
           <div key={d} className="py-1">
             {d}
@@ -412,7 +412,7 @@ function MonthGrid({
                   );
                 })}
                 {dayEvents.length > 3 && (
-                  <div className="text-[10px] text-neutral-400">
+                  <div className="text-[10px] text-secondary">
                     +{dayEvents.length - 3} more
                   </div>
                 )}
@@ -468,16 +468,17 @@ function WeekAgenda({
               </button>
             </div>
             {dayEvents.length === 0 ? (
-              <p className="py-1 text-xs text-neutral-400">Nothing scheduled</p>
+              <p className="py-1 text-xs text-secondary">Nothing scheduled</p>
             ) : (
               <ul className="mt-1 space-y-1">
                 {dayEvents.map((e) => (
-                  <EventRow
-                    key={e.id + key}
-                    event={e}
-                    account={accountById.get(e.account_id ?? "")}
-                    onClick={() => onEvent(e)}
-                  />
+                  <li key={e.id + key}>
+                    <EventRow
+                      event={e}
+                      account={accountById.get(e.account_id ?? "")}
+                      onClick={() => onEvent(e)}
+                    />
+                  </li>
                 ))}
               </ul>
             )}
@@ -506,13 +507,13 @@ function EventRow({
     >
       <span className="font-medium">{event.title}</span>
       {!event.all_day && (
-        <span className="ml-2 text-xs text-neutral-500">
+        <span className="ml-2 text-xs text-secondary">
           {formatTimeIST(event.start_ts)}
           {event.end_ts ? ` - ${formatTimeIST(event.end_ts)}` : ""}
         </span>
       )}
       {event.location && (
-        <span className="block truncate text-xs text-neutral-400">{event.location}</span>
+        <span className="block truncate text-xs text-secondary">{event.location}</span>
       )}
     </button>
   );
@@ -569,7 +570,12 @@ function EventDetail({
         </p>
       )}
       {err && <p className="mt-2 text-sm text-overdue">{err}</p>}
-      <div className="mt-4 flex gap-2">
+      {armed && (
+        <p role="alert" className="mt-3 text-sm text-overdue">
+          Delete this event permanently? If it has guests, they may receive cancellation notices.
+        </p>
+      )}
+      <div className="mt-4 flex flex-wrap gap-2">
         {!readOnly && (
           <button
             onClick={() => {
@@ -590,8 +596,9 @@ function EventDetail({
               }
               setErr(null);
               startTransition(async () => {
-                const r = await deleteEventAction(event.id);
+                const r = await deleteEventAction(event.id, true);
                 if (r.ok) onDeleted();
+                else if ("needsConfirmation" in r) setErr("The attendee list changed. Review the event before confirming deletion again.");
                 else setErr(r.message ?? "Could not delete.");
               });
             }}
@@ -602,9 +609,10 @@ function EventDetail({
                 : "press min-h-11 rounded-lg border border-border-strong px-3 text-sm text-overdue disabled:opacity-50"
             }
           >
-            {armed ? "Confirm delete" : "Delete"}
+            {armed ? "Confirm delete and cancellation" : "Delete"}
           </button>
         )}
+        {armed && <button type="button" disabled={pending} onClick={() => setArmed(false)} className="press min-h-11 rounded-lg border border-border-strong px-3 text-sm">Cancel</button>}
       </div>
     </Drawer>
   );
@@ -712,7 +720,7 @@ function EventForm({
       startIso,
       endIso,
       allDay: f.allDay,
-      attendees: attendees.length ? attendees : undefined,
+      attendees: isEdit ? attendees : attendees.length ? attendees : undefined,
     };
   }
 
@@ -739,7 +747,7 @@ function EventForm({
 
   return (
     <Drawer onClose={onClose} title={isEdit ? "Edit event" : "New event"}>
-      <div className="space-y-3">
+      <fieldset disabled={pending} aria-busy={pending} className="min-w-0 space-y-3" onChangeCapture={() => setConfirmCount(null)}>
         {!isEdit ? (
           <Field label="Account">
             <select
@@ -831,8 +839,8 @@ function EventForm({
           {confirmCount !== null ? (
             <div className="rounded-lg border border-today/30 bg-today-soft p-3 text-sm">
               <p className="text-today">
-                This will send an invite to {confirmCount}{" "}
-                {confirmCount === 1 ? "person" : "people"}.
+                {isEdit ? "This changes an event with" : "This will send invites to"} {confirmCount}{" "}
+                {confirmCount === 1 ? "guest" : "guests"}. {isEdit ? "Guests may receive updates or cancellations." : ""}
               </p>
               <div className="mt-2 flex gap-2">
                 <button
@@ -840,7 +848,7 @@ function EventForm({
                   disabled={pending}
                   className="press min-h-11 rounded-lg bg-today px-3 text-sm font-medium text-white disabled:opacity-50 dark:text-neutral-950"
                 >
-                  {pending ? "Sending" : "Confirm and send invites"}
+                  {pending ? "Saving" : isEdit ? "Confirm guest event changes" : "Confirm and send invites"}
                 </button>
                 <button
                   onClick={() => setConfirmCount(null)}
@@ -860,7 +868,7 @@ function EventForm({
             </button>
           )}
         </div>
-      </div>
+      </fieldset>
     </Drawer>
   );
 }

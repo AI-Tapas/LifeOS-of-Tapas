@@ -39,6 +39,219 @@ export type Database = {
   }
   public: {
     Tables: {
+      scan_execution: {
+        Row: {
+          id: string
+          user_id: string
+          run_id: string
+          status: string
+          started_at: string
+          finished_at: string | null
+        }
+        Insert: {
+          id?: string
+          user_id?: string
+          run_id?: string
+          status: string
+          started_at?: string
+          finished_at?: string | null
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          run_id?: string
+          status?: string
+          started_at?: string
+          finished_at?: string | null
+        }
+        Relationships: []
+      }
+      mcp_operations: {
+        Row: {
+          scope_hash: string
+          id: string
+          user_id: string
+          client_id: string
+          idempotency_key: string
+          request_hash: string
+          tool: string
+          state: string
+          result: Json | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          scope_hash: string
+          id?: string
+          user_id?: string
+          client_id: string
+          idempotency_key: string
+          request_hash: string
+          tool: string
+          state?: string
+          result?: Json | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          scope_hash?: string
+          id?: string
+          user_id?: string
+          client_id?: string
+          idempotency_key?: string
+          request_hash?: string
+          tool?: string
+          state?: string
+          result?: Json | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      mcp_activity: {
+        Row: {
+          id: string
+          user_id: string
+          client_id: string
+          tool: string
+          state: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id?: string
+          client_id: string
+          tool: string
+          state?: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          client_id?: string
+          tool?: string
+          state?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
+      mcp_jobs: {
+        Row: {
+          id: string
+          user_id: string
+          client_id: string
+          state: string
+          input: Json
+          capabilities: Json
+          result: Json | null
+          cancel_requested: boolean
+          created_at: string
+          started_at: string | null
+          finished_at: string | null
+        }
+        Insert: {
+          id?: string
+          user_id?: string
+          client_id: string
+          state?: string
+          input: Json
+          capabilities: Json
+          result?: Json | null
+          cancel_requested?: boolean
+          created_at?: string
+          started_at?: string | null
+          finished_at?: string | null
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          client_id?: string
+          state?: string
+          input?: Json
+          capabilities?: Json
+          result?: Json | null
+          cancel_requested?: boolean
+          created_at?: string
+          started_at?: string | null
+          finished_at?: string | null
+        }
+        Relationships: []
+      }
+      mcp_previews: {
+        Row: {
+          id: string
+          user_id: string
+          client_id: string
+          table_name: string
+          record_id: string
+          version: string
+          patch: Json
+          expires_at: string
+          committed_at: string | null
+          result: Json | null
+        }
+        Insert: {
+          id?: string
+          user_id?: string
+          client_id: string
+          table_name: string
+          record_id: string
+          version: string
+          patch: Json
+          expires_at?: string
+          committed_at?: string | null
+          result?: Json | null
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          client_id?: string
+          table_name?: string
+          record_id?: string
+          version?: string
+          patch?: Json
+          expires_at?: string
+          committed_at?: string | null
+          result?: Json | null
+        }
+        Relationships: []
+      }
+      cron_runs: {
+        Row: {
+          id: string
+          user_id: string
+          job: string
+          ist_date: string
+          run_id: string
+          status: string
+          started_at: string
+          updated_at: string
+          result: Json
+        }
+        Insert: {
+          id?: string
+          user_id?: string
+          job: string
+          ist_date: string
+          run_id?: string
+          status: string
+          started_at?: string
+          updated_at?: string
+          result?: Json
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          job?: string
+          ist_date?: string
+          run_id?: string
+          status?: string
+          started_at?: string
+          updated_at?: string
+          result?: Json
+        }
+        Relationships: []
+      }
       accounts: {
         Row: {
           access_token_enc: string | null
@@ -101,6 +314,9 @@ export type Database = {
       }
       assistant_actions: {
         Row: {
+          execution_state: string | null
+          undo_started_at: string | null
+          undo_error: string | null
           account_id: string | null
           approved_at: string | null
           created_at: string
@@ -119,6 +335,9 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          execution_state?: string | null
+          undo_started_at?: string | null
+          undo_error?: string | null
           account_id?: string | null
           approved_at?: string | null
           created_at?: string
@@ -137,6 +356,9 @@ export type Database = {
           user_id?: string
         }
         Update: {
+          execution_state?: string | null
+          undo_started_at?: string | null
+          undo_error?: string | null
           account_id?: string | null
           approved_at?: string | null
           created_at?: string
@@ -558,6 +780,10 @@ export type Database = {
       }
       mcp_clients: {
         Row: {
+          capabilities: Json | null
+          approved_at: string | null
+          revoked_at: string | null
+          registration_expires_at: string
           client_id: string
           client_name: string
           created_at: string
@@ -567,6 +793,10 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          capabilities?: Json | null
+          approved_at?: string | null
+          revoked_at?: string | null
+          registration_expires_at?: string
           client_id: string
           client_name?: string
           created_at?: string
@@ -576,6 +806,10 @@ export type Database = {
           user_id?: string
         }
         Update: {
+          capabilities?: Json | null
+          approved_at?: string | null
+          revoked_at?: string | null
+          registration_expires_at?: string
           client_id?: string
           client_name?: string
           created_at?: string
@@ -588,6 +822,7 @@ export type Database = {
       }
       mcp_grants: {
         Row: {
+          family_id: string
           client_id: string
           code_challenge: string | null
           created_at: string
@@ -602,6 +837,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          family_id?: string
           client_id: string
           code_challenge?: string | null
           created_at?: string
@@ -616,6 +852,7 @@ export type Database = {
           user_id?: string
         }
         Update: {
+          family_id?: string
           client_id?: string
           code_challenge?: string | null
           created_at?: string
@@ -1237,6 +1474,44 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      claim_scan_execution: { Args: { p_user_id: string }; Returns: Json }
+      release_scan_execution: { Args: { p_user_id: string; p_run_id: string }; Returns: boolean }
+      oauth_register_client: {
+        Args: { p_user_id: string; p_client_id: string; p_client_name: string; p_redirect_uris: string[] }
+        Returns: Json
+      }
+      oauth_approve_client: {
+        Args: { p_user_id: string; p_client_id: string; p_redirect_uri: string; p_code_challenge: string; p_code_hash: string; p_capabilities: Json }
+        Returns: Json
+      }
+      oauth_exchange_grant: {
+        Args: { p_client_id: string; p_kind: string; p_token_hash: string; p_redirect_uri: string; p_code_challenge: string; p_access_hash: string; p_refresh_hash: string }
+        Returns: Json
+      }
+      oauth_disconnect_client: {
+        Args: { p_user_id: string; p_client_id: string }
+        Returns: Json
+      }
+      oauth_revoke_token: {
+        Args: { p_client_id: string; p_token_hash: string }
+        Returns: Json
+      }
+      mcp_service: {
+        Args: { p_action: string; p_owner: string; p_client: string; p_args?: Json }
+        Returns: Json
+      }
+      claim_cron_run: {
+        Args: { p_user_id: string; p_job: string; p_ist_date: string }
+        Returns: Json
+      }
+      mark_cron_dispatch: {
+        Args: { p_user_id: string; p_job: string; p_ist_date: string; p_run_id: string }
+        Returns: boolean
+      }
+      finish_cron_run: {
+        Args: { p_user_id: string; p_job: string; p_ist_date: string; p_run_id: string; p_status: string; p_result?: Json }
+        Returns: boolean
+      }
       clear_account_tokens: {
         Args: { p_account_id: string }
         Returns: undefined
@@ -1275,6 +1550,7 @@ export type Database = {
         | "rejected"
         | "failed"
         | "undone"
+        | "saved_as_draft"
       assistant_persona_source: "interview" | "seeded" | "edited"
       mcp_grant_kind: "code" | "access" | "refresh"
       audit_actor: "user" | "assistant"
@@ -1470,6 +1746,7 @@ export const Constants = {
         "executed",
         "rejected",
         "failed",
+        "saved_as_draft",
         "undone",
       ],
       assistant_persona_source: ["interview", "seeded", "edited"],

@@ -4,7 +4,7 @@ export default function OfflinePage() {
       <div className="text-center">
         <h1 className="font-serif text-2xl font-medium text-foreground">Offline</h1>
         <p className="mt-2 text-sm text-secondary">
-          This page is not cached yet. Reconnect and try again.
+          Your private pages are not saved for offline access. Reconnect to view your data.
         </p>
       </div>
     </main>

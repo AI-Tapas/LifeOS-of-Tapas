@@ -1,27 +1,35 @@
 import type { Metadata, Viewport } from "next";
-import { Geist_Mono, Hanken_Grotesk, Spectral } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import SwRegister from "@/components/sw-register";
 import { THEME_BOOT_SCRIPT } from "@/lib/theme";
 
 // Body and UI text. Variable font: the weights it's used at (400/500/600/700)
 // come from the classes applied in markup, not a fixed weight list here.
-const hankenGrotesk = Hanken_Grotesk({
+const hankenGrotesk = localFont({
+  src: "./fonts/hanken-grotesk-latin-variable.woff2",
+  weight: "100 900",
+  display: "swap",
   variable: "--font-hanken-grotesk",
-  subsets: ["latin"],
 });
 
 // Headings only: page titles and band headers. Static font, so the weights
 // actually used (500 for titles, 600 for occasional emphasis) must be listed.
-const spectral = Spectral({
+const spectral = localFont({
+  src: [
+    { path: "./fonts/spectral-latin-400.woff2", weight: "400" },
+    { path: "./fonts/spectral-latin-500.woff2", weight: "500" },
+    { path: "./fonts/spectral-latin-600.woff2", weight: "600" },
+  ],
+  display: "swap",
   variable: "--font-spectral",
-  subsets: ["latin"],
-  weight: ["400", "500", "600"],
 });
 
-const geistMono = Geist_Mono({
+const geistMono = localFont({
+  src: "./fonts/geist-mono-latin-variable.woff2",
+  weight: "100 900",
+  display: "swap",
   variable: "--font-geist-mono",
-  subsets: ["latin"],
 });
 
 export const metadata: Metadata = {

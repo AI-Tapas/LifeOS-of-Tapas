@@ -1,3 +1,4 @@
+import ConnectorActivity from "@/components/settings/connector-activity";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/ui";
 import PasskeyButton from "@/components/passkey-button";
@@ -131,7 +132,8 @@ export default async function SettingsPage({
         .maybeSingle(),
       supabase
         .from("mcp_clients")
-        .select("client_id, client_name, created_at, last_used_at")
+        .select("client_id, client_name, created_at, last_used_at, capabilities, approved_at, revoked_at")
+        .is("revoked_at", null)
         .order("created_at", { ascending: false }),
       supabase
         .from("mcp_grants")
@@ -172,6 +174,9 @@ export default async function SettingsPage({
       created_label: formatDateIST(c.created_at),
       last_used_label: c.last_used_at ? formatDateIST(c.last_used_at) : null,
       active_tokens: countLiveTokens(mcpGrants ?? [], c.client_id),
+      capabilities: c.capabilities,
+      approved: Boolean(c.approved_at && c.capabilities),
+      work_stream_labels: Object.fromEntries((streams ?? []).map((stream) => [stream.id, stream.name])),
     }));
     devices = (pushDevices ?? []).map((d) => ({
       id: d.id,
@@ -269,12 +274,19 @@ export default async function SettingsPage({
       <h2 className="mt-8 text-base font-semibold tracking-tight">Connected applications</h2>
       <p className="mt-1 text-sm text-secondary">
         ChatGPT, Claude and other assistants you have allowed to use Life OS.
-        They can read and act on your own lists; sending anything to another
-        person still waits for your approval here.
+        Each connection has the permissions shown below. Sending anything to another
+        person and changing guest events still waits for your approval here.
       </p>
       <div className="mt-2">
         <ConnectionsPanel items={connections} />
+        <ConnectorActivity />
       </div>
+
+      <h2 className="mt-8 text-base font-semibold tracking-tight">Privacy on this device</h2>
+      <p className="mt-1 text-sm text-secondary">
+        Your private pages need an internet connection and are not saved for offline access.
+        Signing out clears open app views on this device, including other tabs.
+      </p>
 
       <h2 className="mt-8 text-base font-semibold tracking-tight">Phone alerts</h2>
       <p className="mt-1 text-sm text-secondary">
@@ -300,7 +312,7 @@ export default async function SettingsPage({
 
       <h2 className="mt-8 text-base font-semibold tracking-tight">Assistant persona</h2>
       <p className="mt-1 text-sm text-secondary">
-        How the assistant sounds and judges. Kept private to your session.
+        How the assistant sounds and judges. Connectors can read it only when you grant house-rules access. Your private chat transcript is never shared.
       </p>
       <div className="mt-2">
         <PersonaPanel versions={personaVersions} activeMd={activePersonaMd} />

@@ -569,10 +569,6 @@ test("read_mail_attachment refuses a file over 5 MB, never downloading it, and a
     readMailAttachment(m.request, GACC, { thread_id: "th1", attachment: "photo.jpg" }, EXTRACT),
     /not a PDF or a Word/
   );
-  await assert.rejects(
-    readMailAttachment(m.request, { ...GACC, slot: "icai" }, { thread_id: "th1", attachment: "Notice.pdf" }, EXTRACT),
-    /icai mailbox is not open/
-  );
   // The real length decides too, when the provider understates the size.
   const big = new Uint8Array(ATTACHMENT_MAX_BYTES + 1);
   const lying: MailRequest = async (url) =>

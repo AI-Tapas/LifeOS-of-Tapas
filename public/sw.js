@@ -1,8 +1,7 @@
-// Life OS service worker: offline app shell plus last-loaded pages for
-// reading. No offline writes in V1. Hand-written instead of a bundler plugin
-// because Next 16 builds with Turbopack, which webpack-based PWA plugins do
-// not support; this stays independent of the build tool.
-const CACHE = "life-os-v4";
+// Only the public offline shell and build assets are persisted. Private HTML,
+// RSC, API responses and authenticated state always require a live connection.
+// This deliberately replaces the old last-loaded-private-page policy.
+const CACHE = "life-os-public-v5";
 const SHELL = [
   "/offline",
   "/manifest.webmanifest",
@@ -11,100 +10,58 @@ const SHELL = [
   "/icons/icon-512.png",
 ];
 
-// Client-side navigations fetch RSC payloads (not full pages). They share the
-// page URL, so cache them under a synthetic key to avoid clobbering the HTML
-// copy of the same route.
-function rscKey(url) {
-  return url + (url.includes("?") ? "&" : "?") + "__sw=rsc";
+async function removeLegacyCaches() {
+  const keys = await caches.keys();
+  await Promise.all(keys.filter((key) => key.startsWith("life-os-") && key !== CACHE).map((key) => caches.delete(key)));
 }
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches
-      .open(CACHE)
-      .then((cache) => cache.addAll(SHELL))
-      .then(() => self.skipWaiting())
-  );
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)).then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(
-    caches
-      .keys()
-      .then((keys) =>
-        Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
-      )
-      .then(() => self.clients.claim())
-  );
+  event.waitUntil(removeLegacyCaches().then(() => self.clients.claim()));
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type !== "PURGE_PRIVATE_DATA") return;
+  event.waitUntil(removeLegacyCaches().then(() => event.ports[0]?.postMessage({ ok: true })));
 });
 
 self.addEventListener("fetch", (event) => {
   const { request } = event;
   if (request.method !== "GET") return;
-
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  // Pages: network first, fall back to the last-loaded copy, then /offline.
+  // Never read private entries, including legacy caches restored by an old
+  // worker's in-flight request. Delete those caches again on each navigation.
   if (request.mode === "navigate") {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          if (response.ok) {
-            const copy = response.clone();
-            caches.open(CACHE).then((cache) => cache.put(request, copy));
-          }
-          return response;
-        })
-        .catch(() =>
-          caches
-            .match(request)
-            .then((cached) => cached || caches.match("/offline"))
-        )
-    );
+    event.waitUntil(removeLegacyCaches());
+    event.respondWith(fetch(request).catch(async () => {
+      const shell = await caches.open(CACHE);
+      return await shell.match("/offline") || new Response("Offline. Reconnect to view your private data.", { status: 503, headers: { "Content-Type": "text/plain" } });
+    }));
     return;
   }
 
-  // In-app tab switches (RSC payloads): network first, fall back to the
-  // last-loaded copy so reading works offline inside the installed app.
-  if (request.headers.get("RSC") === "1") {
-    event.respondWith(
-      fetch(request)
-        .then((response) => {
-          if (response.ok) {
-            const copy = response.clone();
-            caches.open(CACHE).then((cache) => cache.put(rscKey(request.url), copy));
-          }
-          return response;
-        })
-        .catch(() => caches.match(rscKey(request.url)).then((c) => c || Response.error()))
-    );
-    return;
-  }
+  // Next's RSC navigations and data/API requests are network-only. A failed
+  // RSC request lets Next fall back to a document navigation and public shell.
+  if (request.headers.get("RSC") === "1") return;
 
-  // Hashed build assets and icons: cache first.
-  if (
-    url.pathname.startsWith("/_next/static/") ||
-    url.pathname.startsWith("/icons/")
-  ) {
-    event.respondWith(
-      caches.match(request).then(
-        (cached) =>
-          cached ||
-          fetch(request).then((response) => {
-            if (response.ok) {
-              const copy = response.clone();
-              caches.open(CACHE).then((cache) => cache.put(request, copy));
-            }
-            return response;
-          })
-      )
-    );
+  if (url.pathname.startsWith("/_next/static/") || url.pathname.startsWith("/icons/")) {
+    event.respondWith((async () => {
+      const cache = await caches.open(CACHE);
+      const cached = await cache.match(request);
+      if (cached) return cached;
+      const response = await fetch(request);
+      if (response.ok && !response.redirected) await cache.put(request, response.clone());
+      return response;
+    })());
   }
 });
 
-// B31: phone alerts (Web Push). The install, activate and fetch behaviour
-// above is unchanged.
+// B31: phone alerts (Web Push).
 //
 // Only a path inside this app may be opened from an alert: anything that
 // resolves to another origin (https://elsewhere, //elsewhere, a backslash

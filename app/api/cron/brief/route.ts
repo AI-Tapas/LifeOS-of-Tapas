@@ -22,7 +22,8 @@ import type { MonthExpense } from "@/lib/trips/month";
 import type { Holding } from "@/lib/money/investments";
 import { syncFamilyTravel } from "@/lib/family/sync";
 import { syncAllEvents } from "@/lib/events/sync";
-import { cronAuthorized, alreadyRanToday } from "@/lib/cron/guard";
+import { cronAuthorized } from "@/lib/cron/guard";
+import { claimCronRun, finishCronRun, markCronDispatch, skippedCronRun } from "@/lib/cron/runs";
 import { addDays, civilKey, civilToday, civilWeekday, istInstant } from "@/lib/datetime";
 import { overlapsFrom } from "@/lib/events/window";
 import { loadUnbilled } from "@/lib/billing/load";
@@ -44,34 +45,24 @@ export async function GET(req: Request): Promise<Response> {
   const istDate = civilKey(civilToday());
   const appBaseUrl = process.env.APP_BASE_URL ?? "http://localhost:3000";
 
-  const { data: recent } = await supabase
-    .from("audit_log")
-    .select("action, ts, meta")
-    .eq("user_id", userId)
-    .in("action", ["cron_brief", "cron_brief_started"])
-    .gte("ts", new Date(Date.now() - 36 * 3600 * 1000).toISOString());
-  if (alreadyRanToday(recent ?? [], istDate)) {
-    return Response.json({ skipped: true, reason: "already ran today" });
+  let claim;
+  try {
+    claim = await claimCronRun(actor, "brief", istDate);
+  } catch {
+    return Response.json({ ok: false, error: "Could not claim brief. No work was started.", retryable: true }, { status: 503 });
   }
-  // Stamped before any work: a second tick within RUNNING_MINUTES sees it and
-  // stops, so a redelivered cron cannot send two briefs.
-  await supabase.from("audit_log").insert({
-    user_id: userId,
-    actor: "assistant",
-    action: "cron_brief_started",
-    entity: "cron",
-    meta: { ist_date: istDate } as Json,
-  });
-
-  // B29: the daily repair pass for the family travel calendar. It never throws
-  // and a failure here never stops the brief.
-  // Pull the calendars first: until now they refreshed only when he opened
-  // the Calendar screen, so a brief after a few days away read a stale week.
-  // syncAllEvents never throws; a slow provider is reported, never fatal.
-  await syncAllEvents(userId);
-  await syncFamilyTravel(userId);
+  if (!claim.claimed) return skippedCronRun(claim);
+  let dispatchStarted = false;
 
   try {
+    // B29: the daily repair pass for the family travel calendar. It never throws
+    // and a failure here never stops the brief.
+    // Pull the calendars first: until now they refreshed only when he opened
+    // the Calendar screen, so a brief after a few days away read a stale week.
+    // syncAllEvents never throws; a slow provider is reported, never fatal.
+    await syncAllEvents(userId);
+    await syncFamilyTravel(userId);
+
     const today = civilToday();
     const dayStart = istInstant(today, 0, 0).toISOString();
     const dayEnd = istInstant(today, 23, 59).toISOString();
@@ -349,49 +340,31 @@ export async function GET(req: Request): Promise<Response> {
     }
 
     if (!briefAccount || briefAccount.status !== "connected" || briefAccount.connect_mode !== "direct") {
-      await supabase.from("audit_log").insert({
-        user_id: userId,
-        actor: "assistant",
-        action: "cron_brief_skipped",
-        entity: "cron",
-        meta: { ist_date: istDate, reason: "ca_tapasnr not connected" } as Json,
-      });
+      await finishCronRun(actor, "brief", istDate, claim.run_id, "failed", { reason: "ca_tapasnr not connected" });
       await sendPushQuietly(supabase, userId, briefNotSentAlert("reconnect"));
-      return Response.json({ skipped: true, reason: "ca_tapasnr not connected" });
+      return Response.json({ skipped: true, run_id: claim.run_id, state: "failed", retryable: true, reason: "ca_tapasnr not connected" });
     }
 
-    try {
-      const sent = await sendBriefEmail(briefAccount.id, briefAccount.email, subject, html, text);
-      await supabase.from("audit_log").insert({
-        user_id: userId,
-        actor: "assistant",
-        action: "cron_brief",
-        entity: "cron",
-        meta: { ist_date: istDate, provider_message_id: sent.provider_message_id } as Json,
-      });
-      return Response.json({ ok: true, sent: true });
-    } catch (e) {
-      const message = e instanceof Error ? e.message : "send failed";
-      await supabase.from("audit_log").insert({
-        user_id: userId,
-        actor: "assistant",
-        action: "cron_brief_skipped",
-        entity: "cron",
-        meta: { ist_date: istDate, reason: message } as Json,
-      });
-      await sendPushQuietly(supabase, userId, briefNotSentAlert("send_failed"));
-      return Response.json({ skipped: true, reason: message });
-    }
-  } catch (e) {
-    const message = e instanceof Error ? e.message : "brief failed";
-    await supabase.from("audit_log").insert({
-      user_id: userId,
-      actor: "assistant",
-      action: "cron_brief_failed",
-      entity: "cron",
-      meta: { ist_date: istDate, message } as Json,
+    // Persist uncertainty before touching the provider. A timeout, lost response,
+    // or failed final commit can never authorize a second send automatically.
+    await markCronDispatch(actor, "brief", istDate, claim.run_id);
+    dispatchStarted = true;
+    const sent = await sendBriefEmail(briefAccount.id, briefAccount.email, subject, html, text);
+    await finishCronRun(actor, "brief", istDate, claim.run_id, "succeeded", {
+      provider_message_id: sent.provider_message_id,
     });
-    await sendPushQuietly(supabase, userId, briefNotSentAlert("failed"));
-    return Response.json({ ok: false, error: message }, { status: 500 });
+    return Response.json({ ok: true, sent: true, run_id: claim.run_id, state: "succeeded" });
+  } catch (e) {
+    const message = (e instanceof Error ? e.message : "brief failed").slice(0, 200);
+    const state = dispatchStarted ? "uncertain" : "failed";
+    try {
+      await finishCronRun(actor, "brief", istDate, claim.run_id, state, { message });
+    } catch {
+      return Response.json({ ok: false, run_id: claim.run_id, state: "uncertain", retryable: false,
+        error: "Brief outcome could not be saved. Inspect the run and Sent mail before retrying." }, { status: 503 });
+    }
+    await sendPushQuietly(supabase, userId, briefNotSentAlert(dispatchStarted ? "send_failed" : "failed"));
+    return Response.json({ ok: false, run_id: claim.run_id, state, retryable: !dispatchStarted,
+      error: dispatchStarted ? "Brief delivery is uncertain. Check Sent mail before retrying." : message }, { status: 500 });
   }
 }

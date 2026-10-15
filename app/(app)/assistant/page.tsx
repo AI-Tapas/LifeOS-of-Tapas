@@ -46,6 +46,7 @@ interface SendPayload {
   cc?: string[];
   subject?: string;
   body?: string;
+  thread_id?: string;
   attendees?: { email: string; name?: string }[];
   date?: string;
   start_time?: string | null;
@@ -79,8 +80,8 @@ export default async function AssistantPage({
         .order("created_at"),
       supabase
         .from("assistant_actions")
-        .select("id, kind, title, status, created_at, executed_at, undone_at, error, result")
-        .in("status", ["executed", "failed", "rejected", "undone", "approved"])
+        .select("id, kind, title, status, created_at, executed_at, undone_at, error, result, execution_state, undo_started_at, undo_error")
+        .in("status", ["executed", "failed", "rejected", "undone", "approved", "saved_as_draft"])
         .order("created_at", { ascending: false })
         .limit(40),
       supabase
@@ -144,6 +145,7 @@ export default async function AssistantPage({
         cc: (pl.cc ?? []).map(flag),
         subject: pl.subject ?? "",
         body: pl.body ?? "",
+        reply_in_thread: !!pl.thread_id,
       };
     }
     return {
@@ -166,8 +168,17 @@ export default async function AssistantPage({
     title: row.title,
     status: row.status,
     when_label: formatDateTimeIST(row.executed_at ?? row.created_at),
+    execution_state: row.execution_state,
+    undo_started_at: row.undo_started_at,
+    undo_error: row.undo_error,
+    note:
+      row.status === "saved_as_draft"
+        ? ((row.result as { summary?: string } | null)?.summary ?? "Saved to drafts")
+        : null,
     undoable:
       row.status === "executed" &&
+      row.execution_state !== "uncertain" &&
+      !row.undo_started_at &&
       UNDOABLE.has(row.kind) &&
       !!(row.result as { undo?: unknown } | null)?.undo,
     error: row.error,

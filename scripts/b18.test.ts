@@ -359,12 +359,12 @@ test("the draft schema is closed and has no recipient, subject or attachment fie
   assert.deepEqual(Object.keys(s.properties).sort(), ["account", "body", "reply_all", "thread_id"]);
   assert.ok(s.required.includes("thread_id"), "replies only: a thread is required");
   assert.ok(s.required.includes("body"));
-  assert.deepEqual(s.properties.account.enum, ["taxstrategia", "ca_tapasnr", "altechon"]);
+  assert.deepEqual(s.properties.account.enum, ["taxstrategia", "ca_tapasnr", "altechon", "icai"]);
   // B10: the autonomous grant belongs to the thread as well as the verb.
   assert.deepEqual(TOOL_TARGETS[SAVE_DRAFT_TOOL], { arg: "thread_id", label: "mail thread" });
 });
 
-test("save_reply_draft refuses a missing thread, icai, and smuggled fields", () => {
+test("save_reply_draft refuses a missing thread, an unknown slot, and smuggled fields", () => {
   const ok = { account: "taxstrategia", thread_id: "th1", body: "Noted, will revert." };
   assert.deepEqual(checkReplyDraftInput(ok), {
     slot: "taxstrategia",
@@ -374,7 +374,7 @@ test("save_reply_draft refuses a missing thread, icai, and smuggled fields", () 
   });
   assert.throws(() => checkReplyDraftInput({ account: "taxstrategia", body: "x" }), /thread_id is required/);
   assert.throws(() => checkReplyDraftInput({ ...ok, thread_id: "  " }), /thread_id is required/);
-  assert.throws(() => checkReplyDraftInput({ ...ok, account: "icai" }), /icai/);
+  assert.equal(checkReplyDraftInput({ ...ok, account: "icai" }).slot, "icai", "B36: icai is open");
   assert.throws(() => checkReplyDraftInput({ ...ok, account: "tapas.tnr" }), /must be one of/);
   assert.throws(() => checkReplyDraftInput({ ...ok, body: "   " }), /body is required/);
   assert.throws(() => checkReplyDraftInput({ ...ok, reply_all: "yes" }), /reply_all/);
@@ -385,7 +385,7 @@ test("save_reply_draft refuses a missing thread, icai, and smuggled fields", () 
       `${smuggled} must be refused by name`
     );
   }
-  // And the executor checks it before it looks the thread up, so an icai or
+  // And the executor checks it before it looks the thread up, so an unknown slot or
   // smuggled call is refused rather than landing in the queue.
   const exec = src("lib/assistant/execute.ts");
   const perf = exec.slice(exec.indexOf("async function performAutonomous("));
@@ -786,7 +786,7 @@ test("Graph inbox: untrusted items, attachment names only, app mail left out", a
 test("inputs outside the tool's range are refused or clamped", () => {
   assert.throws(() => sinceDate("last tuesday"), /ISO date/);
   assert.equal(sinceDate(undefined, new Date("2026-09-26T00:00:00Z")).toISOString(), "2026-09-23T00:00:00.000Z");
-  assert.throws(() => checkMailSlot("icai"), /icai/);
+  assert.equal(checkMailSlot("icai"), "icai");
   assert.equal(checkMailSlot("ca_tapasnr"), "ca_tapasnr");
 });
 
@@ -1001,7 +1001,7 @@ test("the connector publishes a closed schema and a description for both reads",
     assert.match(schema, /additionalProperties: false/);
     assert.doesNotMatch(schema, /conversation_id|attachment|anyOf|type: \[/);
   }
-  assert.deepEqual(MAIL_SLOTS, ["taxstrategia", "ca_tapasnr", "altechon"], "icai never gains these tools");
+  assert.deepEqual(MAIL_SLOTS, ["taxstrategia", "ca_tapasnr", "altechon", "icai"], "B36: icai joined these tools");
 });
 
 // ---------------------------------------------------------------------------
@@ -1087,13 +1087,13 @@ test("the new scopes are requested, and Settings can ask for them again", () => 
   assert.ok(google.scopes.includes("https://www.googleapis.com/auth/gmail.compose"));
   assert.ok(slotByKey("ca_tapasnr")!.scopes.includes("https://www.googleapis.com/auth/gmail.compose"));
   assert.ok(ms.scopes.includes("Mail.ReadWrite"));
-  assert.equal(slotByKey("icai")!.scopes.some((s) => /compose|ReadWrite/i.test(s)), false, "icai gains nothing");
+  assert.ok(slotByKey("icai")!.scopes.includes("https://www.googleapis.com/auth/gmail.compose"), "B36: icai has the same scopes");
   // A pre-B18 grant shows a Reconnect link; a fresh one does not.
   assert.equal(lacksDraftScope(google, ["https://www.googleapis.com/auth/gmail.readonly"]), true);
   assert.equal(lacksDraftScope(google, ["https://www.googleapis.com/auth/gmail.compose"]), false);
   assert.equal(lacksDraftScope(ms, ["Mail.Read", "Mail.Send"]), true);
   assert.equal(lacksDraftScope(ms, ["https://graph.microsoft.com/Mail.ReadWrite"]), false);
-  assert.equal(lacksDraftScope(SLOTS.find((s) => s.key === "icai")!, []), false);
+  assert.equal(lacksDraftScope(SLOTS.find((s) => s.key === "icai")!, ["https://www.googleapis.com/auth/gmail.readonly"]), true, "icai shows Reconnect until regranted");
   assert.match(src("components/accounts-panel.tsx"), /lacksDraftScope\(slot, acct!\.scopes\)/);
 });
 

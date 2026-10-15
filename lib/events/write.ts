@@ -21,7 +21,7 @@ type Svc = SupabaseClient<Database>;
 
 export { ConfirmationRequiredError };
 
-// icai holds calendar.readonly only; writes are structurally refused.
+// icai holds the full calendar scope since B36, but its calendar stays read-only in code: writes are refused.
 export class ReadOnlyAccountError extends Error {
   constructor(slot: string) {
     super(`The ${slot} account is read-only. Events cannot be created or edited on it.`);
@@ -32,6 +32,15 @@ export class ReadOnlyAccountError extends Error {
 export interface EventWriteResult {
   id: string;
   extEventId: string | null;
+}
+
+export class ProviderEventPersistenceError extends Error {
+  readonly providerResult: Record<string, unknown>;
+  constructor(message: string, providerResult: Record<string, unknown>) {
+    super(message);
+    this.name = "ProviderEventPersistenceError";
+    this.providerResult = providerResult;
+  }
 }
 
 interface AccountInfo {
@@ -84,6 +93,33 @@ function providerUrl(
     calExtId
   )}/events`;
   return extEventId ? `${base}/${encodeURIComponent(extEventId)}` : base;
+}
+
+// A stored event can acquire guests outside LifeOS. Always inspect the current
+// provider version, then bind the write to that version with If-Match. Missing
+// version information fails closed; a provider race returns 412 for review.
+async function currentProviderEvent(account: AccountInfo, url: string, allowMissing = false) {
+  const response = await withResourceAuth(account.id, (token) =>
+    fetch(url, { headers: { authorization: `Bearer ${token}` }, cache: "no-store" })
+  );
+  if (allowMissing && (response.status === 404 || response.status === 410)) return null;
+  if (!response.ok) throw new Error(`Could not verify current event (${response.status}). Nothing was changed.`);
+  const body = await response.json() as {
+    etag?: string; "@odata.etag"?: string; attendeesOmitted?: boolean;
+    attendees?: { email?: string; displayName?: string; emailAddress?: { address?: string; name?: string } }[];
+  };
+  if (body.attendeesOmitted === true) throw new Error("The provider returned an incomplete guest list. Nothing was changed.");
+  const etag = response.headers.get("etag") ?? body.etag ?? body["@odata.etag"];
+  if (!etag || /[\r\n]/.test(etag)) throw new Error("The provider supplied no event version. Refresh the calendar before trying again.");
+  if (body.attendees !== undefined && !Array.isArray(body.attendees)) {
+    throw new Error("Could not verify the current guest list. Nothing was changed.");
+  }
+  const attendees = (body.attendees ?? []).map((attendee) => {
+    const email = attendee.email ?? attendee.emailAddress?.address;
+    if (!email) throw new Error("Could not verify a calendar guest. Nothing was changed.");
+    return { email, name: attendee.displayName ?? attendee.emailAddress?.name };
+  });
+  return { etag, attendees };
 }
 
 // Persist the event locally with source = 'app', keyed on (calendar_id,
@@ -155,13 +191,19 @@ export async function createEvent(
   const j = (await res.json()) as { id?: string };
   if (!j.id) throw new Error("Provider returned no event id.");
 
-  const id = await upsertAppEvent(
-    svc,
-    userId,
-    { accountId: account.id, calendarId: cal.id, extEventId: j.id },
-    input
-  );
-  return { id, extEventId: j.id };
+  try {
+    const id = await upsertAppEvent(
+      svc,
+      userId,
+      { accountId: account.id, calendarId: cal.id, extEventId: j.id },
+      input
+    );
+    return { id, extEventId: j.id };
+  } catch {
+    throw new ProviderEventPersistenceError("The provider accepted the event change, but local history could not be saved. Do not repeat it; sync and reconcile the calendar.", {
+      ext_event_id: j.id, account_id: account.id, calendar_id: cal.id,
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -176,8 +218,9 @@ export async function updateEvent(
   const svc = createServiceClient();
   const { data: ev } = await svc
     .from("events")
-    .select("id, account_id, calendar_id, ext_event_id")
+    .select("id, account_id, calendar_id, ext_event_id, attendees")
     .eq("id", eventId)
+    .eq("user_id", userId)
     .single();
   if (!ev || !ev.account_id || !ev.calendar_id || !ev.ext_event_id) {
     throw new Error("This event cannot be edited.");
@@ -190,45 +233,57 @@ export async function updateEvent(
     .single();
   if (!cal) throw new Error("Source calendar not found.");
 
+  const baseUrl = providerUrl(account.provider, cal.ext_calendar_id, ev.ext_event_id);
+  const current = await currentProviderEvent(account, baseUrl);
+  if (!current) throw new Error("Event no longer exists.");
+  const previousCount = Math.max(current.attendees.length, Array.isArray(ev.attendees) ? ev.attendees.length : 0);
+  if (previousCount > 0 && !confirmed) throw new ConfirmationRequiredError(previousCount);
   const payload = prepareEventWrite(account.provider, input, confirmed);
-  const hasAttendees = (input.attendees?.length ?? 0) > 0;
-
-  let url = providerUrl(account.provider, cal.ext_calendar_id, ev.ext_event_id);
-  const method = account.provider === "google" ? "PATCH" : "PATCH";
-  if (account.provider === "google") {
-    url += `?sendUpdates=${hasAttendees ? "all" : "none"}`;
-  }
+  // An omitted field preserves guests. Explicit [] removes them, also gated
+  // above because removing existing guests affects those guests.
+  if (input.attendees !== undefined && input.attendees.length === 0) payload.attendees = [];
+  const hasAttendees = previousCount > 0 || (input.attendees?.length ?? 0) > 0;
+  const url = baseUrl + (account.provider === "google" ? `?sendUpdates=${hasAttendees ? "all" : "none"}` : "");
   const res = await withResourceAuth(account.id, (token) =>
     fetch(url, {
-      method,
+      method: "PATCH",
       headers: {
         authorization: `Bearer ${token}`,
         "content-type": "application/json",
+        "if-match": current.etag,
       },
       body: JSON.stringify(payload),
     })
   );
   if (!res.ok) throw new Error(`${account.provider} event update ${res.status}`);
 
-  const id = await upsertAppEvent(
-    svc,
-    userId,
-    { accountId: account.id, calendarId: ev.calendar_id, extEventId: ev.ext_event_id },
-    input
-  );
-  return { id, extEventId: ev.ext_event_id };
+  try {
+    const id = await upsertAppEvent(
+      svc,
+      userId,
+      { accountId: account.id, calendarId: ev.calendar_id, extEventId: ev.ext_event_id },
+      { ...input, attendees: input.attendees ?? current.attendees }
+    );
+    return { id, extEventId: ev.ext_event_id };
+  } catch {
+    throw new ProviderEventPersistenceError("The provider accepted the event change, but local history could not be saved. Do not repeat it; sync and reconcile the calendar.", {
+      ext_event_id: ev.ext_event_id, account_id: account.id, calendar_id: ev.calendar_id,
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Delete: only app-created events (never external data we merely synced).
 // ---------------------------------------------------------------------------
-export async function deleteAppEvent(userId: string, eventId: string): Promise<void> {
+export async function deleteAppEvent(userId: string, eventId: string, confirmed = false): Promise<void> {
   const svc = createServiceClient();
-  const { data: ev } = await svc
+  const { data: ev, error: readError } = await svc
     .from("events")
-    .select("id, account_id, calendar_id, ext_event_id, source")
+    .select("id, account_id, calendar_id, ext_event_id, source, attendees")
     .eq("id", eventId)
-    .single();
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (readError) throw new Error(readError.message);
   if (!ev) return;
   if (ev.source !== "app") {
     throw new Error("Only events created in the app can be deleted here.");
@@ -239,16 +294,22 @@ export async function deleteAppEvent(userId: string, eventId: string): Promise<v
     .select("ext_calendar_id")
     .eq("id", ev.calendar_id!)
     .single();
-  if (cal && ev.ext_event_id) {
-    const url = providerUrl(account.provider, cal.ext_calendar_id, ev.ext_event_id);
+  if (!cal || !ev.ext_event_id) throw new Error("The provider event could not be located. Refresh before deleting.");
+  const baseUrl = providerUrl(account.provider, cal.ext_calendar_id, ev.ext_event_id);
+  const current = await currentProviderEvent(account, baseUrl, true);
+  if (current) {
+    const count = Math.max(current.attendees.length, Array.isArray(ev.attendees) ? ev.attendees.length : 0);
+    if (count > 0 && !confirmed) throw new ConfirmationRequiredError(count);
+    const url = baseUrl + (account.provider === "google" ? `?sendUpdates=${count ? "all" : "none"}` : "");
     const res = await withResourceAuth(account.id, (token) =>
-      fetch(url, { method: "DELETE", headers: { authorization: `Bearer ${token}` } })
+      fetch(url, { method: "DELETE", headers: { authorization: `Bearer ${token}`, "if-match": current.etag } })
     );
     if (!res.ok && res.status !== 404 && res.status !== 410) {
-      throw new Error(`${account.provider} event delete ${res.status}`);
+      throw new Error(`${account.provider} event delete ${res.status}. Refresh before trying again.`);
     }
   }
-  await svc.from("events").delete().eq("id", eventId);
+  const { error } = await svc.from("events").delete().eq("id", eventId).eq("user_id", userId);
+  if (error) throw new ProviderEventPersistenceError("The provider event was deleted, but local history could not be saved. Sync the calendar; do not recreate the event.", { ext_event_id: ev.ext_event_id, deleted: true });
 }
 
 export type { AppEventInput, GoogleEventBody, GraphEventBody };

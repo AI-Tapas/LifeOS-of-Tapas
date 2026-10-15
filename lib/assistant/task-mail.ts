@@ -7,7 +7,7 @@
 //
 // Pure and dependency-injected like mailbox.ts (relative .ts imports only), so
 // the offline suite drives it with mocks. Only ids move here: no subject, no
-// sender, no body. The icai slot is never resolved (B18).
+// sender, no body. All four mailboxes resolve (B36).
 
 import {
   checkMailSlot,
@@ -26,8 +26,8 @@ export interface MessageRef {
   message_id: string;
 }
 
-// Null when the string is not a mail ref or names a slot outside the three
-// open mailboxes (icai included), so a caller never resolves it.
+// Null when the string is not a mail ref or names a slot outside the open
+// mailboxes, so a caller never resolves it.
 export function parseMessageRef(ref: unknown): MessageRef | null {
   if (typeof ref !== "string") return null;
   const m = /^(gmail|graph):([a-z_]+):(.+)$/.exec(ref.trim());
@@ -85,10 +85,6 @@ export function checkThreadTarget(input: Record<string, unknown>): ThreadTarget 
   }
   const ref = parseMessageRef(input.message_ref);
   if (!ref) {
-    // Name the icai refusal rather than calling its ref malformed.
-    if (typeof input.message_ref === "string" && /^(gmail|graph):icai:/.test(input.message_ref.trim())) {
-      checkMailSlot("icai");
-    }
     throw new Error(
       "message_ref must be a task's external_ref, like gmail:<account>:<message id> or graph:<account>:<message id>."
     );

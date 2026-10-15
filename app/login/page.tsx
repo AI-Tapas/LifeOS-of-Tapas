@@ -1,5 +1,6 @@
 "use client";
 
+import { safeRedirectPath } from "@/lib/auth/safe-redirect";
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -12,7 +13,7 @@ const ALLOWED_EMAIL = "tapas.tnr@gmail.com";
 function friendlySendError(message: string | undefined): string {
   const m = (message ?? "").trim();
   if (!m || m === "{}" || /database error|unexpected_failure/i.test(m)) {
-    return "This email is not allowed.";
+    return "Sign-in is temporarily unavailable. Please try again shortly.";
   }
   return m;
 }
@@ -28,39 +29,54 @@ function LoginForm() {
   // sending the owner back afterwards is what makes that flow bearable. Only
   // in-app paths are honoured, so this can never bounce to another site.
   const search = useSearchParams();
-  const rawNext = search.get("next") ?? "/";
-  const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/";
+  const next = safeRedirectPath(search.get("next"));
+  const invalidLink = search.get("error") === "invalid_link";
 
   async function sendOtp(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const supabase = createClient();
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: `${location.origin}/auth/confirm?next=${encodeURIComponent(next)}`,
-      },
-    });
-    setBusy(false);
-    if (error) {
-      setError(friendlySendError(error.message));
-    } else {
-      setStage("code");
+    if (email.trim().toLowerCase() !== ALLOWED_EMAIL) {
+      setError("This account is not authorised to sign in.");
+      setBusy(false);
+      return;
+    }
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo: `${location.origin}/auth/confirm?next=${encodeURIComponent(next)}`,
+        },
+      });
+      if (error) {
+        setError(friendlySendError(error.message));
+      } else {
+        setStage("code");
+      }
+    } catch {
+      setError("Could not reach the sign-in service. Check your connection and try again.");
+    } finally {
+      setBusy(false);
     }
   }
 
   async function signInWithPasskey() {
     setBusy(true);
     setError(null);
-    const supabase = createClient();
-    const { error } = await supabase.auth.signInWithPasskey();
-    setBusy(false);
-    if (error) {
-      setError(error.message);
-    } else {
-      router.push(next);
-      router.refresh();
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.signInWithPasskey();
+      if (error) {
+        setError(error.message);
+      } else {
+        router.push(next);
+        router.refresh();
+      }
+    } catch {
+      setError("Passkey sign-in was unavailable. Try again or use a sign-in code.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -68,18 +84,23 @@ function LoginForm() {
     e.preventDefault();
     setBusy(true);
     setError(null);
-    const supabase = createClient();
-    const { error } = await supabase.auth.verifyOtp({
-      email,
-      token: code.trim(),
-      type: "email",
-    });
-    setBusy(false);
-    if (error) {
-      setError(error.message);
-    } else {
-      router.push(next);
-      router.refresh();
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.verifyOtp({
+        email,
+        token: code.trim(),
+        type: "email",
+      });
+      if (error) {
+        setError(error.message);
+      } else {
+        router.push(next);
+        router.refresh();
+      }
+    } catch {
+      setError("Could not verify the code. Check your connection and try again.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -91,12 +112,14 @@ function LoginForm() {
           <p className="mt-0.5 text-sm text-secondary">Sign in to continue</p>
         </div>
 
+        {invalidLink && <p role="status" className="text-sm text-secondary">This sign-in link has expired or was already used. Request a fresh code below.</p>}
         {stage === "email" ? (
           <form onSubmit={sendOtp} className="space-y-4">
             <label className="block space-y-1">
               <span className="text-sm font-medium">Email</span>
               <input
                 type="email"
+                autoComplete="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -148,12 +171,12 @@ function LoginForm() {
               onClick={() => setStage("email")}
               className="w-full text-sm text-secondary underline"
             >
-              Use a different email
+              Request a new code or change email
             </button>
           </form>
         )}
 
-        {error && <p className="text-sm text-overdue">{error}</p>}
+        {error && <p role="alert" className="text-sm text-overdue">{error}</p>}
       </div>
     </main>
   );

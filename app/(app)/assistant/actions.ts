@@ -8,6 +8,7 @@ import { revalidatePath } from "next/cache";
 import {
   approveAndExecute,
   rejectProposedAction,
+  saveQueuedEmailToDrafts,
   undoExecutedAction,
 } from "@/lib/assistant/execute";
 import { runMailScan, type ScanSummary } from "@/lib/assistant/scan";
@@ -22,6 +23,12 @@ export async function approveActionAction(actionId: string): Promise<ActionResul
 
 export async function rejectActionAction(actionId: string): Promise<ActionResult> {
   const r = await rejectProposedAction(actionId);
+  revalidatePath("/assistant");
+  return r;
+}
+
+export async function saveToDraftsAction(actionId: string): Promise<ActionResult> {
+  const r = await saveQueuedEmailToDrafts(actionId);
   revalidatePath("/assistant");
   return r;
 }

@@ -54,7 +54,7 @@ export async function GET(
   }
   const slot = slotByKey(flow?.slot);
 
-  // Provider returned an error (icai.org admin block is the expected case).
+  // Provider returned an error (for icai, an admin block would offer the optional forwarded fallback).
   const provErr = sp.get("error");
   if (provErr) {
     if (slot?.allowForwarded) return back(req, { slot: slot.key, blocked: "1" });

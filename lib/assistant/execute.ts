@@ -8,6 +8,7 @@
 // apply; only the provider calls use the service-role path inside
 // withResourceAuth.
 
+import { checkedAddresses, checkedHeader, plainTextMime } from "./mail-headers";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { cookieActor, type Actor } from "@/lib/assistant/actor";
 import { withResourceAuth } from "@/lib/oauth/tokens";
@@ -92,11 +93,16 @@ import {
   SAVE_DRAFT_TOOL,
   checkReplyDraftInput,
   deleteReplyDraft,
+  isScopeShortfall,
+  reconnectMessage,
+  replySubject,
   saveReplyDraft,
   storedDraftPayload,
   threadExists,
+  threadReplyContext,
 } from "./mailbox";
 import { mailRequest } from "@/lib/assistant/mail";
+import { saveQueuedToDrafts } from "@/lib/assistant/queued-draft";
 import { parseScanArgs } from "@/lib/assistant/scan-args";
 import {
   removeFinanceReminder,
@@ -129,7 +135,7 @@ async function audit(
   meta: Record<string, unknown>,
   prov: Provenance
 ): Promise<void> {
-  await supabase.from("audit_log").insert({
+  const { error } = await supabase.from("audit_log").insert({
     user_id: userId,
     actor: "assistant",
     action,
@@ -137,6 +143,7 @@ async function audit(
     entity_id: entityId,
     meta: { ...meta, provenance: prov } as unknown as Json,
   });
+  if (error) throw new Error(`The audit entry could not be saved: ${error.message}`);
 }
 
 // The provenance every assistant audit row carries. One wrapper over the
@@ -311,20 +318,23 @@ export async function resolveAccount(
 }
 
 function asEmailList(v: unknown): string[] {
-  if (!Array.isArray(v)) return [];
-  const out: string[] = [];
-  for (const item of v) {
-    const e = typeof item === "string" ? item.trim() : "";
-    // Minimal shape check; the confirmation UI shows the raw address either way.
-    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) out.push(e);
-    else if (e) throw new Error(`Not a valid email address: ${e}`);
-  }
-  return out;
+  return checkedAddresses(v);
 }
 
 // ---------------------------------------------------------------------------
 // Tool dispatch for the chat loop
 // ---------------------------------------------------------------------------
+export class OperationUncertainError extends Error {
+  readonly state = "uncertain";
+  readonly retryable = false;
+  readonly actionId: string;
+  constructor(message: string, actionId: string) {
+    super(message);
+    this.name = "OperationUncertainError";
+    this.actionId = actionId;
+  }
+}
+
 export interface ToolOutcome {
   // What the model sees as the tool result.
   reply: string;
@@ -394,10 +404,29 @@ async function proposeAction(
     const to = asEmailList(input.to);
     if (!to.length) throw new Error("At least one valid recipient is required.");
     const cc = asEmailList(input.cc ?? []);
-    const subject = s(input.subject) ?? "";
+    let subject = checkedHeader(typeof input.subject === "string" ? input.subject : "", "Subject").trim();
     const body = typeof input.body === "string" ? input.body : "";
+    const threadRaw = s(input.thread_id);
+    const thread = threadRaw ? checkedHeader(threadRaw, "thread_id").trim() : "";
+    if (thread) {
+      // The thread must exist in that mailbox (as for save_reply_draft). The
+      // subject is then the thread's own, "Re: ...", stored in the payload so
+      // the card shows it, the hash binds it, and Gmail threads reliably.
+      if (thread.length > 200) throw new Error("thread_id is too long.");
+      let ctx;
+      try {
+        ctx = await threadReplyContext(mailRequest(account.id), account, thread);
+      } catch (e) {
+        if (e instanceof Error && e.message.startsWith("No mail thread")) {
+          throw new Error(`No mail thread ${thread} in ${slot}. Take thread_id from lifeos_list_inbox.`);
+        }
+        throw e;
+      }
+      subject = checkedHeader(replySubject(ctx.subject), "Subject").trim();
+    }
     if (!subject || !body.trim()) throw new Error("Subject and body are required.");
-    payload = { account_id: account.id, account_slot: slot, to, cc, subject, body };
+    // thread_id is part of the payload, so the approval hash binds it.
+    payload = { account_id: account.id, account_slot: slot, to, cc, subject, body, ...(thread ? { thread_id: thread } : {}) };
     title = `Email to ${to.join(", ")}: ${subject}`.slice(0, 200);
   } else {
     // propose_event_with_invites
@@ -555,7 +584,7 @@ async function performAutonomous(
     throw new Error(`${name} is not an autonomous tool.`);
   }
   // B18: a reply draft's input is checked before its thread is looked up, so
-  // an icai slot, a missing thread or a smuggled recipient is refused outright
+  // an unknown slot, a missing thread or a smuggled recipient is refused outright
   // rather than queued. And what the row keeps of it leaves the words out:
   // the draft lives in the mailbox, not in this database.
   const isDraft = name === SAVE_DRAFT_TOOL;
@@ -582,27 +611,53 @@ async function performAutonomous(
           ? storedDraftPayload(input)
           : input;
   const spec = TOOL_TARGETS[name];
+  let executionId: string | null = null;
   const outcome = await runAutonomousAction<Performed>(input, spec, {
     resolveTarget: (value) => targetResolves(supabase, userId, spec, value, input),
-    perform: () => performers[name](supabase, userId, input, owner),
+    perform: async () => {
+      // Persist intent BEFORE any mutation. A missing completion can then be
+      // reconciled by operation id; it is never interpreted as safe to replay.
+      const { data, error } = await supabase.from("assistant_actions").insert({
+        user_id: userId, kind: name, mode: "auto", status: "approved",
+        execution_state: "running", title: `${name}: in progress`,
+        payload: stored as Json, payload_hash: hashPayload(input),
+        executed_at: new Date().toISOString(),
+      }).select("id").single();
+      if (error || !data) throw new Error(error?.message ?? "Could not record the operation; nothing was changed.");
+      executionId = data.id;
+      try {
+        await audit(supabase, userId, "execute_started", executionId, { kind: name },
+          prov(owner, "autonomous_bucket", name, executionId));
+        return await performers[name](supabase, userId, input, owner);
+      } catch (cause) {
+        const message = cause instanceof Error ? cause.message : "Execution failed.";
+        await supabase.from("assistant_actions").update({
+          status: "failed", execution_state: "uncertain", error: message,
+          ...(cause && typeof cause === "object" && "providerResult" in cause ? { result: cause.providerResult as Json } : {}),
+        }).eq("id", executionId);
+        throw new OperationUncertainError(`${message} Operation ${executionId} needs review before retrying; changes may have partially completed.`, executionId);
+      }
+    },
     recordExecuted: async (done) => {
-      const { data } = await supabase
+      if (!executionId) throw new Error("Missing durable execution intent.");
+      const result = { undo: done.undo } as Json;
+      const { data, error } = await supabase
         .from("assistant_actions")
-        .insert({
-          user_id: userId,
-          kind: name,
-          mode: "auto",
-          status: "executed",
-          account_id: done.accountId ?? null,
-          title: done.summary.slice(0, 200),
-          payload: stored as Json,
-          payload_hash: hashPayload(input),
-          executed_at: new Date().toISOString(),
-          result: { undo: done.undo } as Json,
+        .update({
+          status: "executed", execution_state: "succeeded",
+          account_id: done.accountId ?? null, title: done.summary.slice(0, 200), result,
         })
+        .eq("id", executionId)
+        .eq("status", "approved")
         .select("id")
         .single();
-      return { actionId: data?.id ?? null };
+      if (error || !data) {
+        const message = `Operation ${executionId} completed but final history could not be saved. Do not repeat it; reconcile its result first.`;
+        // Best-effort result preservation, never re-execution of the effect.
+        await supabase.from("assistant_actions").update({ execution_state: "uncertain", error: message, result }).eq("id", executionId);
+        throw new OperationUncertainError(message, executionId);
+      }
+      return { actionId: data.id };
     },
     downgrade: (reason) => downgradeToQueue(supabase, userId, name, stored, reason),
   });
@@ -625,14 +680,15 @@ async function performAutonomous(
       queued: true,
     };
   }
-  await audit(
-    supabase,
-    userId,
-    "execute_autonomous",
-    outcome.actionId,
-    { kind: name, ...outcome.done.auditMeta },
-    prov(owner, "autonomous_bucket", name, outcome.actionId)
-  );
+  try {
+    await audit(
+      supabase, userId, "execute_autonomous", outcome.actionId,
+      { kind: name, ...outcome.done.auditMeta },
+      prov(owner, "autonomous_bucket", name, outcome.actionId)
+    );
+  } catch {
+    return { reply: `${outcome.done.summary} Operation ${outcome.actionId} was saved, but its supplementary audit entry failed. Do not repeat it.`, actionId: outcome.actionId ?? undefined };
+  }
   return { reply: outcome.done.summary, actionId: outcome.actionId ?? undefined };
 }
 
@@ -1783,11 +1839,53 @@ const performers: Record<string, Performer> = {
 // the same action, so one undo reverses both. Not on any tool surface: the
 // receipt link is reachable only from the scan, never from a model's input.
 // ---------------------------------------------------------------------------
+async function auditScannedCompletion(owner: Actor, kind: string, actionId: string, meta: Record<string, unknown>): Promise<string | undefined> {
+  try {
+    await audit(owner.supabase, owner.userId, "execute_autonomous", actionId, { kind, via: "scan_mail", ...meta }, prov(owner, "autonomous_bucket", kind, actionId));
+    return undefined;
+  } catch {
+    const warning = `Operation ${actionId} completed and was saved, but its supplementary audit entry failed. Do not repeat it.`;
+    await owner.supabase.from("assistant_actions").update({ error: warning }).eq("id", actionId);
+    return warning;
+  }
+}
+
+async function recordScannedExecution<T>(
+  owner: Actor,
+  kind: string,
+  accountId: string,
+  title: string,
+  payload: Json,
+  perform: () => Promise<T>,
+  resultOf: (done: T) => Json
+): Promise<{ actionId: string; done: T }> {
+  const { supabase, userId } = owner;
+  const { data, error } = await supabase.from("assistant_actions").insert({
+    user_id: userId, kind, mode: "auto", status: "approved", execution_state: "running",
+    account_id: accountId, title, payload, payload_hash: hashPayload(payload), executed_at: new Date().toISOString(),
+  }).select("id").single();
+  if (error || !data) throw new Error(error?.message ?? "Could not record scan intent; nothing was changed.");
+  const actionId = data.id;
+  let result: Json | null = null;
+  try {
+    await audit(supabase, userId, "execute_started", actionId, { kind, via: "scan_mail" }, prov(owner, "autonomous_bucket", kind, actionId));
+    const done = await perform();
+    result = resultOf(done);
+    const saved = await supabase.from("assistant_actions").update({ status: "executed", execution_state: "succeeded", result }).eq("id", actionId).eq("status", "approved").select("id").single();
+    if (saved.error || !saved.data) throw new Error("The scan mutation completed but its final history could not be saved.");
+    return { actionId, done };
+  } catch (cause) {
+    const reason = cause instanceof Error ? cause.message : "Scan mutation failed.";
+    await supabase.from("assistant_actions").update({ execution_state: "uncertain", error: reason, ...(result ? { result } : {}) }).eq("id", actionId);
+    throw new OperationUncertainError(`${reason} Reconcile operation ${actionId} before repeating it.`, actionId);
+  }
+}
+
 export async function logScannedTripLeg(
   owner: Actor,
   t: TicketLeg,
   accountId: string
-): Promise<{ actionId: string | null; receiptLinked: boolean }> {
+): Promise<{ actionId: string | null; receiptLinked: boolean; auditWarning?: string }> {
   const { supabase, userId } = owner;
   const input: Record<string, unknown> = {
     trip_id: t.trip_id,
@@ -1798,65 +1896,44 @@ export async function logScannedTripLeg(
     ...(t.leg.ref ? { reference: t.leg.ref } : {}),
     ...(t.leg.time ? { time: t.leg.time } : {}),
   };
-  const undo: TicketUndo = await applyTicketLeg(
-    {
-      addLeg: async () => {
-        const done = await performers.log_trip_leg(supabase, userId, input, owner);
-        return (done.undo?.previous_legs ?? []) as TripLeg[];
-      },
-      listExpenses: async (tripId) => {
-        const { data } = await supabase
-          .from("trip_expenses")
-          .select("id, category, date, billable, receipt_ref")
-          .eq("trip_id", tripId)
-          .eq("user_id", userId);
-        return data ?? [];
-      },
-      setReceiptIfEmpty: async (expenseId, receiptRef) => {
-        const { data } = await supabase
-          .from("trip_expenses")
-          .update({ receipt_ref: receiptRef })
-          .eq("id", expenseId)
-          .or("receipt_ref.is.null,receipt_ref.eq.")
-          .select("id");
-        return !!data?.length;
-      },
-    },
-    t
-  );
-  // What the row keeps: ids and the message ref, never the PNR or cities.
+  // Persist only provenance/ids in intent, never ticket bodies or PNRs.
   const stored = { trip_id: t.trip_id, external_ref: t.external_ref, date: t.leg.date, mode: t.leg.mode };
-  const { data } = await supabase
-    .from("assistant_actions")
-    .insert({
-      user_id: userId,
-      kind: "log_trip_leg",
-      mode: "auto",
-      status: "executed",
-      account_id: accountId,
-      title: "Ticket from mail: leg logged on a trip",
-      payload: stored as Json,
-      payload_hash: hashPayload(stored),
-      executed_at: new Date().toISOString(),
-      result: { undo } as unknown as Json,
-    })
-    .select("id")
-    .single();
-  const actionId = data?.id ?? null;
-  await audit(
-    supabase,
-    userId,
-    "execute_autonomous",
-    actionId,
-    {
-      kind: "log_trip_leg",
-      via: "scan_mail",
-      trip_id: t.trip_id,
-      receipt_linked: undo.receipt_links.length > 0,
-    },
-    prov(owner, "autonomous_bucket", "log_trip_leg", actionId)
+  const { actionId, done: undo } = await recordScannedExecution<TicketUndo>(
+    owner, "log_trip_leg", accountId, "Ticket from mail: leg logged on a trip", stored,
+    () => applyTicketLeg(
+      {
+        addLeg: async () => {
+          const done = await performers.log_trip_leg(supabase, userId, input, owner);
+          return (done.undo?.previous_legs ?? []) as TripLeg[];
+        },
+        listExpenses: async (tripId) => {
+          const { data, error } = await supabase
+            .from("trip_expenses")
+            .select("id, category, date, billable, receipt_ref")
+            .eq("trip_id", tripId)
+            .eq("user_id", userId);
+          if (error) throw new Error(error.message);
+          return data ?? [];
+        },
+        setReceiptIfEmpty: async (expenseId, receiptRef) => {
+          const { data, error } = await supabase
+            .from("trip_expenses")
+            .update({ receipt_ref: receiptRef })
+            .eq("id", expenseId)
+            .or("receipt_ref.is.null,receipt_ref.eq.")
+            .select("id");
+          if (error) throw new Error(error.message);
+          return !!data?.length;
+        },
+      },
+      t
+  ),
+    (undo) => ({ undo }) as unknown as Json
   );
-  return { actionId, receiptLinked: undo.receipt_links.length > 0 };
+  const auditWarning = await auditScannedCompletion(owner, "log_trip_leg", actionId, {
+    trip_id: t.trip_id, receipt_linked: undo.receipt_links.length > 0,
+  });
+  return { actionId, receiptLinked: undo.receipt_links.length > 0, auditWarning };
 }
 
 // ---------------------------------------------------------------------------
@@ -1873,36 +1950,17 @@ export async function logScannedCabExpense(
   owner: Actor,
   ride: CabRide,
   accountId: string
-): Promise<{ actionId: string | null }> {
+): Promise<{ actionId: string | null; auditWarning?: string }> {
   const { supabase, userId } = owner;
-  const done = await performers.add_trip_expense(supabase, userId, cabExpenseInput(ride), owner);
   const stored = cabActionPayload(ride);
-  const { data } = await supabase
-    .from("assistant_actions")
-    .insert({
-      user_id: userId,
-      kind: "add_trip_expense",
-      mode: "auto",
-      status: "executed",
-      account_id: accountId,
-      title: `Cab receipt from mail: ${cabDescription(ride)}`.slice(0, 200),
-      payload: stored as unknown as Json,
-      payload_hash: hashPayload(stored),
-      executed_at: new Date().toISOString(),
-      result: { undo: done.undo } as unknown as Json,
-    })
-    .select("id")
-    .single();
-  const actionId = data?.id ?? null;
-  await audit(
-    supabase,
-    userId,
-    "execute_autonomous",
-    actionId,
-    { kind: "add_trip_expense", via: "scan_mail", trip_id: ride.trip_id, amount: ride.amount },
-    prov(owner, "autonomous_bucket", "add_trip_expense", actionId)
+  const { actionId } = await recordScannedExecution(
+    owner, "add_trip_expense", accountId,
+    `Cab receipt from mail: ${cabDescription(ride)}`.slice(0, 200), stored as unknown as Json,
+    () => performers.add_trip_expense(supabase, userId, cabExpenseInput(ride), owner),
+    (done) => ({ undo: done.undo }) as unknown as Json
   );
-  return { actionId };
+  const auditWarning = await auditScannedCompletion(owner, "add_trip_expense", actionId, { trip_id: ride.trip_id, amount: ride.amount });
+  return { actionId, auditWarning };
 }
 
 export async function approveAndExecute(
@@ -1949,14 +2007,20 @@ export async function approveAndExecute(
     .eq("status", "proposed")
     .select("id");
   if (!approved?.length) return { ok: false, message: "The action changed state." };
-  await audit(
-    supabase,
-    userId,
-    "approve",
-    actionId,
-    { kind: action.kind },
-    prov(owner, "owner_approval", action.kind, actionId, hashPayload(action.payload))
-  );
+  try {
+    await audit(
+      supabase,
+      userId,
+      "approve",
+      actionId,
+      { kind: action.kind },
+      prov(owner, "owner_approval", action.kind, actionId, hashPayload(action.payload))
+    );
+  } catch {
+    const message = `Approval audit could not be saved for operation ${actionId}. Nothing was sent. Review or create a new proposal after the database recovers.`;
+    await supabase.from("assistant_actions").update({ status: "failed", error: message }).eq("id", actionId).eq("status", "approved").is("executed_at", null);
+    return { ok: false, message };
+  }
   return executeApprovedAction(actionId, owner);
 }
 
@@ -1989,7 +2053,7 @@ export async function executeApprovedAction(
     claimExecution: async () => {
       const { data, error } = await supabase
         .from("assistant_actions")
-        .update({ executed_at: new Date().toISOString() })
+        .update({ executed_at: new Date().toISOString(), execution_state: "running" })
         .eq("id", actionId)
         .eq("status", "approved")
         .is("executed_at", null)
@@ -2000,16 +2064,27 @@ export async function executeApprovedAction(
     perform: (kind, payload) =>
       performSendClass(owner, kind, payload as Record<string, unknown>),
     markExecuted: async (result) => {
-      await supabase
+      const { data, error } = await supabase
         .from("assistant_actions")
-        .update({ status: "executed", result: result as Json })
-        .eq("id", actionId);
+        .update({ status: "executed", execution_state: "succeeded", result: result as Json })
+        .eq("id", actionId)
+        .eq("status", "approved")
+        .select("id");
+      if (error || !data?.length) throw new Error(error?.message ?? "Execution history was not saved.");
     },
     markFailed: async (message) => {
-      await supabase
+      const { error } = await supabase
         .from("assistant_actions")
-        .update({ status: "failed", error: message })
+        .update({ status: "failed", execution_state: "uncertain", error: message })
         .eq("id", actionId);
+      if (error) throw new Error(error.message);
+    },
+    markUncertain: async (message, result) => {
+      const { error } = await supabase
+        .from("assistant_actions")
+        .update({ execution_state: "uncertain", error: message, result: result as Json })
+        .eq("id", actionId);
+      if (error) throw new Error(error.message);
     },
     audit: (action, meta) =>
       audit(
@@ -2075,23 +2150,27 @@ async function sendEmail(
     .eq("id", accountId)
     .single();
   if (!account) throw new Error("Account not found.");
-  const to = (payload.to as string[]) ?? [];
-  const cc = (payload.cc as string[]) ?? [];
-  const subject = s(payload.subject) ?? "";
+  const to = checkedAddresses(payload.to ?? []);
+  const cc = checkedAddresses(payload.cc ?? []);
+  const subject = checkedHeader(typeof payload.subject === "string" ? payload.subject : "", "Subject");
+  checkedAddresses([account.email]);
   const body = typeof payload.body === "string" ? payload.body : "";
   if (!to.length) throw new Error("No recipients.");
 
+  const thread = typeof payload.thread_id === "string" ? checkedHeader(payload.thread_id, "thread_id").trim() : "";
+  const ctx = thread
+    ? await threadReplyContext(
+        mailRequest(accountId),
+        { id: accountId, slot: account.slot ?? "", provider: account.provider, email: account.email },
+        thread
+      )
+    : null;
+
   if (account.provider === "google") {
-    const mime = [
-      `From: ${account.email}`,
-      `To: ${to.join(", ")}`,
-      ...(cc.length ? [`Cc: ${cc.join(", ")}`] : []),
-      `Subject: ${subject}`,
-      "MIME-Version: 1.0",
-      'Content-Type: text/plain; charset="UTF-8"',
-      "",
-      body,
-    ].join("\r\n");
+    const mime = plainTextMime({
+      from: account.email, to, cc, subject, body,
+      ...(ctx ? { inReplyTo: ctx.message_id, references: ctx.references } : {}),
+    });
     const res = await withResourceAuth(accountId, (token) =>
       fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", {
         method: "POST",
@@ -2099,15 +2178,37 @@ async function sendEmail(
           authorization: `Bearer ${token}`,
           "content-type": "application/json",
         },
-        body: JSON.stringify({ raw: Buffer.from(mime, "utf8").toString("base64url") }),
+        body: JSON.stringify({ raw: Buffer.from(mime, "utf8").toString("base64url"), ...(thread ? { threadId: thread } : {}) }),
       })
     );
-    if (!res.ok) throw new Error(`Gmail send failed (${res.status}).`);
+    if (!res.ok) {
+      if (await isScopeShortfall(res)) throw new Error(reconnectMessage(account.slot ?? "this mailbox"));
+      throw new Error(`Gmail send failed (${res.status}).`);
+    }
+    if (false) throw new Error(`Gmail send failed (${res.status}).`);
     const j = (await res.json()) as { id?: string };
     return { provider_message_id: j.id ?? null };
   }
 
-  // Microsoft Graph
+  // Microsoft Graph. A reply is made on the thread's last message with exactly
+  // the approved recipients; the body goes in as the reply comment.
+  if (ctx) {
+    const replied = await withResourceAuth(accountId, (token) =>
+      fetch(`https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(ctx.message_id)}/reply`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          message: {
+            toRecipients: to.map((a) => ({ emailAddress: { address: a } })),
+            ccRecipients: cc.map((a) => ({ emailAddress: { address: a } })),
+          },
+            body: { contentType: "Text", content: body },
+        }),
+      })
+    );
+    if (!replied.ok && replied.status !== 202) throw new Error(`Graph reply failed (${replied.status}).`);
+    return { provider_message_id: null };
+  }
   const res = await withResourceAuth(accountId, (token) =>
     fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
       method: "POST",
@@ -2163,6 +2264,49 @@ export async function rejectProposedAction(
   return { ok: true };
 }
 
+// B36: the owner's third choice on a queued email. Reached only from an owner
+// server action (no MCP tool calls it). Creates a draft in the mailbox and
+// closes the action as saved_as_draft; a failed draft leaves it queued.
+export async function saveQueuedEmailToDrafts(
+  actionId: string,
+  actor?: Actor
+): Promise<{ ok: boolean; message?: string }> {
+  const owner = await ownerClient(actor);
+  const { supabase, userId } = owner;
+  return saveQueuedToDrafts({
+    loadAction: async () => {
+      const { data } = await supabase
+        .from("assistant_actions")
+        .select("id, kind, status, payload")
+        .eq("id", actionId)
+        .maybeSingle();
+      return data ?? null;
+    },
+    account: async (accountId) => {
+      const { data } = await supabase
+        .from("accounts")
+        .select("id, email, provider, slot")
+        .eq("id", accountId)
+        .maybeSingle();
+      if (!data?.slot) throw new Error("The mailbox for that email is no longer connected.");
+      return { id: data.id, slot: data.slot, provider: data.provider, email: data.email };
+    },
+    request: (accountId) => mailRequest(accountId),
+    markSaved: async (result) => {
+      const { data, error } = await supabase
+        .from("assistant_actions")
+        .update({ status: "saved_as_draft", result: result as Json })
+        .eq("id", actionId)
+        .eq("status", "proposed")
+        .select("id");
+      if (error) throw new Error(error.message);
+      return (data?.length ?? 0) > 0;
+    },
+    audit: (meta) =>
+      audit(supabase, userId, "save_to_drafts", actionId, meta, prov(owner, "owner_approval", "send_email", actionId)),
+  });
+}
+
 // Kinds with a reversible inverse. Send-class actions are deliberately absent:
 // a sent mail cannot be unsent.
 const UNDOABLE = new Set([
@@ -2216,7 +2360,7 @@ export async function undoExecutedAction(
   const { supabase, userId } = owner;
   const { data: action } = await supabase
     .from("assistant_actions")
-    .select("id, kind, status, result")
+    .select("id, kind, status, result, undo_started_at, undo_error")
     .eq("id", actionId)
     .single();
   if (!action) return { ok: false, message: "Action not found." };
@@ -2249,39 +2393,59 @@ export async function undoExecutedAction(
     if (refusal) return { ok: false, message: refusal };
   }
 
-  // Claim the row first (executed -> undone via the trigger whitelist), so a
-  // double tap performs the inverse exactly once.
-  const { data: claimed } = await supabase
+  // The action remains executed until the inverse completes. An in-flight or
+  // crashed inverse is never expired automatically (a provider may be slow).
+  const claim = new Date().toISOString();
+  const { data: claimed, error: claimError } = await supabase
     .from("assistant_actions")
-    .update({ status: "undone", undone_at: new Date().toISOString() })
+    .update({ undo_started_at: claim, undo_error: null })
     .eq("id", actionId)
     .eq("status", "executed")
+    .is("undo_started_at", null)
     .select("id");
-  if (!claimed?.length) return { ok: false, message: "The action changed state." };
+  if (claimError || !claimed?.length) return { ok: false, message: claimError?.message ?? "Undo is already running or needs reconciliation. No second inverse was started." };
 
   try {
     await performUndo(supabase, userId, action.kind, undo);
-    await audit(
-      supabase,
-      userId,
-      "undo",
-      actionId,
-      { kind: action.kind },
-      prov(owner, "autonomous_bucket", "undo_action", actionId)
-    );
-    return { ok: true };
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Undo failed.";
-    await audit(
-      supabase,
-      userId,
-      "undo_failed",
-      actionId,
-      { reason: message },
-      prov(owner, "autonomous_bucket", "undo_action", actionId)
-    );
+    const reason = e instanceof Error ? e.message : "Undo failed.";
+    const retryable = LOCAL_RETRYABLE_UNDO.has(action.kind);
+    const message = retryable ? reason : `${reason} Undo may be partially complete. Reconcile it before releasing the claim; do not repeat it blindly.`;
+    const { error } = await supabase.from("assistant_actions").update({
+      undo_error: message, ...(retryable ? { undo_started_at: null } : {}),
+    }).eq("id", actionId).eq("undo_started_at", claim);
+    try { await audit(supabase, userId, "undo_failed", actionId, { reason: message }, prov(owner, "autonomous_bucket", "undo_action", actionId)); } catch { /* Failure remains on the durable action. */ }
+    return { ok: false, message: error ? `${message} The failure record also could not be saved; inspect operation ${actionId}.` : message };
+  }
+
+  const { data: finished, error: finishError } = await supabase.from("assistant_actions").update({
+    status: "undone", undone_at: new Date().toISOString(), undo_started_at: null, undo_error: null,
+  }).eq("id", actionId).eq("status", "executed").eq("undo_started_at", claim).select("id");
+  if (finishError || !finished?.length) {
+    const message = `The inverse completed, but its history could not be saved. Reconcile operation ${actionId}; do not repeat Undo.`;
+    await supabase.from("assistant_actions").update({ undo_error: message }).eq("id", actionId).eq("undo_started_at", claim);
     return { ok: false, message };
   }
+  try {
+    await audit(supabase, userId, "undo", actionId, { kind: action.kind }, prov(owner, "autonomous_bucket", "undo_action", actionId));
+  } catch {
+    return { ok: true, message: "Undo completed and was saved, but its supplementary audit entry failed." };
+  }
+  return { ok: true };
+}
+
+// Only single local writes can safely release a failed claim for retry. Multi-
+// step/reminder/provider inverses need reconciliation if any step throws.
+const LOCAL_RETRYABLE_UNDO = new Set([
+  "add_note", "update_note", "add_person", "update_person", "add_project",
+  "update_project", "update_work_stream", "report_agent_result", "set_billing_state",
+  "delete_note", "delete_person",
+]);
+
+async function checkedUndoQuery<T extends { error: { message: string } | null }>(query: PromiseLike<T>): Promise<T> {
+  const result = await query;
+  if (result.error) throw new Error(result.error.message);
+  return result;
 }
 
 async function performUndo(
@@ -2305,30 +2469,40 @@ async function performUndo(
       // lapses_on, B22 billable, project, repeat rule) leaves that column
       // alone rather than clearing a value set since: taskUndoPatch, pure in
       // lib/tasks/tool-fields.ts and proved in scripts/b22.test.ts.
-      const r = await updateTask(supabase, userId, String(undo.task_id), taskUndoPatch(prev), "undo");
+      const patch = undo.patch_only === true
+        ? {
+            ...("title" in prev ? { title: String(prev.title) } : {}),
+            ...("notes" in prev ? { notes: prev.notes as string | null } : {}),
+          }
+        : taskUndoPatch(prev);
+      if (!Object.keys(patch).length) throw new Error("No restorable task fields were recorded.");
+      const r = await updateTask(supabase, userId, String(undo.task_id), patch, "undo");
       if (!r.ok) throw new Error(r.message);
       return;
     }
     case "add_note": {
-      await supabase.from("notes").delete().eq("id", String(undo.note_id));
+      await checkedUndoQuery(supabase.from("notes").delete().eq("id", String(undo.note_id)));
       return;
     }
     case "update_note": {
       const prev = (undo.prev ?? {}) as Record<string, unknown>;
-      await supabase
+      await checkedUndoQuery(supabase
         .from("notes")
-        .update({
+        .update(undo.patch_only === true ? {
+          ...("title" in prev ? { title: String(prev.title) } : {}),
+          ...("body_md" in prev ? { body_md: prev.body_md as string | null } : {}),
+        } : {
           title: prev.title as string,
           body_md: prev.body_md as string | null,
           task_id: (prev.task_id as string | null) ?? null,
           trip_id: (prev.trip_id as string | null) ?? null,
         })
-        .eq("id", String(undo.note_id));
+        .eq("id", String(undo.note_id)).select("id").single());
       return;
     }
     case "update_person": {
       const prev = (undo.prev ?? {}) as Record<string, unknown>;
-      await supabase
+      await checkedUndoQuery(supabase
         .from("people")
         .update({
           name: prev.name as string,
@@ -2339,12 +2513,12 @@ async function performUndo(
           context_md: prev.context_md as string | null,
           unverified: prev.unverified as boolean,
         })
-        .eq("id", String(undo.person_id));
+        .eq("id", String(undo.person_id)).select("id").single());
       return;
     }
     case "update_obligation": {
       const prev = (undo.prev ?? {}) as Record<string, unknown>;
-      await supabase
+      await checkedUndoQuery(supabase
         .from("recurring_obligations")
         .update({
           name: prev.name as string,
@@ -2354,7 +2528,7 @@ async function performUndo(
           autopay: prev.autopay as boolean,
           active: prev.active as boolean,
         })
-        .eq("id", String(undo.obligation_id));
+        .eq("id", String(undo.obligation_id)).select("id").single());
       await syncObligationReminder(userId, String(undo.obligation_id));
       return;
     }
@@ -2369,33 +2543,33 @@ async function performUndo(
       // this only ever drops an instruction the agents had already answered).
       const row = { ...snapshot };
       for (const col of INSTRUCTION_COLUMNS) delete row[col];
-      const { error } = await supabase.from("tasks").insert(row as never);
+      const { error } = await checkedUndoQuery(supabase.from("tasks").insert(row as never));
       if (error) throw new Error(`Could not restore the task: ${error.message}`);
       if (row.due_ts) await syncTaskReminder(userId, String(row.id));
       return;
     }
     case "delete_note": {
-      const { error } = await supabase.from("notes").insert(undo.row as never);
+      const { error } = await checkedUndoQuery(supabase.from("notes").insert(undo.row as never));
       if (error) throw new Error(`Could not restore the note: ${error.message}`);
       return;
     }
     case "delete_person": {
-      const { error } = await supabase.from("people").insert(undo.row as never);
+      const { error } = await checkedUndoQuery(supabase.from("people").insert(undo.row as never));
       if (error) throw new Error(`Could not restore the person: ${error.message}`);
       return;
     }
     case "delete_obligation": {
       const row = undo.row as Record<string, unknown>;
-      const { error } = await supabase
+      const { error } = await checkedUndoQuery(supabase
         .from("recurring_obligations")
-        .insert(row as never);
+        .insert(row as never));
       if (error) throw new Error(`Could not restore the obligation: ${error.message}`);
       await syncObligationReminder(userId, String(row.id));
       return;
     }
     case "delete_finance_item": {
       const row = undo.row as Record<string, unknown>;
-      const { error } = await supabase.from("finance_items").insert(row as never);
+      const { error } = await checkedUndoQuery(supabase.from("finance_items").insert(row as never));
       if (error) throw new Error(`Could not restore the holding: ${error.message}`);
       // Restoring the row restores its reminder too, the same way a restored
       // obligation gets its own back.
@@ -2403,21 +2577,21 @@ async function performUndo(
       return;
     }
     case "add_project": {
-      await supabase.from("projects").delete().eq("id", String(undo.project_id));
+      await checkedUndoQuery(supabase.from("projects").delete().eq("id", String(undo.project_id)));
       return;
     }
     case "add_finance_item": {
       await removeFinanceReminder(userId, String(undo.finance_item_id));
-      await supabase
+      await checkedUndoQuery(supabase
         .from("finance_items")
         .delete()
-        .eq("id", String(undo.finance_item_id));
+        .eq("id", String(undo.finance_item_id)));
       return;
     }
     case "update_finance_item": {
       const prev = (undo.prev ?? {}) as Record<string, unknown>;
       const itemId = String(undo.finance_item_id);
-      await supabase
+      await checkedUndoQuery(supabase
         .from("finance_items")
         .update({
           name: prev.name as string,
@@ -2428,23 +2602,23 @@ async function performUndo(
             null) as Database["public"]["Enums"]["finance_key_date_type"] | null,
           notes: prev.notes as string | null,
         })
-        .eq("id", itemId);
+        .eq("id", itemId).select("id").single());
       // The reminder follows the restored row, so undoing a maturity that was
       // turned into a review date puts the calendar entry back.
       await syncFinanceReminder(userId, itemId);
       return;
     }
     case "add_person": {
-      await supabase.from("people").delete().eq("id", String(undo.person_id));
+      await checkedUndoQuery(supabase.from("people").delete().eq("id", String(undo.person_id)));
       return;
     }
     case "add_obligation": {
       // ponytail: direct delete; the obligation was just created by the
       // assistant, so no reminder event exists yet for it in practice.
-      await supabase
+      await checkedUndoQuery(supabase
         .from("recurring_obligations")
         .delete()
-        .eq("id", String(undo.obligation_id));
+        .eq("id", String(undo.obligation_id)));
       return;
     }
     case "add_event_solo": {
@@ -2460,7 +2634,7 @@ async function performUndo(
             (v): v is string => typeof v === "string"
           )
         : [];
-      for (const taskId of seeded) await deleteTask(supabase, userId, taskId);
+      for (const taskId of seeded) { const r = await deleteTask(supabase, userId, taskId); if (!r.ok) throw new Error(r.message); }
       const r = await deleteTrip(supabase, userId, String(undo.trip_id));
       if (!r.ok) throw new Error(r.message ?? "Could not delete the trip.");
       return;
@@ -2508,11 +2682,11 @@ async function performUndo(
             if (!r.ok) throw new Error(r.message);
           },
           clearReceiptIf: async (expenseId, receiptRef) => {
-            await supabase
+            await checkedUndoQuery(supabase
               .from("trip_expenses")
               .update({ receipt_ref: null })
               .eq("id", expenseId)
-              .eq("receipt_ref", receiptRef);
+              .eq("receipt_ref", receiptRef));
           },
         },
         undo
@@ -2525,11 +2699,12 @@ async function performUndo(
       await undoLapse(
         {
           currentStatus: async (id) => {
-            const { data } = await supabase.from("tasks").select("status").eq("id", id).maybeSingle();
+            const { data } = await checkedUndoQuery(supabase.from("tasks").select("status").eq("id", id).maybeSingle());
             return data?.status ?? null;
           },
           setStatus: async (id, status) => {
-            await setTaskStatus(supabase, userId, id, status as NonNullable<TaskInput["status"]>);
+            const r = await setTaskStatus(supabase, userId, id, status as NonNullable<TaskInput["status"]>);
+            if (!r.ok) throw new Error(r.message);
           },
         },
         undo
@@ -2544,11 +2719,11 @@ async function performUndo(
     case "save_reply_draft": {
       // The id comes from this executed row's own record, never from the
       // caller, and deleteReplyDraft asks the provider before it deletes.
-      const { data: account } = await supabase
+      const { data: account } = await checkedUndoQuery(supabase
         .from("accounts")
         .select("id, email, slot, provider")
         .eq("id", String(undo.account_id))
-        .single();
+        .single());
       if (!account?.slot) throw new Error("The mailbox for that draft is no longer connected.");
       await deleteReplyDraft(
         mailRequest(account.id),
@@ -2570,7 +2745,7 @@ async function performUndo(
     }
     case "update_project": {
       const prev = (undo.prev ?? {}) as Record<string, unknown>;
-      const { error } = await supabase
+      const { error } = await checkedUndoQuery(supabase
         .from("projects")
         .update({
           name: prev.name as string,
@@ -2578,16 +2753,16 @@ async function performUndo(
           status: prev.status as Database["public"]["Enums"]["project_status"],
           notes: (prev.notes as string | null) ?? null,
         })
-        .eq("id", String(undo.project_id));
+        .eq("id", String(undo.project_id)).select("id").single());
       if (error) throw new Error(error.message);
       return;
     }
     case "update_work_stream": {
       const prev = (undo.prev ?? {}) as { hourly_rate?: number | null; scan_hint?: string | null };
-      const { error } = await supabase
+      const { error } = await checkedUndoQuery(supabase
         .from("work_streams")
         .update(prev)
-        .eq("id", String(undo.work_stream_id));
+        .eq("id", String(undo.work_stream_id)).select("id").single());
       if (error) throw new Error(error.message);
       return;
     }
@@ -2596,21 +2771,22 @@ async function performUndo(
       const ids = Array.isArray(undo.task_ids)
         ? (undo.task_ids as unknown[]).filter((v): v is string => typeof v === "string")
         : [];
-      for (const taskId of ids) await deleteTask(supabase, userId, taskId);
+      for (const taskId of ids) { const r = await deleteTask(supabase, userId, taskId); if (!r.ok) throw new Error(r.message); }
       return;
     }
     case "sync_trip_hotel_step": {
       const c = (undo.changes ?? { created: [], updated: [], dropped: [] }) as HotelSyncChanges;
-      for (const id of c.created ?? []) await deleteTask(supabase, userId, id);
+      for (const id of c.created ?? []) { const r = await deleteTask(supabase, userId, id); if (!r.ok) throw new Error(r.message); }
       for (const u of c.updated ?? []) {
         const r = await updateTask(supabase, userId, u.id, { title: u.prev.title, notes: u.prev.notes, due_ts: u.prev.due_ts }, "undo");
         if (!r.ok) throw new Error(r.message);
       }
       for (const d of c.dropped ?? []) {
         // A step he has moved since is left where he put it.
-        const { data } = await supabase.from("tasks").select("status").eq("id", d.id).maybeSingle();
+        const { data } = await checkedUndoQuery(supabase.from("tasks").select("status").eq("id", d.id).maybeSingle());
         if (data?.status === "dropped") {
-          await setTaskStatus(supabase, userId, d.id, d.prev_status as NonNullable<TaskInput["status"]>);
+          const r = await setTaskStatus(supabase, userId, d.id, d.prev_status as NonNullable<TaskInput["status"]>);
+          if (!r.ok) throw new Error(r.message);
         }
       }
       return;
@@ -2619,7 +2795,7 @@ async function performUndo(
       // Puts the previous result columns back. The hash goes back with them,
       // so the instruction is pending again and the next sweep does it again.
       const prev = (undo.prev ?? {}) as Record<string, unknown>;
-      const { error } = await supabase
+      const { error } = await checkedUndoQuery(supabase
         .from("tasks")
         .update({
           agent_status: (prev.agent_status as string | null) ?? null,
@@ -2627,7 +2803,7 @@ async function performUndo(
           agent_result_at: (prev.agent_result_at as string | null) ?? null,
           agent_done_hash: (prev.agent_done_hash as string | null) ?? null,
         })
-        .eq("id", String(undo.task_id));
+        .eq("id", String(undo.task_id)).select("id").single());
       if (error) throw new Error(error.message);
       return;
     }
@@ -2635,13 +2811,13 @@ async function performUndo(
       // Puts the previous state and reference back (the guard trigger decides
       // who may clear one: his own session, or nobody over the connector).
       const prev = (undo.prev ?? {}) as Record<string, unknown>;
-      const { error } = await supabase
+      const { error } = await checkedUndoQuery(supabase
         .from("tasks")
         .update({
           billing_state: (prev.billing_state as string | null) ?? null,
           billing_ref: (prev.billing_ref as string | null) ?? null,
         })
-        .eq("id", String(undo.task_id));
+        .eq("id", String(undo.task_id)).select("id").single());
       if (error) throw new Error(error.message);
       return;
     }

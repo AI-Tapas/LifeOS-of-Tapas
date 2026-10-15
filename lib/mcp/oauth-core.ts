@@ -39,7 +39,7 @@ export function verifyPkce(
   if (method !== "S256") {
     return { ok: false, reason: "Only the S256 code challenge method is supported." };
   }
-  if (verifier.length < 43 || verifier.length > 128) {
+  if (!/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)) {
     return { ok: false, reason: "The code verifier must be 43 to 128 characters." };
   }
   const computed = createHash("sha256").update(verifier, "utf8").digest("base64url");
@@ -64,6 +64,7 @@ export function isAcceptableRedirectUri(uri: string): boolean {
   } catch {
     return false;
   }
+  if (uri.length > 2048 || /[\x00-\x20\x7f]/.test(uri) || uri.includes("#") || uri.includes("\\") || parsed.username || parsed.password || parsed.hash) return false;
   if (parsed.protocol === "https:") return true;
   const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname);
   return parsed.protocol === "http:" && loopback;
@@ -150,4 +151,23 @@ export function protectedResourceMetadata(origin: string): Record<string, unknow
     scopes_supported: [SCOPE],
     bearer_methods_supported: ["header"],
   };
+}
+
+export function registrationMetadata(body: unknown): { client_name: string; redirect_uris: string[] } | null {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+  const value = body as Record<string, unknown>;
+  const name = value.client_name === undefined ? "MCP client" : value.client_name;
+  if (typeof name !== "string" || !name.trim() || name.length > 120 || /[\x00-\x1f\x7f]/.test(name)) return null;
+  if (!Array.isArray(value.redirect_uris) || !value.redirect_uris.length || value.redirect_uris.length > 10) return null;
+  if (!value.redirect_uris.every((uri) => typeof uri === "string" && isAcceptableRedirectUri(uri))) return null;
+  if (value.token_endpoint_auth_method !== undefined && value.token_endpoint_auth_method !== "none") return null;
+  for (const [key, allowed] of [["grant_types", ["authorization_code", "refresh_token"]], ["response_types", ["code"]]] as const) {
+    const supplied = value[key];
+    if (supplied !== undefined && (!Array.isArray(supplied) || !supplied.length || !supplied.every((v) => (allowed as readonly unknown[]).includes(v)))) return null;
+  }
+  return { client_name: name.trim(), redirect_uris: [...new Set(value.redirect_uris as string[])] };
+}
+
+export function clientCanAuthorize(client: { revoked_at: string | null; approved_at: string | null; registration_expires_at: string }, now = new Date()): boolean {
+  return !client.revoked_at && (!!client.approved_at || new Date(client.registration_expires_at).getTime() > now.getTime());
 }

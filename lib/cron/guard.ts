@@ -1,5 +1,5 @@
-// Shared guards for the two Vercel Cron routes (scan, brief). Pure: no
-// Supabase, no fetch, so both are exercised offline in scripts/m5.test.ts.
+// Authentication and legacy audit display helpers. Execution ownership is
+// atomic and durable in lib/cron/runs.ts, never inferred from audit rows.
 
 import { timingSafeEqual } from "node:crypto";
 
@@ -15,6 +15,7 @@ export function cronAuthorized(header: string | null): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+// Legacy audit display helper only; never use this to claim execution.
 // Vercel can redeliver a cron tick, so each route stamps an audit_log row
 // with meta.ist_date on success and checks for one before doing real work.
 // A failed prior attempt does not stamp this, so a retry after a failure is

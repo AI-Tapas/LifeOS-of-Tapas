@@ -7,7 +7,7 @@
 //     never does: its rules are unchanged (ticket and cab-receipt senders
 //     only, through readTicketMail), and scripts/b22.test.ts fails if
 //     scan.ts ever names this module.
-//   - The three connected mailboxes only. checkMailSlot refuses icai.
+//   - The four connected mailboxes (checkMailSlot).
 //   - PDF (unpdf, the B20 reader) and Word .docx (docx-text.ts, Node's own
 //     zlib) only. At most ATTACHMENT_MAX_BYTES, refused before download when
 //     the provider states the size and again on the real length. At most

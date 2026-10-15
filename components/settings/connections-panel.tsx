@@ -2,11 +2,12 @@
 
 // Settings > Connected applications. Shows every remote client that has been
 // approved, and lets one be cut off. Revoking kills its live tokens and its
-// registration, so it must sign in again from scratch.
+// access while retaining a revocation record; reconnecting requires consent.
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { revokeConnectionAction } from "@/app/(app)/connect/actions";
+import { CAPABILITY_DESCRIPTIONS, normalizeCapabilities } from "@/lib/mcp/permissions";
 import { Empty } from "@/components/ui";
 
 export interface ConnectionView {
@@ -15,6 +16,9 @@ export interface ConnectionView {
   created_label: string;
   last_used_label: string | null;
   active_tokens: number;
+  capabilities: unknown;
+  approved: boolean;
+  work_stream_labels: Record<string, string>;
 }
 
 export default function ConnectionsPanel({ items }: { items: ConnectionView[] }) {
@@ -33,7 +37,7 @@ export default function ConnectionsPanel({ items }: { items: ConnectionView[] })
 
   return (
     <div className="rounded-2xl border border-border bg-surface p-4 shadow-[var(--shadow-card)]">
-      {message && <p className="mb-2 text-sm text-accent">{message}</p>}
+      {message && <p role="status" className="mb-2 text-sm text-accent">{message}</p>}
       <ul className="divide-y divide-border">
         {items.map((c) => (
           <li
@@ -43,12 +47,13 @@ export default function ConnectionsPanel({ items }: { items: ConnectionView[] })
             <div className="min-w-0">
               <p className="font-medium">{c.client_name}</p>
               <p className="text-xs text-secondary">
-                Connected {c.created_label}
+                {c.approved ? "Connected" : "Registered"} {c.created_label}
                 {c.last_used_label ? `, last used ${c.last_used_label}` : ", not used yet"}
                 {c.active_tokens
                   ? `, ${c.active_tokens} live credential${c.active_tokens === 1 ? "" : "s"}`
                   : ""}
               </p>
+              <ConnectionPermissions connection={c} />
             </div>
             <button
               type="button"
@@ -71,6 +76,22 @@ export default function ConnectionsPanel({ items }: { items: ConnectionView[] })
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+function ConnectionPermissions({ connection }: { connection: ConnectionView }) {
+  const capabilities = normalizeCapabilities(connection.capabilities);
+  if (!connection.approved || !capabilities) {
+    return <p className="mt-1 text-xs text-overdue">Reconnect from the application to review and approve its permissions. Access is paused.</p>;
+  }
+  const granted = Object.entries(CAPABILITY_DESCRIPTIONS).filter(([key]) => capabilities[key as keyof typeof CAPABILITY_DESCRIPTIONS]);
+  return (
+    <div className="mt-2 text-xs text-secondary">
+      <p>Allowed: {granted.map(([key, value]) => key === "finance" && !capabilities.write ? "Read financial records" : value.label).join(", ") || "None"}.</p>
+      <p className="mt-1">Mailboxes: {capabilities.mailboxes === null ? "All" : capabilities.mailboxes.join(", ") || "None"}.</p>
+      <p className="mt-1">Work streams: {capabilities.work_streams === null ? "All" : capabilities.work_streams.map((id) => connection.work_stream_labels[id] ?? "Unavailable stream").join(", ") || "None"}.</p>
+      <p className="mt-1">To change permissions, disconnect and reconnect from the application.</p>
     </div>
   );
 }

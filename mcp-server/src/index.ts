@@ -22,7 +22,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { LifeOsClient, type ToolManifestEntry } from "./client.js";
 import { jsonSchemaToZodShape } from "./schema.js";
 
-const VERSION = "1.0.0";
+const VERSION = "2.0.0";
 
 function requireEnv(name: string, hint: string): string {
   const v = process.env[name];
@@ -41,6 +41,7 @@ function toolConfig(entry: ToolManifestEntry) {
       ? `${entry.description} This only queues the request: it reaches nobody until Tapas approves it inside the Life OS app.`
       : entry.description,
     inputSchema: jsonSchemaToZodShape(entry.input_schema),
+    ...(entry.output_schema ? { outputSchema: jsonSchemaToZodShape(entry.output_schema) } : {}),
     annotations: {
       readOnlyHint: entry.read_only,
       // Writes are recorded and undoable in the app; queued proposals do
@@ -55,7 +56,7 @@ function toolConfig(entry: ToolManifestEntry) {
 function textResult(payload: unknown, isError = false) {
   const text =
     typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
-  return { content: [{ type: "text" as const, text }], ...(isError ? { isError } : {}) };
+  return { content: [{ type: "text" as const, text }], ...(payload && typeof payload === "object" && !Array.isArray(payload) ? { structuredContent: payload as Record<string, unknown> } : {}), ...((isError || (payload && typeof payload === "object" && "state" in payload && ["failed", "uncertain"].includes(String(payload.state)))) ? { isError: true } : {}) };
 }
 
 async function main(): Promise<void> {
@@ -97,16 +98,15 @@ async function main(): Promise<void> {
     server.registerTool(entry.name, toolConfig(entry), async (input: Record<string, unknown>) => {
       try {
         const r = await client.write(entry.name, input ?? {});
-        return textResult(
-          r.queued
-            ? `${r.reply}\n\nNothing has been sent. Open the Life OS app, Assistant tab, Queue, to approve it.`
-            : r.reply
-        );
+        return textResult(r);
       } catch (e) {
         return textResult(e instanceof Error ? e.message : "The action failed.", true);
       }
     });
   }
+
+  for (const resource of manifest.resources ?? []) server.registerResource(resource.name, resource.uri, { description: resource.description, mimeType: resource.mimeType }, async () => client.resource(resource.uri));
+  for (const prompt of manifest.prompts ?? []) server.registerPrompt(prompt.name, { description: prompt.description }, async () => client.prompt(prompt.name));
 
   console.error(
     `life-os-mcp-server ${VERSION} ready: ${manifest.read_tools.length} read tools, ` +

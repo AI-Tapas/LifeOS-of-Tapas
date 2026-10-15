@@ -119,7 +119,7 @@ export default function TimeGrid({
 
       {perDay.some((d) => d.allDay.length > 0) && (
         <div className="grid border-b border-border" style={cols}>
-          <div className="pr-1 pt-1.5 text-right text-[10px] uppercase leading-tight text-neutral-400">
+          <div className="pr-1 pt-1.5 text-right text-[10px] uppercase leading-tight text-secondary">
             All day
           </div>
           {perDay.map((d) => (
@@ -137,7 +137,7 @@ export default function TimeGrid({
         </div>
       )}
 
-      <div ref={scrollRef} className="max-h-[68vh] overflow-y-auto overscroll-contain">
+      <div ref={scrollRef} role="region" aria-label="Calendar hours" tabIndex={0} className="max-h-[68vh] overflow-y-auto overscroll-contain">
         <div className="grid" style={{ ...cols, height: totalPx }}>
           <div className="relative">
             {Array.from({ length: endHour - startHour }, (_, i) => startHour + i).map((h) => (
@@ -145,7 +145,7 @@ export default function TimeGrid({
                 key={h}
                 onClick={() => onAddAt(heads[0].key, h)}
                 aria-label={`New event at ${hourLabel(h)}`}
-                className="absolute right-1 -translate-y-1/2 text-[10px] text-neutral-400 active:text-accent"
+                className="absolute right-1 -translate-y-1/2 text-[10px] text-secondary active:text-accent"
                 style={{ top: (h - startHour) * PX_PER_HOUR + (h === startHour ? 8 : 0) }}
               >
                 {hourLabel(h)}

@@ -21,6 +21,7 @@
 // performer; a ride outside every trip is personal and only counted.
 
 import { cookieActor, type Actor } from "@/lib/assistant/actor";
+import { withScanExecution } from "@/lib/assistant/scan-execution";
 import { runLlmTurn, type LlmTurn, type LlmTurnRequest } from "@/lib/assistant/llm";
 import type { LlmOverride } from "@/lib/assistant/config";
 import { CAB_TOOL, SCAN_TOOL, TICKET_TOOL, disclosureOf } from "@/lib/assistant/tools";
@@ -129,6 +130,10 @@ async function modelTurn(req: LlmTurnRequest): Promise<LlmTurn> {
 // messages a mailbox, 5 tasks an account, every account).
 export async function runMailScan(actor?: Actor, options: ScanOptions = {}): Promise<ScanSummary> {
   const owner = actor ?? (await cookieActor());
+  return withScanExecution(owner, () => performMailScan(owner, options));
+}
+
+async function performMailScan(owner: Actor, options: ScanOptions): Promise<ScanSummary> {
   const { supabase } = owner;
   const limits = scanLimits(options.days);
 
@@ -418,7 +423,8 @@ async function ticketPass(
   }
   for (const t of accepted) {
     try {
-      await logScannedTripLeg(owner, t, account.id);
+      const result = await logScannedTripLeg(owner, t, account.id);
+      if (result.auditWarning) out.notes.push(result.auditWarning);
       out.legs += 1;
     } catch (e) {
       out.notes.push(`${account.slot}: ${e instanceof Error ? e.message : "could not record a ticket leg"}`);
@@ -548,7 +554,8 @@ async function cabPass(
   }
   for (const r of accepted) {
     try {
-      await logScannedCabExpense(owner, r, account.id);
+      const result = await logScannedCabExpense(owner, r, account.id);
+      if (result.auditWarning) out.notes.push(result.auditWarning);
       out.added.push({ trip_id: r.trip_id, label: r.trip_label, amount: r.amount });
     } catch (e) {
       out.notes.push(`${account.slot}: ${e instanceof Error ? e.message : "could not record a cab ride"}`);

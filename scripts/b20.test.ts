@@ -229,7 +229,7 @@ test("the executor's log_trip_leg undo runs the ticket undo, and the scan writes
   assert.ok(undoCase.includes('.eq("receipt_ref", receiptRef)'), "only clears the value this action set");
   const scanned = exec.slice(exec.indexOf("export async function logScannedTripLeg"));
   assert.ok(scanned.includes("performers.log_trip_leg("));
-  assert.ok(scanned.includes('kind: "log_trip_leg"'));
+  assert.ok(scanned.includes('owner, "log_trip_leg", accountId'));
 });
 
 test("the ticket pass is isolated: one tool, fenced mail, no body or PNR in audit", () => {

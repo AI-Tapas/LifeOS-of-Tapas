@@ -11,6 +11,7 @@ import { useState, useTransition } from "react";
 import {
   approveActionAction,
   rejectActionAction,
+  saveToDraftsAction,
   undoActionAction,
 } from "@/app/(app)/assistant/actions";
 
@@ -27,6 +28,7 @@ export interface PendingView {
   account_label: string; // e.g. "ca_tapasnr (ca.tapasnr@gmail.com)"
   subject?: string;
   body?: string;
+  reply_in_thread?: boolean; // the email goes as a reply in an existing thread
   to?: RecipientFlag[];
   cc?: RecipientFlag[];
   event_line?: string; // for invites: date/time/location line
@@ -44,6 +46,10 @@ export interface HistoryView {
   status: string;
   when_label: string;
   undoable: boolean;
+  execution_state?: string | null;
+  undo_started_at?: string | null;
+  undo_error?: string | null;
+  note?: string | null; // e.g. "Saved to drafts in ca_tapasnr"
   error: string | null;
 }
 
@@ -147,7 +153,10 @@ export function PendingCard({ item }: { item: PendingView }) {
       )}
 
       {item.event_line && <p className="mt-2 text-sm">{item.event_line}</p>}
-      {item.subject && (
+      {item.reply_in_thread && (
+        <p className="mt-2 text-sm font-medium">Reply in thread: {item.subject}</p>
+      )}
+      {item.subject && !item.reply_in_thread && (
         <p className="mt-2 text-sm font-medium">Subject: {item.subject}</p>
       )}
       {item.body && (
@@ -183,6 +192,22 @@ export function PendingCard({ item }: { item: PendingView }) {
                 }`}
           </button>
         )}
+        {item.kind === "send_email" && !unresolved && !armed && (
+          <button
+            type="button"
+            onClick={() =>
+              startTransition(async () => {
+                const r = await saveToDraftsAction(item.id);
+                if (r.ok) setGone(true);
+                else setMessage(r.message ?? "The draft could not be saved.");
+              })
+            }
+            disabled={pending}
+            className="press min-h-11 rounded-xl border border-border-strong px-4 py-2 text-sm font-medium disabled:opacity-50"
+          >
+            Save to drafts
+          </button>
+        )}
         <button
           type="button"
           onClick={() => act(rejectActionAction)}
@@ -210,8 +235,11 @@ export function HistoryRow({ item }: { item: HistoryView }) {
   const [pending, startTransition] = useTransition();
   const [undone, setUndone] = useState(false);
 
+  const uncertain = item.execution_state === "uncertain";
+  const undoPending = !!item.undo_started_at;
+  const statusLabel = undone ? "undone" : uncertain ? "needs review" : undoPending ? "undo in progress" : item.execution_state === "running" ? "in progress" : item.status === "saved_as_draft" ? "saved to drafts" : item.status;
   const statusColor =
-    item.status === "executed"
+    uncertain || undoPending ? "text-waiting" : item.status === "executed"
       ? "text-ok"
       : item.status === "failed"
         ? "text-overdue"
@@ -222,13 +250,17 @@ export function HistoryRow({ item }: { item: HistoryView }) {
       <div className="min-w-0">
         <p className="truncate text-sm font-medium">{item.title || item.kind}</p>
         <p className="text-xs text-secondary">
-          {item.kind} <span className={statusColor}>{undone ? "undone" : item.status}</span>{" "}
+          {item.kind} <span className={statusColor}>{statusLabel}</span>{" "}
           {item.when_label}
         </p>
+        {uncertain && <p className="mt-1 text-xs text-waiting" role="status">The outcome needs review. Check the affected record or connected account before trying again.</p>}
+        {undoPending && <p className="mt-1 text-xs text-waiting" role="status">Undo has been claimed. Refresh to check its result; do not repeat the original action.</p>}
+        {item.note && <p className="text-xs text-secondary">{item.note}</p>}
+        {item.undo_error && <p className="text-xs text-overdue" role="status">{item.undo_error}</p>}
         {item.error && <p className="text-xs text-overdue">{item.error}</p>}
-        {message && <p className="text-xs text-overdue">{message}</p>}
+        {message && <p className="text-xs text-overdue" role="status">{message}</p>}
       </div>
-      {item.undoable && !undone && (
+      {item.undoable && !undone && !uncertain && !undoPending && (
         <button
           type="button"
           disabled={pending}

@@ -142,12 +142,15 @@ const PROJECT_ID_DESC =
 const RECURRING_RULE_DESC =
   "Repeat rule: daily, weekly, monthly or yearly, optionally with an interval after a colon (weekly:2 is fortnightly, monthly:3 is quarterly). Completing the task then creates the next one. Anything else is refused.";
 
+const THREAD_ID_DESC =
+  "Only when this email is a reply: the thread_id from lifeos_list_inbox (for altechon, the Outlook conversation id). The mail is then sent, once Tapas approves it, as a reply in that thread, to exactly the recipients listed, and the subject is taken from the thread. Omit for a new email.";
+
 // The four connected account slots the assistant may act through.
 const SLOT_KEYS = ["taxstrategia", "ca_tapasnr", "altechon", "icai"];
 
-// B18: the mailboxes whose inbox, threads and reply drafts the connector may
-// reach. icai is out, and stays out: it has no tool of this kind at all.
-export const MAIL_SLOTS = SLOT_KEYS.filter((s) => s !== "icai");
+// B18/B36: the mailboxes whose inbox, threads and reply drafts the connector
+// may reach. All four, icai included (B36). Only its CALENDAR stays read-only.
+export const MAIL_SLOTS = SLOT_KEYS;
 
 // Where a holding is held. Money invites exactly the fields this app must
 // never hold, so the tool that records one says the rule in the schema the
@@ -346,8 +349,8 @@ export const TOOLS: ToolDef[] = [
       "Draft an email in Tapas's voice. The draft is stored in the app only (never in Gmail or Outlook) and CANNOT be sent until Tapas approves it in the queue.",
     input_schema: schema({
       account: enumOf(
-        SLOT_KEYS.filter((s) => s !== "icai"),
-        "Account slot the mail would go from. icai cannot send."
+        MAIL_SLOTS,
+        "Account slot the mail would go from."
       ),
       to: {
         type: "array",
@@ -361,6 +364,7 @@ export const TOOLS: ToolDef[] = [
       }),
       subject: str("Subject line."),
       body: str("Plain-text body in Tapas's voice."),
+      thread_id: opt(str(THREAD_ID_DESC)),
     }),
   },
   {
@@ -371,8 +375,8 @@ export const TOOLS: ToolDef[] = [
       "Queue an email for sending. It is NEVER sent directly: it lands in the approval queue and goes out only after Tapas approves it there.",
     input_schema: schema({
       account: enumOf(
-        SLOT_KEYS.filter((s) => s !== "icai"),
-        "Account slot the mail goes from. icai cannot send."
+        MAIL_SLOTS,
+        "Account slot the mail goes from."
       ),
       to: {
         type: "array",
@@ -386,6 +390,7 @@ export const TOOLS: ToolDef[] = [
       }),
       subject: str("Subject line."),
       body: str("Plain-text body."),
+      thread_id: opt(str(THREAD_ID_DESC)),
     }),
   },
   {
@@ -430,7 +435,7 @@ export const TOOLS: ToolDef[] = [
     input_schema: schema({
       account: enumOf(
         MAIL_SLOTS,
-        "The mailbox the thread is in. icai has no drafts."
+        "The mailbox the thread is in."
       ),
       thread_id: str(
         "The thread_id from lifeos_list_inbox: the Gmail thread id, or for altechon the Outlook conversation id."

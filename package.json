@@ -41,25 +41,30 @@
     "test:board": "node --test scripts/board.test.ts",
     "test:b29": "node --test scripts/b29.test.ts scripts/b29-sync.test.ts",
     "report:premature": "node --env-file=.env.local scripts/report-premature-tasks.ts",
-    "report:lapsed": "node --env-file=.env.local scripts/report-lapsed-tasks.ts"
+    "report:lapsed": "node --env-file=.env.local scripts/report-lapsed-tasks.ts",
+    "test": "node --test scripts/*.test.ts",
+    "test:review:sql": "node --test scripts/*-sql.test.ts && node scripts/cron-claims-sql.mjs",
+    "docs:mcp": "node scripts/generate-mcp-docs.mjs",
+    "test:mcp:stdio": "npm run docs:mcp && npm --prefix mcp-server run build && node scripts/mcp-stdio-smoke.mjs && node --test scripts/mcp-stdio.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",
     "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.110.0",
-    "next": "16.2.10",
-    "react": "19.2.4",
-    "react-dom": "19.2.4",
+    "next": "16.4.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
     "unpdf": "^1.8.1",
     "web-push": "^3.6.7"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.10",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "eslint-config-next": "16.2.10",
+    "eslint-config-next": "16.4.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

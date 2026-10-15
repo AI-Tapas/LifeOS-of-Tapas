@@ -1,107 +1,43 @@
-// HTTP surface for the MCP connector. Authenticated by a shared secret in the
-// Authorization header (LIFEOS_MCP_TOKEN), compared in constant time. This is
-// the only door into the app that does not use a browser session, so it is
-// deliberately narrow:
-//
-//   POST { op: "manifest" }                     the callable tools
-//   POST { op: "read",  tool, input }           read-only queries
-//   POST { op: "write", tool, input }           the assistant's own registry
-//
-// Approving, rejecting or executing a queued action is NOT available here.
-// Those stay owner-session acts inside the app, so connecting an outside
-// model can queue a send but can never authorise one.
-
+// Shared-secret stdio adapter. Both transports use the SAME permission and
+// durable dispatch boundary; approval is deliberately absent.
 import { timingSafeEqual } from "node:crypto";
-import {
-  runReadTool,
-  runWriteTool,
-  writeTools,
-  READ_TOOL_NAMES,
-  READ_TOOL_SCHEMAS as READ_SCHEMAS,
-  READ_TOOL_DESCRIPTIONS as READ_DESCRIPTIONS,
-} from "@/lib/assistant/mcp-api";
-
+import { after } from "next/server";
+import { serviceActor } from "@/lib/assistant/actor";
+import { ALL_CAPABILITIES, type McpContext } from "@/lib/mcp/permissions";
+import { dispatch, manifest } from "@/lib/mcp/dispatch";
+import { isObject, readJson } from "@/lib/mcp/http";
+import { appOrigin } from "@/lib/mcp/origin";
+import { failure } from "@/lib/mcp/operations";
+import { runNextMcpJob } from "@/lib/mcp/jobs";
+import { listResources, readResource, listPrompts, getPrompt } from "@/lib/mcp/catalog";
 export const runtime = "nodejs";
-// B24: scan_mail (the mail catch-up, up to 150 mails for one account) runs
-// through this route and can take minutes; 300 matches the scan cron.
 export const maxDuration = 300;
-
 function tokenOk(header: string | null): boolean {
   const expected = process.env.LIFEOS_MCP_TOKEN;
-  if (!expected || expected.length < 24) return false; // refuse a weak secret
-  const given = (header ?? "").replace(/^Bearer\s+/i, "");
-  const a = Buffer.from(given);
-  const b = Buffer.from(expected);
+  if (!expected || expected.length < 24 || !header?.match(/^Bearer\s+/i)) return false;
+  const a = Buffer.from(header.replace(/^Bearer\s+/i, "")); const b = Buffer.from(expected);
   return a.length === b.length && timingSafeEqual(a, b);
 }
-
 export async function POST(req: Request): Promise<Response> {
-  if (!tokenOk(req.headers.get("authorization"))) {
-    return Response.json(
-      { error: "Unauthorized. Set LIFEOS_MCP_TOKEN and send it as a bearer token." },
-      { status: 401 }
-    );
-  }
-
-  let body: { op?: string; tool?: string; input?: Record<string, unknown> };
+  const origin = req.headers.get("origin");
+  if (origin !== null && origin !== appOrigin(req)) return Response.json({error:"Unapproved Origin."}, {status:403});
+  if (!tokenOk(req.headers.get("authorization"))) return Response.json({ error: "Unauthorized." }, { status: 401 });
   try {
-    body = (await req.json()) as typeof body;
-  } catch {
-    return Response.json({ error: "Body must be JSON." }, { status: 400 });
-  }
-
-  try {
-    if (body.op === "manifest") {
-      return Response.json({
-        read_tools: READ_TOOL_NAMES.map((name) => ({
-          name,
-          description: READ_DESCRIPTIONS[name],
-          input_schema: READ_SCHEMAS[name],
-          read_only: true,
-        })),
-        write_tools: writeTools().map((t) => ({
-          // Prefixed so the tool cannot collide with another connector's.
-          name: `lifeos_${t.name}`,
-          description: t.description,
-          input_schema: t.input_schema,
-          read_only: false,
-          // 'confirm' tools only ever queue; they never reach anybody.
-          queues_for_approval: t.bucket === "confirm",
-        })),
-      });
-    }
-
-    const tool = body.tool ?? "";
-    const input = body.input ?? {};
-
-    if (body.op === "read") {
-      if (!(READ_TOOL_NAMES as readonly string[]).includes(tool)) {
-        return Response.json({ error: `Unknown read tool: ${tool}` }, { status: 400 });
-      }
-      return Response.json(await runReadTool(tool, input));
-    }
-
-    if (body.op === "write") {
-      const bare = tool.replace(/^lifeos_/, "");
-      if (!writeTools().some((t) => t.name === bare)) {
-        return Response.json(
-          { error: `Unknown or unavailable write tool: ${tool}` },
-          { status: 400 }
-        );
-      }
-      return Response.json(await runWriteTool(bare, input));
-    }
-
-    return Response.json(
-      { error: 'op must be "manifest", "read" or "write".' },
-      { status: 400 }
-    );
-  } catch (e) {
-    // Readable, but never internal detail: this endpoint is reachable by a
-    // token holder, so errors stay generic-but-useful.
-    return Response.json(
-      { error: e instanceof Error ? e.message : "The operation failed." },
-      { status: 400 }
-    );
-  }
+    const body = await readJson(req);
+    if (!isObject(body)) return Response.json({ error: "Body must be an object." }, { status: 400 });
+    const actor = await serviceActor();
+    const context: McpContext = { clientId: "shared-secret", userId: actor.userId, capabilities: ALL_CAPABILITIES };
+    const entries = manifest(context); const names = new Set(entries.map(e => e.name));
+    let result: unknown;
+    if (body.op === "manifest") result = { read_tools: entries.filter(e => e.read_only), write_tools: entries.filter(e => !e.read_only), resources: listResources(names), prompts: listPrompts(names) };
+    else if (body.op === "resource") result = await readResource(String(body.uri ?? ""), names, (name, input) => dispatch(context, name, input));
+    else if (body.op === "prompt") result = getPrompt(String(body.name ?? ""), names);
+    else if ((body.op === "read" || body.op === "write") && typeof body.tool === "string" && (body.input === undefined || isObject(body.input))) {
+      const entry = entries.find(e => e.name === body.tool);
+      if (!entry || entry.read_only !== (body.op === "read")) return Response.json({ error: "Unknown tool or wrong operation." }, { status: 400 });
+      result = await dispatch(context, body.tool, body.input ?? {});
+      if (body.tool === "lifeos_start_scan_job") after(async () => { await runNextMcpJob(); });
+    } else return Response.json({ error: "Invalid operation or input." }, { status: 400 });
+    return Response.json(result, { headers: { "cache-control": "no-store" } });
+  } catch (error) { return Response.json(failure(error), { status: 400, headers: { "cache-control": "no-store" } }); }
 }

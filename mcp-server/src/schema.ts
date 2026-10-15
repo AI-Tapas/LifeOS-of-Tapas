@@ -1,78 +1,45 @@
-// The app publishes its tool schemas as plain JSON Schema, which keeps one
-// definition behind both the in-app assistant and this connector. The MCP SDK
-// wants Zod, so convert at startup rather than maintaining a second copy that
-// could drift from the registry the security gates are built around.
-//
-// Only the constructs the app actually emits are handled: one concrete type
-// per parameter, optional parameters expressed by absence from `required`,
-// enums, arrays and nested objects. Anything unrecognised degrades to
-// z.unknown() rather than throwing, so a new field can never take the
-// connector down.
-
+// Translate the actual manifest contract without silently dropping unions or
+// limits. Unsupported types fail startup rather than weaken client validation.
 import { z } from "zod";
-
-interface JsonSchemaNode {
-  type?: string;
-  enum?: unknown[];
-  items?: JsonSchemaNode;
-  properties?: Record<string, JsonSchemaNode>;
-  required?: string[];
-  description?: string;
-}
-
-function nodeToZod(node: JsonSchemaNode): z.ZodTypeAny {
+interface Node { type?: string | string[]; enum?: unknown[]; items?: Node; properties?: Record<string, Node>; required?: string[]; description?: string; additionalProperties?: boolean; minimum?: number; maximum?: number; minLength?: number; maxLength?: number; minItems?: number; maxItems?: number }
+function nodeToZod(node: Node): z.ZodTypeAny {
   let out: z.ZodTypeAny;
-
-  const values = (node.enum ?? []).filter(
-    (v): v is string => typeof v === "string"
-  );
-  if (node.type === "string" && values.length) {
-    out =
-      values.length === 1
-        ? z.literal(values[0])
-        : z.enum(values as [string, string, ...string[]]);
+  if (Array.isArray(node.type)) {
+    const variants = node.type.map(type => nodeToZod({ ...node, type }));
+    out = variants.length === 1 ? variants[0] : z.union(variants as [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]]);
   } else {
     switch (node.type) {
-      case "string":
-        out = z.string();
-        break;
-      case "integer":
-        out = z.number().int();
-        break;
-      case "number":
-        out = z.number();
-        break;
-      case "boolean":
-        out = z.boolean();
-        break;
-      case "array":
-        out = z.array(node.items ? nodeToZod(node.items) : z.unknown());
-        break;
-      case "object":
-        out = z.object(shapeOf(node));
-        break;
-      default:
-        out = z.unknown();
+      case "null": out = z.null(); break;
+      case "string": {
+        let text = z.string();
+        if (node.minLength !== undefined) text = text.min(node.minLength);
+        if (node.maxLength !== undefined) text = text.max(node.maxLength);
+        out = text; break;
+      }
+      case "number": case "integer": {
+        let number = node.type === "integer" ? z.number().int() : z.number();
+        if (node.minimum !== undefined) number = number.min(node.minimum);
+        if (node.maximum !== undefined) number = number.max(node.maximum);
+        out = number; break;
+      }
+      case "boolean": out = z.boolean(); break;
+      case "array": {
+        let array = z.array(node.items ? nodeToZod(node.items) : z.unknown());
+        if (node.minItems !== undefined) array = array.min(node.minItems);
+        if (node.maxItems !== undefined) array = array.max(node.maxItems);
+        out = array; break;
+      }
+      case "object": { const obj = z.object(shapeOf(node)); out = node.additionalProperties === false ? obj.strict() : obj.passthrough(); break; }
+      case undefined: out = z.unknown(); break;
+      default: throw new Error(`Unsupported JSON Schema type: ${node.type}`);
     }
+    if (node.enum) { const values = node.enum; out = out.refine(value => values.includes(value), "Value is not in the allowed enumeration."); }
   }
-
   return node.description ? out.describe(node.description) : out;
 }
-
-function shapeOf(node: JsonSchemaNode): Record<string, z.ZodTypeAny> {
-  const shape: Record<string, z.ZodTypeAny> = {};
-  const required = new Set(node.required ?? []);
-  for (const [key, child] of Object.entries(node.properties ?? {})) {
-    const zod = nodeToZod(child);
-    shape[key] = required.has(key) ? zod : zod.optional();
-  }
+function shapeOf(node: Node): Record<string, z.ZodTypeAny> {
+  const shape: Record<string, z.ZodTypeAny> = {}; const required = new Set(node.required ?? []);
+  for (const [key, child] of Object.entries(node.properties ?? {})) { const value = nodeToZod(child); shape[key] = required.has(key) ? value : value.optional(); }
   return shape;
 }
-
-// The SDK takes the top level as a raw shape (a map of field to Zod type),
-// not as a wrapped object.
-export function jsonSchemaToZodShape(
-  schema: Record<string, unknown>
-): Record<string, z.ZodTypeAny> {
-  return shapeOf(schema as JsonSchemaNode);
-}
+export function jsonSchemaToZodShape(schema: Record<string, unknown>): Record<string, z.ZodTypeAny> { return shapeOf(schema as Node); }

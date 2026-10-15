@@ -105,7 +105,7 @@ export default function Nav({ queueCount = 0 }: { queueCount?: number }) {
               aria-current={active ? "page" : undefined}
               className={
                 "flex flex-col items-center gap-0.5 py-2 text-[10px] font-semibold " +
-                (active ? "text-accent dark:text-brand" : "text-muted")
+                (active ? "text-accent dark:text-brand" : "text-secondary")
               }
             >
               <span className="relative">

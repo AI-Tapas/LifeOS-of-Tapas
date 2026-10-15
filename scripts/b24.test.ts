@@ -233,11 +233,46 @@ test("the model error classifier gives short fixed reasons and never the provide
   assert.equal(classifyModelError(new Error("Could not reach https://x")).code, "provider");
 });
 
-test("the scan route stamps a start row, allows a long run, and keeps failed runs out of the guard", () => {
+test("concurrent cron ticks claim one scan, and claim failures do no work", async () => {
+  resetState();
+  seedMails(1);
+  proposeAll();
+  const responses = await Promise.all([scanCron(cronRequest()), scanCron(cronRequest())]);
+  const bodies = await Promise.all(responses.map((r) => r.json()));
+  assert.equal(bodies.filter((b) => b.ok).length, 1);
+  assert.equal(bodies.filter((b) => b.skipped).length, 1);
+  assert.equal(state.audit.filter((r) => r.action === "cron_scan_started").length, 1);
+  assert.equal(state.audit.filter((r) => r.action === "cron_scan").length, 1);
+  resetState();
+  state.cronRpcError = "claim_cron_run";
+  const refused = await scanCron(cronRequest());
+  assert.equal(refused.status, 503);
+  assert.equal(state.llmCalls, 0);
+  assert.equal(state.listerCalls.length, 0);
+});
+
+test("scan result persistence failure does not turn completed work into a retry", async () => {
+  resetState();
+  seedMails(1);
+  proposeAll();
+  state.cronRpcError = "finish_cron_run";
+  const response = await scanCron(cronRequest());
+  assert.equal(response.status, 503);
+  const body = await response.json();
+  assert.equal(body.state, "uncertain");
+  assert.equal(body.retryable, false);
+  const calls = state.llmCalls;
+  state.cronRpcError = null;
+  const retry = await scanCron(cronRequest());
+  assert.equal((await retry.json()).skipped, true);
+  assert.equal(state.llmCalls, calls);
+});
+
+test("scan route permits a long run and uses durable claims instead of audit inference", () => {
   const route = src("app/api/cron/scan/route.ts");
   assert.match(route, /export const maxDuration = 300;/);
-  assert.ok(route.indexOf('"cron_scan_started"') < route.indexOf("await runMailScan"));
-  assert.ok(route.includes('.eq("action", "cron_scan")'), "the already-ran check reads finished runs only");
+  assert.ok(route.indexOf('await claimCronRun') < route.indexOf("await runMailScan"));
+  assert.ok(!route.includes("alreadyRanToday"));
 });
 
 test("scan_mail refuses days of 0 and 15 and an unknown account, and takes 1 to 14", () => {
@@ -318,6 +353,42 @@ test("running the same 10 day mail set twice creates its tasks once only", async
   assert.equal(second.created, 0);
   assert.equal(state.tasks.length, 12);
   assert.equal(state.llmCalls, calls, "nothing new to read, so the model is not asked again");
+});
+
+test("all scan entrypoints share one claim so concurrent scans cannot duplicate tasks", async () => {
+  resetState(); seedMails(1); proposeAll();
+  const results = await Promise.allSettled([
+    runMailScan(OWNER, { account: "ca_tapasnr" }),
+    runMailScan({ supabase: fakeSupabase, userId: "user-1", origin: "service", job: "cron_scan" } as never, { account: "ca_tapasnr" }),
+  ]);
+  assert.equal(results.filter(r => r.status === "fulfilled").length, 1);
+  const rejected = results.find(r => r.status === "rejected") as PromiseRejectedResult;
+  assert.equal(rejected.reason.code, "scan_busy");
+  assert.equal(state.tasks.length, 1);
+  assert.equal(state.scanClaim?.status, "released");
+  assert.equal((await runMailScan(OWNER, { account: "ca_tapasnr" })).created, 0);
+});
+
+test("shared scan claim refuses storage failure and uncertain prior work", async () => {
+  resetState(); seedMails(1); proposeAll();
+  state.cronRpcError = "claim_scan_execution";
+  await assert.rejects(() => runMailScan(OWNER), { code: "storage_unavailable" });
+  assert.equal(state.listerCalls.length, 0);
+  state.cronRpcError = null;
+  state.scanClaim = { run_id: "old", status: "uncertain" };
+  await assert.rejects(() => runMailScan(OWNER), { code: "scan_uncertain" });
+  assert.equal(state.listerCalls.length, 0);
+});
+
+test("failure releasing a scan claim returns the scan result and still blocks a second scan until takeover", async () => {
+  resetState(); seedMails(1); proposeAll();
+  state.cronRpcError = "release_scan_execution";
+  const first = await runMailScan(OWNER);
+  assert.equal(first.created, 1, "a successful scan is not thrown over by a release failure");
+  const calls = state.llmCalls;
+  state.cronRpcError = null;
+  await assert.rejects(() => runMailScan(OWNER), { code: "scan_busy" });
+  assert.equal(state.llmCalls, calls);
 });
 
 test("the real listers take the window from the caller", () => {

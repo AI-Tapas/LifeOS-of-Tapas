@@ -1,5 +1,10 @@
 # Life OS
 
+## Security and MCP implementation handoff (15 October 2026)
+
+See [Claude handoff](docs/CLAUDE_HANDOFF_2026-10-15.md) before deployment: it records the review findings, fixes, migration order, verification and remaining integration checks. The [generated MCP capability reference](docs/generated/mcp-capabilities.md) reflects the current registry.
+
+
 Single-user PWA: executive assistant and work-life second brain. Milestone 1:
 repo, database, auth, seeds, installable PWA shell.
 
@@ -58,8 +63,9 @@ sign in again afterwards.
 ## PWA
 
 Installable on Android Chrome (menu, Add to Home screen). The service worker
-(public/sw.js) caches the app shell and last-loaded pages for offline
-reading. No offline writes in V1. Note: service workers require HTTPS or
+(public/sw.js) caches public assets and the offline screen only. Private pages
+and server-component responses are not saved for offline reading. Signing out
+clears legacy private caches and resets other open tabs. No offline writes. Note: service workers require HTTPS or
 localhost, so test installs against localhost or the deployed URL.
 
 ## Accounts and OAuth (Milestone 2)
@@ -75,10 +81,10 @@ Slots (Settings > Accounts):
 
 | Slot | Provider | Client | Scopes |
 |---|---|---|---|
-| taxstrategia | google | Internal (Client A, Trusted) | calendar, gmail.readonly, gmail.send |
-| ca_tapasnr | google | External (Client B, unverified) | calendar, gmail.readonly, gmail.send |
+| taxstrategia | google | Internal (Client A, Trusted) | calendar, gmail.readonly, gmail.send, gmail.compose |
+| ca_tapasnr | google | External (Client B, unverified) | calendar, gmail.readonly, gmail.send, gmail.compose |
 | altechon | microsoft | single-tenant Entra app | Calendars.ReadWrite, Mail.Read, Mail.Send, offline_access, User.Read |
-| icai | google | External (Client B) | calendar.readonly, gmail.readonly |
+| icai | google | External (Client B) | calendar, gmail.readonly, gmail.send, gmail.compose |
 
 Two Google clients are mandatory: an Internal-audience client cannot serve
 accounts outside its org, so Client A serves taxstrategia and Client B serves
@@ -123,9 +129,9 @@ match `APP_BASE_URL`).
 3. Client B: set publishing status to **Production** (leave it unverified). On
    the first ca.tapasnr connect, click through the unverified-app warning once.
 4. Entra app: grant **admin consent** for the delegated permissions.
-5. Connect each slot from Settings > Accounts. For icai.org, attempt the direct
-   connect; if the org admin blocks it (expected), use the **Treat as
-   forwarded** toggle on that card. Mail then arrives via the Gmail forwarding
+5. Connect each slot from Settings > Accounts. icai.org connects directly like
+   the others (confirmed 15 October 2026). If its admin ever blocks the app,
+   the optional **Treat as forwarded** toggle on that card is a fallback. Mail then arrives via the Gmail forwarding
    filter into ca.tapasnr (arranged outside the app).
 
 Vault is enabled automatically by the M2 migration (the `supabase_vault`
@@ -214,8 +220,8 @@ re-sync never downgrades an app or reminder event to `synced`.
 ### Event write and the confirmation gate
 
 Events are created and edited on each account's `is_primary_write` calendar;
-editing a synced event writes back to its own source calendar. icai is
-read-only. Solo events save directly. An event that carries attendees needs an
+editing a synced event writes back to its own source calendar. the icai calendar is
+read-only (its mail is fully open). Solo events save directly. An event that carries attendees needs an
 explicit confirmation ("This will send an invite to N people") enforced in code,
 not only in the UI: the server write path refuses an attendee-bearing payload
 without the confirmed flag.

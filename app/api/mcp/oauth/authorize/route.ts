@@ -10,7 +10,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
-import { redirectUriAllowed, SCOPE } from "@/lib/mcp/oauth-core";
+import { clientCanAuthorize, redirectUriAllowed, SCOPE } from "@/lib/mcp/oauth-core";
 
 export const runtime = "nodejs";
 
@@ -35,17 +35,20 @@ export async function GET(req: Request): Promise<Response> {
   if (responseType !== "code") {
     return problem("Only the authorization code flow is supported.");
   }
-  if (!challenge || method !== "S256") {
+  if (!/^[A-Za-z0-9_-]{43}$/.test(challenge) || method !== "S256") {
     return problem("This connection must use PKCE with the S256 method.");
   }
+
+  if (p.get("scope") && p.get("scope") !== SCOPE) return problem("That scope is not supported.");
+  if (clientId.length > 200 || redirectUri.length > 2048 || state.length > 2048) return problem("The authorization request is too large.");
 
   const svc = createServiceClient();
   const { data: client } = await svc
     .from("mcp_clients")
-    .select("client_id, client_name, redirect_uris")
+    .select("client_id, client_name, redirect_uris, revoked_at, approved_at, registration_expires_at")
     .eq("client_id", clientId)
     .maybeSingle();
-  if (!client) return problem("That client is not registered with Life OS.");
+  if (!client || !clientCanAuthorize(client)) return problem("That registration has expired or was disconnected. Start a new connection from your application.");
   if (!redirectUriAllowed(redirectUri, client.redirect_uris)) {
     return problem("That redirect address was not registered by this client.");
   }

@@ -5,7 +5,7 @@
 // controls keep a minimum 44px hit target, and .press gives them uniform
 // touch feedback that respects reduced-motion.
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { formatDateShortIST, istDayKey } from "@/lib/datetime";
 import type { PrioritySource } from "@/lib/tasks/priority";
@@ -313,18 +313,53 @@ export function Drawer({
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
+  const dirty = useRef(false);
+
+  useEffect(() => {
+    const dialog = dialogRef.current!;
+    const previousFocus = document.activeElement as HTMLElement | null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    dialog.showModal();
+    return () => {
+      dialog.close();
+      document.body.style.overflow = previousOverflow;
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, []);
+
+  function requestClose() {
+    // Explicit Cancel buttons remain intentional discard actions. Accidental
+    // backdrop/Escape/Close dismissal must not silently lose entered values.
+    if (dirty.current && !window.confirm("Discard your unsaved changes?")) return;
+    onClose();
+  }
+
   return (
-    <div className="fixed inset-0 z-40 flex items-end justify-center sm:items-center">
-      <div
-        className="fade-in absolute inset-0 bg-black/40"
-        onClick={onClose}
-      />
-      <div className="rise-in relative z-50 max-h-[85vh] w-full max-w-md overflow-y-auto rounded-t-2xl border border-border bg-surface p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:rounded-2xl">
+    <dialog
+      ref={dialogRef}
+      aria-labelledby={titleId}
+      aria-modal="true"
+      onCancel={(event) => {
+        event.preventDefault();
+        requestClose();
+      }}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) requestClose();
+      }}
+      onInputCapture={() => { dirty.current = true; }}
+      onChangeCapture={() => { dirty.current = true; }}
+      className="fixed inset-0 m-0 h-dvh max-h-none w-full max-w-none items-end justify-center border-0 bg-transparent p-0 text-foreground outline-none backdrop:bg-black/40 open:flex sm:items-center"
+    >
+      <div className="rise-in relative max-h-[85vh] w-full max-w-md overflow-y-auto rounded-t-2xl border border-border bg-surface p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:rounded-2xl">
         <div className="sticky top-0 z-10 -mx-4 -mt-4 mb-2 flex items-center justify-between border-b border-border bg-surface px-4 py-3">
-          <h2 className="text-base font-semibold">{title}</h2>
+          <h2 id={titleId} className="text-base font-semibold">{title}</h2>
           <button
-            onClick={onClose}
-            className="-m-2 min-h-11 p-2 text-sm font-medium text-muted"
+            type="button"
+            onClick={requestClose}
+            className="-m-2 min-h-11 p-2 text-sm font-medium text-secondary"
             aria-label="Close"
           >
             Close
@@ -332,6 +367,6 @@ export function Drawer({
         </div>
         {children}
       </div>
-    </div>
+    </dialog>
   );
 }

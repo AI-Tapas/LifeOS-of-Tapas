@@ -11,9 +11,10 @@
 import { serviceActor } from "@/lib/assistant/actor";
 import { runMailScan } from "@/lib/assistant/scan";
 import { ScanModelError } from "@/lib/assistant/scan-args";
-import { cronAuthorized, alreadyRanToday } from "@/lib/cron/guard";
+import { ScanExecutionError } from "@/lib/assistant/scan-execution";
+import { cronAuthorized } from "@/lib/cron/guard";
 import { civilKey, civilToday } from "@/lib/datetime";
-import type { Json } from "@/lib/database.types";
+import { claimCronRun, finishCronRun, skippedCronRun } from "@/lib/cron/runs";
 
 export const runtime = "nodejs";
 // B24: was 60. Since B20 and B21 one night is up to nine model turns plus PDF
@@ -30,51 +31,37 @@ export async function GET(req: Request): Promise<Response> {
   const actor = await serviceActor("cron_scan");
   const istDate = civilKey(civilToday());
 
-  const { data: recent } = await actor.supabase
-    .from("audit_log")
-    .select("action, ts, meta")
-    .eq("user_id", actor.userId)
-    .in("action", ["cron_scan", "cron_scan_started"])
-    .gte("ts", new Date(Date.now() - 36 * 3600 * 1000).toISOString());
-  if (alreadyRanToday(recent ?? [], istDate)) {
-    return Response.json({ skipped: true, reason: "already ran today" });
-  }
-
-  // B24: stamped before any work, so the 7 AM brief can tell "never ran"
-  // from "started and was cut off" (a Vercel timeout writes nothing else).
-  // The already-ran check above treats this row as "running" only while it is
-  // younger than RUNNING_MINUTES, so a cut-off run or a cron_scan_failed row
-  // never blocks a same-day manual re-run after that.
-  await actor.supabase.from("audit_log").insert({
-    user_id: actor.userId,
-    actor: "assistant",
-    action: "cron_scan_started",
-    entity: "cron",
-    meta: { ist_date: istDate } as Json,
-  });
-
+  let claim;
   try {
-    const summary = await runMailScan(actor);
-    await actor.supabase.from("audit_log").insert({
-      user_id: actor.userId,
-      actor: "assistant",
-      action: "cron_scan",
-      entity: "cron",
-      meta: { ist_date: istDate, ...summary } as Json,
-    });
-    return Response.json({ ok: true, ...summary });
+    claim = await claimCronRun(actor, "scan", istDate);
+  } catch {
+    return Response.json({ ok: false, error: "Could not claim scan. No work was started.", retryable: true }, { status: 503 });
+  }
+  if (!claim.claimed) return skippedCronRun(claim);
+
+  let summary;
+  try {
+    summary = await runMailScan(actor);
   } catch (e) {
-    // A model failure carries a code and a fixed short phrase (never the
-    // provider's body). Anything else keeps its own message, capped.
     const failure = e instanceof ScanModelError ? e : null;
     const message = (failure?.message ?? (e instanceof Error ? e.message : "mail scan failed")).slice(0, 200);
-    await actor.supabase.from("audit_log").insert({
-      user_id: actor.userId,
-      actor: "assistant",
-      action: "cron_scan_failed",
-      entity: "cron",
-      meta: { ist_date: istDate, message, reason_code: failure?.code ?? "other" } as Json,
-    });
-    return Response.json({ ok: false, error: message }, { status: 500 });
+    const execution = e instanceof ScanExecutionError ? e : null;
+    const state = execution?.code === "scan_uncertain" ? "uncertain" : "failed";
+    try {
+      await finishCronRun(actor, "scan", istDate, claim.run_id, state, {
+        message, reason_code: failure?.code ?? execution?.code ?? "other",
+      });
+    } catch {
+      return Response.json({ ok: false, run_id: claim.run_id, state: "uncertain",
+        error: "Scan failed and its result could not be saved. Inspect the run before retrying.", retryable: false }, { status: 503 });
+    }
+    return Response.json({ ok: false, run_id: claim.run_id, state, error: message, retryable: state === "failed" }, { status: 500 });
   }
+  try {
+    await finishCronRun(actor, "scan", istDate, claim.run_id, "succeeded", { ...summary });
+  } catch {
+    return Response.json({ ok: false, run_id: claim.run_id, state: "uncertain",
+      error: "Scan completed but its result could not be saved. Inspect the run before retrying.", retryable: false }, { status: 503 });
+  }
+  return Response.json({ ok: true, run_id: claim.run_id, state: "succeeded", ...summary });
 }

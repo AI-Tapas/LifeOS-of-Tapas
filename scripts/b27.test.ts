@@ -90,7 +90,7 @@ test("task reads serve mail_account and mail_thread_id; an older row resolves on
   seed();
   const stored = task({ id: "t-stored", external_ref: "gmail:ca_tapasnr:m-new", external_thread: "th-new" });
   const older = task({ id: "t-old", external_ref: "gmail:ca_tapasnr:m-old" });
-  const icai = task({ id: "t-icai", external_ref: "gmail:icai:m-icai" });
+  const icai = task({ id: "t-icai", external_ref: "gmail:icai:m-icai", external_thread: "th-icai" });
   const manual = task({ id: "t-manual", source: "manual" });
   mail.handler = (url) =>
     url.startsWith(`${GMAIL}/messages/m-old?`)
@@ -103,12 +103,12 @@ test("task reads serve mail_account and mail_thread_id; an older row resolves on
   assert.equal(by("t-stored").mail_thread_id, "th-new");
   assert.equal(by("t-old").mail_account, "ca_tapasnr");
   assert.equal(by("t-old").mail_thread_id, "th-old", "resolved through the provider");
-  assert.equal(by("t-icai").mail_account, null, "icai is never served");
-  assert.equal(by("t-icai").mail_thread_id, null);
+  assert.equal(by("t-icai").mail_account, "icai", "B36: icai is served");
+  assert.equal(by("t-icai").mail_thread_id, "th-icai");
   assert.equal(by("t-manual").mail_account, null);
   assert.equal(older.external_thread, "th-old", "written back to the task");
   assert.equal(stored.external_thread, "th-new");
-  assert.equal(icai.external_thread, null);
+  assert.equal(icai.external_thread, "th-icai");
   assert.equal(manual.external_thread, null);
   assert.deepEqual(mail.calls.length, 1, "one lookup, for the older row only");
   assert.ok(mail.calls[0].includes("fields=threadId") && !mail.calls[0].includes("icai"));
@@ -166,14 +166,15 @@ test("lifeos_list_agent_instructions serves the same two fields", async () => {
   assert.equal(db.tasks[1].external_thread, "th-old");
 });
 
-test("parseMessageRef reads the two ref shapes and refuses icai and junk", () => {
+test("parseMessageRef reads the two ref shapes and reads icai and refuses junk", () => {
   assert.deepEqual(parseMessageRef("gmail:ca_tapasnr:abc:def"), {
     provider: "gmail",
     slot: "ca_tapasnr",
     message_id: "abc:def",
   });
   assert.equal(parseMessageRef("graph:altechon:AAMk")?.provider, "graph");
-  assert.equal(parseMessageRef("gmail:icai:abc"), null);
+  assert.equal(parseMessageRef("gmail:icai:abc")?.slot, "icai");
+  assert.equal(parseMessageRef("gmail:other:abc"), null);
   assert.equal(parseMessageRef("nonsense"), null);
   assert.equal(parseMessageRef(42), null);
 });
@@ -195,14 +196,13 @@ test("read_mail_thread with message_ref reads the same thread as account plus th
   assert.equal(db.audit_log.filter((a) => a.action === "mail_thread_read").length, 2, "both reads audited");
 });
 
-test("read_mail_thread refuses both forms, neither form, icai, and a ref for the wrong provider", async () => {
+test("read_mail_thread refuses both forms, neither form, and a ref for the wrong provider", async () => {
   seed();
   await assert.rejects(
     runReadTool("lifeos_read_mail_thread", { account: "ca_tapasnr", thread_id: "th", message_ref: "gmail:ca_tapasnr:m" }),
     /not both/
   );
   await assert.rejects(runReadTool("lifeos_read_mail_thread", {}), /message_ref/);
-  await assert.rejects(runReadTool("lifeos_read_mail_thread", { message_ref: "gmail:icai:m" }), /icai/);
   await assert.rejects(runReadTool("lifeos_read_mail_thread", { message_ref: "junk" }), /message_ref must be/);
   await assert.rejects(runReadTool("lifeos_read_mail_thread", { message_ref: "graph:ca_tapasnr:m" }), /gmail mailbox|graph but/);
   await assert.rejects(runReadTool("lifeos_read_mail_thread", { account: "ca_tapasnr" }), /thread_id/);

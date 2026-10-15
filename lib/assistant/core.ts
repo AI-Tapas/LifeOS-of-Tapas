@@ -146,11 +146,12 @@ export interface ApprovedExecutionDeps {
   perform(kind: string, payload: unknown): Promise<unknown>;
   markExecuted(result: unknown): Promise<void>;
   markFailed(message: string): Promise<void>;
+  markUncertain?(message: string, result: unknown): Promise<void>;
   audit(action: string, meta: Record<string, unknown>): Promise<void>;
 }
 
 export type GateOutcome =
-  | { ok: true }
+  | { ok: true; message?: string }
   | { ok: false; message: string };
 
 export async function runApprovedExecution(
@@ -181,17 +182,36 @@ export async function runApprovedExecution(
   if (!(await deps.claimExecution())) {
     return { ok: false, message: "Already executed, or its state changed." };
   }
+  let result: unknown;
   try {
-    const result = await deps.perform(action.kind, action.payload);
-    await deps.markExecuted(result);
-    await deps.audit("execute", { action_id: action.id, kind: action.kind });
-    return { ok: true };
+    result = await deps.perform(action.kind, action.payload);
   } catch (e) {
     const message = e instanceof Error ? e.message : "Execution failed.";
-    await deps.markFailed(message);
-    await deps.audit("execute_failed", { action_id: action.id, reason: message });
+    // A timeout does not establish that the provider did nothing. Keep the
+    // execution claim and never automatically retry an external operation.
+    try {
+      if (e && typeof e === "object" && "providerResult" in e) {
+        await deps.markUncertain?.(message, e.providerResult);
+      } else {
+        await deps.markFailed(message);
+      }
+      await deps.audit("execute_failed", { action_id: action.id, reason: message });
+    } catch { /* The durable execution claim remains the recovery record. */ }
+    return { ok: false, message: `${message} Operation ${action.id}: check the provider before retrying; delivery may be uncertain.` };
+  }
+  try {
+    await deps.markExecuted(result);
+  } catch {
+    const message = `The provider accepted operation ${action.id}, but its final history could not be saved. Do not send it again; reconcile it against the provider.`;
+    try { await deps.markUncertain?.(message, result); } catch { /* Retain the claim even during a database outage. */ }
     return { ok: false, message };
   }
+  try {
+    await deps.audit("execute", { action_id: action.id, kind: action.kind });
+  } catch {
+    return { ok: true, message: `Operation ${action.id} completed and its result was saved, but the supplementary audit entry failed. Do not repeat it.` };
+  }
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------------------

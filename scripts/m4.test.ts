@@ -1278,8 +1278,8 @@ test("the send path is unreachable from the service actor without an owner appro
   });
   assert.deepEqual(
     importers.sort(),
-    ["app/(app)/assistant/actions.ts", "scripts/m4.test.ts"],
-    "approval belongs to the owner-session server action, and to this test"
+    ["app/(app)/assistant/actions.ts", "scripts/execution-safety.test.ts", "scripts/m4.test.ts"],
+    "approval belongs to the owner-session server action and explicit offline safety tests"
   );
 
   // 3. And the gate itself still refuses everything but an approved send.
@@ -1386,8 +1386,9 @@ test("every provenance carries every field, and one helper writes them all", asy
   const auditCalls = src.split(/\bawait audit\(/).length - 1;
   const provArgs = src.split(/\bprov\(owner,/).length - 1;
   // Every direct call, plus the one the approval gate makes through its audit
-  // dependency, is given a provenance built by the wrapper.
-  assert.equal(provArgs, auditCalls + 1, 'every audit row, the gate dep included, gets one');
+  // dependency and the B36 save-to-drafts dependency, is given a provenance
+  // built by the wrapper (both pass audit() as an arrow, not an await call).
+  assert.equal(provArgs, auditCalls + 2, 'every audit row, the gate and drafts deps included, gets one');
   assert.ok(auditCalls >= 7, 'the whole lifecycle is audited, not just execution');
 });
 
