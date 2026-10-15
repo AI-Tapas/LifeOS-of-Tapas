@@ -434,7 +434,7 @@ export const READ_TOOL_DESCRIPTIONS: Record<string, string> = {
   lifeos_list_trips:
     "List trips with their session (session_label like L1D2, and session_date, the day he actually teaches, which is not the travel start), purpose, dates, cities, how each is billed (bills_to: icai_monthly, chapter_aed, none or client), how the hotel is arranged (branch, self, relative, same_day or client), the journey_id it shares with the other sessions of one continuous journey (null when it stands alone), how much billable expense each carries, the legs logged against them, and checklist progress (checklist_done of checklist_total). Life OS holds these records; it does not produce an invoice or a bill.",
   lifeos_list_action_history:
-    "List assistant actions that already ran, with their ids, so one can be undone with lifeos_undo_action.",
+    "List assistant actions that already ran, with their ids, so one can be undone with lifeos_undo_action. A queued email Tapas saved to his mailbox drafts instead of sending shows status saved_as_draft: it was not sent.",
   lifeos_list_pending_actions:
     "List actions waiting for Tapas's approval in the app. Read-only: approval is not possible through this connector.",
   lifeos_get_month_pack:
@@ -1239,7 +1239,7 @@ export async function runReadTool(
       .select("id, kind, title, status, created_at, executed_at, error, result", {
         count: "exact",
       })
-      .in("status", ["executed", "failed", "rejected", "undone"])
+      .in("status", ["executed", "failed", "rejected", "undone", "saved_as_draft"])
       .order("created_at", { ascending: false })
       .range(offset, offset + limit - 1);
     if (error) throw new Error(error.message);

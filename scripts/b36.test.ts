@@ -183,8 +183,15 @@ test("the button is owner-only: no MCP surface, tool or read can reach it", () =
   for (const f of ["lib/assistant/tools.ts", "lib/assistant/mcp-api.ts", "lib/mcp/dispatch.ts", "lib/mcp/catalog.ts", "lib/mcp/operations.ts", "app/api/mcp/http/route.ts", "app/api/mcp/route.ts"]) {
     let text = "";
     try { text = src(f); } catch { continue; }
-    assert.doesNotMatch(text, /saveQueuedEmailToDrafts|queued-draft|saveToDrafts|saved_as_draft/, f);
+    assert.doesNotMatch(text, /saveQueuedEmailToDrafts|queued-draft|saveToDrafts/, f);
+    // The status may be READ (history lists it) but never written from here.
+    if (f !== "lib/assistant/mcp-api.ts") assert.doesNotMatch(text, /saved_as_draft/, f);
   }
+  const api = src("lib/assistant/mcp-api.ts");
+  for (const line of api.split("\n").filter((l) => l.includes("saved_as_draft"))) {
+    assert.match(line, /\.in\("status", \[|shows status saved_as_draft/, line);
+  }
+  assert.doesNotMatch(api, /status:\s*"saved_as_draft"/);
   assert.match(src("app/(app)/assistant/actions.ts"), /export async function saveToDraftsAction/);
   const draft = src("lib/assistant/queued-draft.ts");
   assert.doesNotMatch(draft, /messages\/send|sendMail|\/send\b|createReply\b/);

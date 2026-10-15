@@ -836,7 +836,7 @@
     },
     {
       "name": "lifeos_list_action_history",
-      "description": "List assistant actions that already ran, with their ids, so one can be undone with lifeos_undo_action.",
+      "description": "List assistant actions that already ran, with their ids, so one can be undone with lifeos_undo_action. A queued email Tapas saved to his mailbox drafts instead of sending shows status saved_as_draft: it was not sent.",
       "input_schema": {
         "type": "object",
         "properties": {
