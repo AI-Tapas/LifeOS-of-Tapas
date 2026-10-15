@@ -5,7 +5,7 @@ practising CA in Ahmedabad, India. Sole user: tapas.tnr@gmail.com.
 
 ## Security, usability and MCP handoff (15 October 2026)
 
-Read [docs/CLAUDE_HANDOFF_2026-10-15.md](docs/CLAUDE_HANDOFF_2026-10-15.md) before continuing this implementation or deploying. It maps findings to changes, explains new migrations and MCP contracts, records validation limits, and links the historical review. This section and its linked implementation notes supersede older descriptions of private offline caching, OAuth lifecycle, connector capabilities, and Undo state handling below. Existing OAuth clients must explicitly consent again after migration.
+Read [docs/CLAUDE_HANDOFF_2026-10-15.md](docs/CLAUDE_HANDOFF_2026-10-15.md) before continuing this implementation or deploying. It maps findings to changes, explains new migrations and MCP contracts, records validation limits, and links the historical review. This section and its linked implementation notes supersede older descriptions of private offline caching, OAuth lifecycle, connector capabilities, and Undo state handling below. Connections that were live at the migration kept working without re-consent (B37 follow-up, see the handoff); only dead ones must reconnect.
 
 ## Stack
 

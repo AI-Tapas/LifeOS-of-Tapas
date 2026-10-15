@@ -50,7 +50,7 @@ Apply reviewed migrations before exposing the new app routes:
 4. `20261015000400_cron_claims.sql`: atomic cron runs, legacy audit backfill and dispatch fencing.
 5. `20261015000500_scan_execution.sql`: one fenced owner scan across UI, cron, direct MCP and background jobs.
 
-**OAuth migration keeps live connections (changed in B35, see Follow-ups).** Clients with a live access or refresh grant stay approved with their existing access; only dead clients and in-flight codes are revoked.
+**OAuth migration keeps live connections (changed in B37, see Follow-ups).** Clients with a live access or refresh grant stay approved with their existing access; only dead clients and in-flight codes are revoked.
 
 The cron migration backfills existing audit evidence so deploying cannot resend a brief already sent today. Expired/ambiguous work becomes uncertain. Do not simply delete run rows or clear execution claims: first inspect provider/local effects, then perform a reviewed repair. See [cron recovery notes](reviews/cron-reliability.md).
 
@@ -112,7 +112,7 @@ Browser tooling and invocation are documented in `scripts/review-ui-browser.cjs`
 
 Build and SDK success refer to the installed versions listed above, not the upgraded target runtime. No production database or deployment was changed. The five migrations, OAuth re-consent, clean dependency installation and real provider/Supabase integration checks remain release steps.
 
-## Follow-ups (B35)
+## Follow-ups (B37)
 
 Applied on branch `codex-followups` after the Codex review:
 
