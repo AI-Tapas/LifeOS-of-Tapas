@@ -7,6 +7,7 @@ import ts from "typescript";
 import * as permissions from "../lib/mcp/permissions.ts";
 import * as core from "../lib/mcp/oauth-core.ts";
 import * as catalog from "../lib/mcp/catalog.ts";
+import * as coerce from "../lib/mcp/coerce.ts";
 function load(path: string, imports: Record<string, unknown>) {
   const exports: Record<string, unknown> = {};
   const code = ts.transpileModule(readFileSync(new URL(`../${path}`, import.meta.url), "utf8"), {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
@@ -89,7 +90,7 @@ test("shared dispatcher idempotency preserves the original outcome and rejects c
     throw new Error(`Unexpected ${action}`);
   };
   const api={READ_TOOL_NAMES:["lifeos_list_tasks"],READ_TOOL_DESCRIPTIONS:{lifeos_list_tasks:"Tasks"},READ_TOOL_SCHEMAS:{lifeos_list_tasks:{type:"object",properties:{},additionalProperties:false}},writeTools:()=>[{name:"add_note",description:"Add",bucket:"autonomous",input_schema:{type:"object",properties:{title:{type:"string"}},required:["title"],additionalProperties:false}}],runReadTool:async()=>({items:[{id:"task",title:"Task",billing_ref:"private",hours_spent:3,work_stream:{hourly_rate:42,name:"Stream"}}]}),runWriteTool:async(_name:unknown,input:unknown)=>{writes.push(input);return{reply:"Saved",queued:false};}};
-  const loaded=load("lib/mcp/dispatch.ts",{"node:crypto":crypto,"@/lib/assistant/mcp-api":api,"@/lib/assistant/actor":{serviceActor:async()=>({})},"@/lib/supabase/service":{},"./permissions":permissions,"./operations":{...operations,operationStore:store}});
+  const loaded=load("lib/mcp/dispatch.ts",{"node:crypto":crypto,"@/lib/assistant/mcp-api":api,"@/lib/assistant/actor":{serviceActor:async()=>({})},"@/lib/supabase/service":{},"./permissions":permissions,"./coerce":coerce,"./operations":{...operations,operationStore:store}});
   const dispatch=loaded.dispatch as (context:unknown,name:string,input:Record<string,unknown>)=>Promise<Record<string,unknown>>;
   const context={clientId:"client",userId:"owner",capabilities:permissions.ALL_CAPABILITIES};
   const first=await dispatch(context,"lifeos_add_note",{title:"A",_idempotency_key:"same"});assert.equal(first.state,"completed");assert.equal(first.operation_id,"operation");
@@ -109,9 +110,33 @@ test("background worker rechecks revocation, honors cancellation and marks ambig
       if(action==="finish_job"){finished=args;return args;}
       throw new Error(action);
     };
-    const loaded=load("lib/mcp/jobs.ts",{"@/lib/assistant/actor":{serviceActor:async()=>({userId:"owner"})},"@/lib/assistant/mcp-api":{runWriteTool:async()=>{scans++;if(scenario==="uncertain")throw new Error("Worker lost completion after task write");return{reply:"Scanned",queued:false};}},"@/lib/supabase/service":{createServiceClient:()=>({from:()=>query})},"./permissions":permissions,"./operations":{...operations,operationStore:store}});
+    const loaded=load("lib/mcp/jobs.ts",{"@/lib/assistant/actor":{serviceActor:async()=>({userId:"owner"})},"@/lib/assistant/mcp-api":{runWriteTool:async()=>{scans++;if(scenario==="uncertain")throw new Error("Worker lost completion after task write");return{reply:"Scanned",queued:false};}},"@/lib/supabase/service":{createServiceClient:()=>({from:()=>query})},"./permissions":permissions,"./coerce":coerce,"./operations":{...operations,operationStore:store}});
     await (loaded.runNextMcpJob as ()=>Promise<unknown>)();
     assert.equal(finished.state,scenario==="revoked"?"failed":scenario);
     assert.equal(scans,["revoked","cancelled"].includes(scenario)?0:1);
   }
+});
+
+test("a number sent as text by a client with a stale schema is accepted, nothing else is", async () => {
+  const { coerceNumericStrings } = await import("../lib/mcp/coerce.ts");
+  const schema = {
+    type: "object",
+    properties: {
+      invested: { type: "number" },
+      limit: { type: "integer" },
+      name: { type: "string" },
+    },
+  };
+  assert.deepEqual(coerceNumericStrings({ invested: "64895.12", name: "12" }, schema), {
+    invested: 64895.12,
+    name: "12",
+  });
+  assert.deepEqual(coerceNumericStrings({ limit: "25" }, schema), { limit: 25 });
+  // Left as sent, so validation still refuses them.
+  for (const bad of ["1,81,389.42", "1e5", "Infinity", "", " ", "0x10", "12abc"]) {
+    assert.deepEqual(coerceNumericStrings({ invested: bad }, schema), { invested: bad }, bad);
+  }
+  assert.deepEqual(coerceNumericStrings({ limit: "2.5" }, schema), { limit: "2.5" });
+  const untouched = { invested: 5 };
+  assert.equal(coerceNumericStrings(untouched, schema), untouched);
 });

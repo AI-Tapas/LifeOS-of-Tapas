@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { coerceNumericStrings } from "./coerce";
 import { READ_TOOL_NAMES, READ_TOOL_DESCRIPTIONS, READ_TOOL_SCHEMAS, runReadTool, runWriteTool, writeTools } from "@/lib/assistant/mcp-api";
 import { serviceActor } from "@/lib/assistant/actor";
 import { createServiceClient } from "@/lib/supabase/service";
@@ -104,6 +105,8 @@ export async function dispatch(context: McpContext, name: string, rawInput: Reco
   try {
     const entry = manifest(context).find(t => t.name === name);
     if (!entry || !capabilityAllows(context.capabilities, name, !entry.read_only, rawInput)) throw new McpError("permission_denied", "This tool or target is not enabled for this connection.");
+    // A client with a stale schema sends a new number field as text.
+    rawInput = coerceNumericStrings(rawInput, entry.input_schema);
     validateInput(rawInput, entry.input_schema);
     const input = { ...rawInput }; const suppliedKey = input._idempotency_key; delete input._idempotency_key;
     const call = await operationStore(context, "begin_call", { tool: name }); activity = String(call.id);
