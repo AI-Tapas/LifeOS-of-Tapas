@@ -11,6 +11,7 @@ import { customStepDays, parseDateKey } from "@/lib/reminders/core";
 import type { Database } from "@/lib/database.types";
 import { requireUser } from "@/lib/auth/require-user";
 import type { FinanceKind } from "@/lib/money/investments";
+import { isFundCategory } from "@/lib/money/portfolio";
 
 type Category = Database["public"]["Enums"]["obligation_category"];
 type Frequency = Database["public"]["Enums"]["obligation_frequency"];
@@ -210,6 +211,9 @@ export interface HoldingInput {
   notes?: string | null;
   held_for?: string | null;
   reference_only?: boolean;
+  fund_category?: string | null;
+  equity_pct?: number | null;
+  invested?: number | null;
 }
 
 export type HoldingResult =
@@ -226,6 +230,15 @@ function validateHolding(input: HoldingInput): string | null {
   }
   if (input.value != null && (!Number.isFinite(input.value) || input.value < 0)) {
     return "The value must be a number.";
+  }
+  if (input.fund_category && !isFundCategory(input.fund_category)) {
+    return "That fund category is not one the app knows.";
+  }
+  if (input.equity_pct != null && !(input.equity_pct >= 0 && input.equity_pct <= 100)) {
+    return "The equity share must be between 0 and 100.";
+  }
+  if (input.invested != null && (!Number.isFinite(input.invested) || input.invested < 0)) {
+    return "The invested amount must be a number.";
   }
   if ((input.held_for?.trim().length ?? 0) > 40) {
     return "Whose it is should be a short label, 40 characters at most.";
@@ -246,6 +259,9 @@ function holdingRow(input: HoldingInput) {
     notes: input.notes?.trim() || null,
     held_for: input.held_for?.trim() || null,
     reference_only: input.reference_only ?? false,
+    fund_category: input.kind === "mf" ? input.fund_category || null : null,
+    equity_pct: input.equity_pct ?? null,
+    invested: input.invested ?? null,
   };
 }
 

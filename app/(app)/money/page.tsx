@@ -21,7 +21,7 @@ export default async function MoneyPage() {
       .order("name"),
     supabase
       .from("finance_items")
-      .select("id, kind, name, institution, value, key_date, key_date_type, remind, notes, held_for, reference_only")
+      .select("id, kind, name, institution, value, key_date, key_date_type, remind, notes, held_for, reference_only, fund_category, equity_pct, invested")
       // Dated holdings first and soonest first, so what needs an answer is at
       // the top; the undated ones fall to the bottom rather than the middle.
       .order("key_date", { ascending: true, nullsFirst: false })

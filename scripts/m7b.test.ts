@@ -45,6 +45,13 @@ import {
   totalsByKind,
   type Holding,
 } from "../lib/money/investments.ts";
+import {
+  FUND_CATEGORY_KEYS,
+  assetClass,
+  equityShare,
+  holdersOf,
+  portfolio,
+} from "../lib/money/portfolio.ts";
 import { RATE_FLOOR, streamRateLine } from "../lib/money/rates.ts";
 import { civilToday, formatINR } from "../lib/datetime.ts";
 import { TOOLS, toolByName } from "../lib/assistant/tools.ts";
@@ -71,6 +78,9 @@ function holding(over: Partial<Holding> & { id: string }): Holding {
     notes: null,
     held_for: null,
     reference_only: false,
+    fund_category: null,
+    equity_pct: null,
+    invested: null,
     ...over,
   };
 }
@@ -743,4 +753,49 @@ test("Home and the brief ask the database for managed holdings only", () => {
   assert.match(src("lib/reminders/writer.ts"), /remind: item\.remind && !item\.reference_only/);
   const mig = src("supabase/migrations/20261016000100_holding_held_for.sql");
   assert.match(mig, /NEVER a PAN, an account number, a folio number/);
+});
+
+// --- portfolio: asset classes, sheet lines, fund categories (16 Oct 2026) ---
+
+test("asset class and equity share follow the kind, the category and the override", () => {
+  assert.equal(assetClass(holding({ id: "a", kind: "ppf" })), "debt");
+  assert.equal(assetClass(holding({ id: "b", kind: "stock" })), "equity");
+  assert.equal(assetClass(holding({ id: "c", kind: "mf", fund_category: "liquid" })), "debt");
+  assert.equal(equityShare(holding({ id: "d", kind: "nps" })), 75);
+  assert.equal(equityShare(holding({ id: "e", kind: "nps", equity_pct: 70 })), 70);
+  assert.equal(equityShare(holding({ id: "f", kind: "mf", fund_category: "aggressive_hybrid" })), 75);
+});
+
+test("the portfolio reads like his sheet and never counts reference holdings", () => {
+  const items = [
+    holding({ id: "m1", kind: "mf", fund_category: "large_cap", value: 600, invested: 400 }),
+    holding({ id: "m2", kind: "mf", fund_category: "liquid", value: 200 }),
+    holding({ id: "fd1", kind: "fd", held_for: "Mother", value: 100 }),
+    holding({ id: "fd2", kind: "fd", held_for: "Mother", value: 100 }),
+    holding({ id: "g", kind: "gold", value: 100 }),
+    holding({ id: "w", kind: "stock", held_for: "Wife", reference_only: true, value: 9999 }),
+  ];
+  const p = portfolio(items, "all");
+  assert.equal(p.total, 1100);
+  assert.equal(p.gain, 200);
+  assert.deepEqual(
+    p.allocation.map((s) => [s.key, s.value]),
+    [["equity", 600], ["debt", 400], ["gold", 100]]
+  );
+  const mf = p.lines.find((l) => l.label === "Mutual funds")!;
+  assert.equal(mf.asset_class, "hybrid");
+  assert.equal(mf.equity_pct, 75);
+  const fds = p.lines.find((l) => l.label === "Fixed deposits")!;
+  assert.deepEqual([fds.holder, fds.count, fds.value], ["Mother", 2, 200]);
+  assert.deepEqual(p.categories.map((c) => c.key), ["large_cap", "liquid"]);
+  assert.equal(portfolio(items, "you").total, 900);
+  assert.equal(portfolio(items, "Mother").total, 200);
+  assert.deepEqual(holdersOf(items), ["Mother"]);
+});
+
+test("the tool registry lists exactly the fund categories the app knows", () => {
+  const add = toolByName("add_finance_item")!;
+  const desc = JSON.stringify(add.input_schema);
+  const listed = /one of: ([a-z_, ]+)\./.exec(desc)![1].split(", ");
+  assert.deepEqual(listed, FUND_CATEGORY_KEYS);
 });

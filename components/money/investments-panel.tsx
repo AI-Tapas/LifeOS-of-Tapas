@@ -17,13 +17,14 @@ import {
   KIND_LABELS,
   defaultKeyDateType,
   groupByHolder,
-  dashboard,
   remindsOnCalendar,
   totalValue,
   totalsByKind,
   type FinanceKind,
   type Holding,
 } from "@/lib/money/investments";
+import PortfolioDashboard from "@/components/money/portfolio-dashboard";
+import { FUND_CATEGORIES, FUND_CATEGORY_KEYS } from "@/lib/money/portfolio";
 import {
   createHoldingAction,
   updateHoldingAction,
@@ -95,7 +96,7 @@ export default function InvestmentsPanel({
       ) : (
         <>
           {managed.length > 0 && (
-            <DashboardView holdings={holdings} todayKey={todayKey} />
+            <PortfolioDashboard holdings={holdings} todayKey={todayKey} />
           )}
           {managed.map((g) => (
             <section key={`m|${g.held_for ?? ""}`} className="mt-6">
@@ -129,88 +130,6 @@ export default function InvestmentsPanel({
           onNotice={setNotice}
         />
       )}
-    </div>
-  );
-}
-
-const cardCls =
-  "rounded-lg border border-border bg-surface p-3 shadow-[var(--shadow-card)]";
-
-// His holdings and the ones he manages, together. Reference-only holdings
-// never reach this: dashboard() drops them before it adds anything up.
-function DashboardView({ holdings, todayKey }: { holdings: HoldingRow[]; todayKey: string }) {
-  const d = dashboard(holdings, todayKey);
-  return (
-    <div className="mt-4 space-y-2">
-      <div className={cardCls}>
-        <p className="text-xs font-medium text-secondary">Dashboard</p>
-        <p className="mt-0.5 text-2xl font-semibold tabular-nums">{formatINR(d.total)}</p>
-        <p className="text-xs text-secondary">
-          {d.count} {d.count === 1 ? "holding" : "holdings"} recorded
-        </p>
-        {d.by_holder.length > 1 && (
-          <ul className="mt-2 divide-y divide-border">
-            {d.by_holder.map((p) => (
-              <li key={p.title} className="flex items-baseline justify-between py-1.5">
-                <span className="text-sm">
-                  {p.title}
-                  <span className="text-secondary"> · {p.count}</span>
-                </span>
-                <span className="text-sm font-medium tabular-nums">{formatINR(p.total)}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <div className={cardCls}>
-          <p className="text-xs font-medium text-secondary">By kind, everyone</p>
-          <ul className="mt-1 divide-y divide-border">
-            {d.by_kind.map((t) => (
-              <li key={t.kind} className="flex items-baseline justify-between py-1.5">
-                <span className="text-sm">
-                  {t.label}
-                  <span className="text-secondary"> · {t.count}</span>
-                </span>
-                <span className="text-sm font-medium tabular-nums">{t.total_label}</span>
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div className={cardCls}>
-          <p className="text-xs font-medium text-secondary">Maturing in the next 90 days</p>
-          {d.maturing.length ? (
-            <ul className="mt-1 divide-y divide-border">
-              {d.maturing.map((m) => (
-                <li key={m.id} className="py-1.5">
-                  <p className="text-sm font-medium">{m.label}</p>
-                  <p className="text-xs text-secondary">
-                    {dateLabel(m.key_date)}
-                    {m.value != null ? ` · ${formatINR(m.value)}` : ""}
-                  </p>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="mt-0.5 text-sm text-secondary">Nothing maturing.</p>
-          )}
-          <p className="mt-2 text-xs font-medium text-secondary">Due for review</p>
-          {d.reviews.length ? (
-            <ul className="mt-1 divide-y divide-border">
-              {d.reviews.map((r) => (
-                <li key={r.id} className="py-1.5 text-sm">
-                  {r.name}
-                  <span className={r.overdue ? "text-overdue" : "text-secondary"}>
-                    {" "}· {dateLabel(r.key_date)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="mt-0.5 text-sm text-secondary">Nothing in the next two weeks.</p>
-          )}
-        </div>
-      </div>
     </div>
   );
 }
@@ -285,6 +204,9 @@ function HolderGroupView({
 }
 
 interface Fields {
+  fundCategory: string;
+  equityPct: string;
+  invested: string;
   heldFor: string;
   referenceOnly: boolean;
   kind: FinanceKind;
@@ -300,6 +222,9 @@ interface Fields {
 function toFields(h: HoldingRow | null): Fields {
   const kind = h?.kind ?? "fd";
   return {
+    fundCategory: h?.fund_category ?? "",
+    equityPct: h?.equity_pct != null ? String(h.equity_pct) : "",
+    invested: h?.invested != null ? String(h.invested) : "",
     heldFor: h?.held_for ?? "",
     referenceOnly: h?.reference_only ?? false,
     kind,
@@ -357,6 +282,9 @@ function HoldingForm({
       notes: f.notes || null,
       held_for: f.heldFor.trim() || null,
       reference_only: f.referenceOnly,
+      fund_category: f.kind === "mf" ? f.fundCategory || null : null,
+      equity_pct: f.equityPct ? Number(f.equityPct) : null,
+      invested: f.invested ? Number(f.invested) : null,
     };
     startTransition(async () => {
       const r = isEdit
@@ -417,6 +345,46 @@ function HoldingForm({
               value={f.value}
               onChange={(e) => setF({ ...f, value: e.target.value })}
               className={inputCls}
+            />
+          </Field>
+        </div>
+        {f.kind === "mf" && (
+          <Field label="Fund category">
+            <select
+              value={f.fundCategory}
+              onChange={(e) => setF({ ...f, fundCategory: e.target.value })}
+              className={inputCls}
+            >
+              <option value="">Not set</option>
+              {FUND_CATEGORY_KEYS.map((k) => (
+                <option key={k} value={k}>
+                  {FUND_CATEGORIES[k].label}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+        <div className="flex gap-2">
+          <Field label="Invested (₹)">
+            <input
+              type="number"
+              inputMode="decimal"
+              value={f.invested}
+              onChange={(e) => setF({ ...f, invested: e.target.value })}
+              className={inputCls}
+              placeholder="If known"
+            />
+          </Field>
+          <Field label="Equity share (%)">
+            <input
+              type="number"
+              inputMode="decimal"
+              min={0}
+              max={100}
+              value={f.equityPct}
+              onChange={(e) => setF({ ...f, equityPct: e.target.value })}
+              className={inputCls}
+              placeholder="Default"
             />
           </Field>
         </div>

@@ -114,7 +114,7 @@ export async function GET(req: Request): Promise<Response> {
         // design (M7b), so the brief is where it reaches him.
         supabase
           .from("finance_items")
-          .select("id, kind, name, institution, value, key_date, key_date_type, remind, notes, held_for, reference_only")
+          .select("id, kind, name, institution, value, key_date, key_date_type, remind, notes, held_for, reference_only, fund_category, equity_pct, invested")
           .eq("user_id", userId)
           // Reference-only holdings (his wife's, his in-laws') never reach the brief.
           .eq("reference_only", false)

@@ -2101,3 +2101,25 @@ cron, the reminder writer and the connector all select the new columns.
 - add_finance_item and update_finance_item take `held_for` and
   `reference_only`; lifeos_list_finance_items returns both. Undo restores them.
 - Tests: three in `npm run test:m7b`.
+
+## Portfolio dashboard (16 October 2026)
+
+Migration `20261016000200_portfolio_categories.sql`: six new `finance_item_kind`
+values (ppf, epf, nps, ssy, gold, savings) and three nullable columns,
+`fund_category`, `equity_pct`, `invested`. NOT applied when written.
+
+- Asset class is DERIVED in lib/money/portfolio.ts, never stored: from the
+  kind, and for a mutual fund from its SEBI category (`FUND_CATEGORIES`).
+  `equity_pct` overrides the default equity share (NPS active choice).
+- `portfolio(items, view)` gives the dashboard: total, gain where `invested` is
+  known, equity/debt/gold allocation (hybrids split by equity share), one line
+  per kind and holder like his own sheet, and funds by category. Views:
+  everyone managed, you, or one holder. Reference-only holdings never count.
+- components/money/portfolio-dashboard.tsx draws it. Allocation colours are
+  `--viz-equity/debt/gold` in globals.css, validated with the dataviz
+  validator on both app surfaces.
+- tools.ts imports nothing (m8 rule), so the fund category keys are written
+  into the add_finance_item description by hand; a m7b test keeps them equal
+  to `FUND_CATEGORY_KEYS`.
+- Gotcha: the service worker caches CSS on localhost; unregister it before
+  judging a style change in the preview.

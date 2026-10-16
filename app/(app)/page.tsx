@@ -127,7 +127,7 @@ export default async function DashboardPage() {
       // interruption, along with the morning brief.
       supabase
         .from("finance_items")
-        .select("id, kind, name, institution, value, key_date, key_date_type, remind, notes, held_for, reference_only")
+        .select("id, kind, name, institution, value, key_date, key_date_type, remind, notes, held_for, reference_only, fund_category, equity_pct, invested")
         .eq("reference_only", false)
         .eq("key_date_type", "review")
         .not("key_date", "is", null),

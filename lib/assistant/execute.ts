@@ -8,6 +8,8 @@
 // apply; only the provider calls use the service-role path inside
 // withResourceAuth.
 
+import { FINANCE_KINDS } from "@/lib/money/investments";
+import { isFundCategory } from "@/lib/money/portfolio";
 import { checkedAddresses, checkedHeader, plainTextMime } from "./mail-headers";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { cookieActor, type Actor } from "@/lib/assistant/actor";
@@ -1289,6 +1291,7 @@ const performers: Record<string, Performer> = {
         // Reference-only holdings are never reminded (the writer refuses too).
         reference_only: input.reference_only === true,
         remind: input.reference_only !== true,
+        ...portfolioFields(input, kind),
       })
       .select("id")
       .single();
@@ -1304,7 +1307,9 @@ const performers: Record<string, Performer> = {
     if (!itemId) throw new Error("finance_item_id is required.");
     const { data: prev } = await supabase
       .from("finance_items")
-      .select("name, institution, value, key_date, key_date_type, notes, held_for, reference_only")
+      .select(
+        "kind, name, institution, value, key_date, key_date_type, notes, held_for, reference_only, fund_category, equity_pct, invested"
+      )
       .eq("id", itemId)
       .single();
     if (!prev) throw new Error("Holding not found.");
@@ -1332,6 +1337,7 @@ const performers: Record<string, Performer> = {
         ...(typeof input.reference_only === "boolean"
           ? { reference_only: input.reference_only }
           : {}),
+        ...portfolioFields(input, s(input.kind) ?? prev.kind, true),
       })
       .eq("id", itemId);
     if (error) throw new Error(error.message);
@@ -2614,6 +2620,14 @@ async function performUndo(
           ...("reference_only" in prev
             ? { reference_only: prev.reference_only as boolean }
             : {}),
+          ...("fund_category" in prev
+            ? {
+                kind: prev.kind as Database["public"]["Enums"]["finance_item_kind"],
+                fund_category: prev.fund_category as string | null,
+                equity_pct: prev.equity_pct as number | null,
+                invested: prev.invested as number | null,
+              }
+            : {}),
         })
         .eq("id", itemId).select("id").single());
       // The reminder follows the restored row, so undoing a maturity that was
@@ -2847,4 +2861,43 @@ async function performUndo(
     default:
       throw new Error(`${kind} cannot be undone.`);
   }
+}
+
+// Portfolio fields for add_finance_item and update_finance_item (16 Oct
+// 2026). The wire is not trusted: kind and fund category are checked against
+// the known lists, the numbers against their ranges, and a category on
+// anything but a fund is dropped. On an update, a field left out is kept.
+function portfolioFields(
+  input: Record<string, unknown>,
+  kind: string,
+  isUpdate = false
+): {
+  kind?: Database["public"]["Enums"]["finance_item_kind"];
+  fund_category?: string | null;
+  equity_pct?: number | null;
+  invested?: number | null;
+} {
+  const out: ReturnType<typeof portfolioFields> = {};
+  if (!(FINANCE_KINDS as string[]).includes(kind)) {
+    throw new Error("Unknown kind of holding.");
+  }
+  if (isUpdate && input.kind !== undefined) {
+    out.kind = kind as Database["public"]["Enums"]["finance_item_kind"];
+  }
+  if (input.fund_category !== undefined) {
+    const cat = typeof input.fund_category === "string" ? input.fund_category.trim() : "";
+    if (cat && !isFundCategory(cat)) throw new Error("Unknown fund_category.");
+    out.fund_category = kind === "mf" ? cat || null : null;
+  }
+  if (typeof input.equity_pct === "number") {
+    if (!(input.equity_pct >= 0 && input.equity_pct <= 100)) {
+      throw new Error("equity_pct must be between 0 and 100.");
+    }
+    out.equity_pct = input.equity_pct;
+  }
+  if (typeof input.invested === "number") {
+    if (!(input.invested >= 0)) throw new Error("invested must not be negative.");
+    out.invested = input.invested;
+  }
+  return out;
 }

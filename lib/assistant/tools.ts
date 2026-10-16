@@ -557,7 +557,10 @@ export const TOOLS: ToolDef[] = [
     description:
       "Record an investment or deposit: a fixed deposit, mutual fund, stock, NCD or other holding. A maturity date puts one reminder on his calendar; a review date does not interrupt him and shows on Home and in the morning brief instead.",
     input_schema: schema({
-      kind: enumOf(["fd", "mf", "stock", "ncd", "other"], "What kind of holding."),
+      kind: enumOf(
+        ["fd", "mf", "stock", "ncd", "ppf", "epf", "nps", "ssy", "gold", "savings", "other"],
+        "What kind of holding. ppf, epf, nps, ssy, gold and savings are their own kinds; other is only for what fits none."
+      ),
       name: str("What it is called."),
       institution: strOrNull(HOLDING_WHERE_DESC),
       value: numOrNull("Current value in rupees."),
@@ -573,6 +576,13 @@ export const TOOLS: ToolDef[] = [
       reference_only: boolOrNull(
         "True for a holding kept on record only (his wife's, his parents-in-law's): never on the dashboard, Home, the brief or the calendar. Leave false for his own and his mother's, which he manages."
       ),
+      fund_category: strOrNull(
+        "For a mutual fund only: its SEBI category key, one of: large_cap, large_mid_cap, flexi_cap, multi_cap, mid_cap, small_cap, value, focused, elss, sectoral, index_large, index_mid, index_small, international, aggressive_hybrid, balanced_advantage, multi_asset, equity_savings, arbitrage, liquid, overnight, money_market, ultra_short, low_duration, short_duration, corporate_bond, banking_psu, gilt, dynamic_bond, gold_fund."
+      ),
+      equity_pct: numOrNull(
+        "Share of this holding in equity, 0 to 100, only where the default for its kind or category is wrong (for example NPS on active choice at 70)."
+      ),
+      invested: numOrNull("Amount invested in rupees, where a statement gives it."),
     }),
   },
   {
@@ -583,6 +593,10 @@ export const TOOLS: ToolDef[] = [
       "Update a recorded holding: its value, where it is held, its key date or notes. Changing the key date type changes how it reminds him, so a maturity turned into a review date loses its calendar entry.",
     input_schema: schema({
       finance_item_id: str("The holding id."),
+      kind: enumOrNull(
+        ["fd", "mf", "stock", "ncd", "ppf", "epf", "nps", "ssy", "gold", "savings", "other"],
+        "New kind. Omit to keep."
+      ),
       name: strOrNull("New name. Omit to keep."),
       institution: strOrNull(HOLDING_WHERE_DESC + " Omit to keep."),
       value: numOrNull("New value in rupees. Omit to keep."),
@@ -598,6 +612,13 @@ export const TOOLS: ToolDef[] = [
       reference_only: boolOrNull(
         "True for a holding kept on record only (his wife's, his parents-in-law's): never on the dashboard, Home, the brief or the calendar. Leave false for his own and his mother's, which he manages."
       ),
+      fund_category: strOrNull(
+        "For a mutual fund only: its SEBI category key, one of: large_cap, large_mid_cap, flexi_cap, multi_cap, mid_cap, small_cap, value, focused, elss, sectoral, index_large, index_mid, index_small, international, aggressive_hybrid, balanced_advantage, multi_asset, equity_savings, arbitrage, liquid, overnight, money_market, ultra_short, low_duration, short_duration, corporate_bond, banking_psu, gilt, dynamic_bond, gold_fund."
+      ),
+      equity_pct: numOrNull(
+        "Share of this holding in equity, 0 to 100, only where the default for its kind or category is wrong (for example NPS on active choice at 70)."
+      ),
+      invested: numOrNull("Amount invested in rupees, where a statement gives it."),
     }),
   },
   {

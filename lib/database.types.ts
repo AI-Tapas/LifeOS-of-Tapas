@@ -732,9 +732,12 @@ export type Database = {
       }
       finance_items: {
         Row: {
+          equity_pct: number | null
+          fund_category: string | null
           held_for: string | null
           id: string
           institution: string | null
+          invested: number | null
           key_date: string | null
           key_date_type:
             | Database["public"]["Enums"]["finance_key_date_type"]
@@ -749,9 +752,12 @@ export type Database = {
           value: number | null
         }
         Insert: {
+          equity_pct?: number | null
+          fund_category?: string | null
           held_for?: string | null
           id?: string
           institution?: string | null
+          invested?: number | null
           key_date?: string | null
           key_date_type?:
             | Database["public"]["Enums"]["finance_key_date_type"]
@@ -766,9 +772,12 @@ export type Database = {
           value?: number | null
         }
         Update: {
+          equity_pct?: number | null
+          fund_category?: string | null
           held_for?: string | null
           id?: string
           institution?: string | null
+          invested?: number | null
           key_date?: string | null
           key_date_type?:
             | Database["public"]["Enums"]["finance_key_date_type"]
@@ -1561,7 +1570,18 @@ export type Database = {
       mcp_grant_kind: "code" | "access" | "refresh"
       audit_actor: "user" | "assistant"
       event_source: "synced" | "app" | "reminder"
-      finance_item_kind: "fd" | "mf" | "stock" | "ncd" | "other"
+      finance_item_kind:
+        | "fd"
+        | "mf"
+        | "stock"
+        | "ncd"
+        | "other"
+        | "ppf"
+        | "epf"
+        | "nps"
+        | "ssy"
+        | "gold"
+        | "savings"
       finance_key_date_type: "maturity" | "review"
       hotel_arrangement: "branch" | "self" | "relative" | "same_day" | "client"
       note_type: "meeting" | "decision" | "idea" | "reference"
@@ -1759,7 +1779,7 @@ export const Constants = {
       mcp_grant_kind: ["code", "access", "refresh"],
       audit_actor: ["user", "assistant"],
       event_source: ["synced", "app", "reminder"],
-      finance_item_kind: ["fd", "mf", "stock", "ncd", "other"],
+      finance_item_kind: ["fd", "mf", "stock", "ncd", "ppf", "epf", "nps", "ssy", "gold", "savings", "other"],
       finance_key_date_type: ["maturity", "review"],
       hotel_arrangement: ["branch", "self", "relative", "same_day", "client"],
       note_type: ["meeting", "decision", "idea", "reference"],

@@ -1113,7 +1113,7 @@ export async function runReadTool(
     const { data, count, error } = await supabase
       .from("finance_items")
       .select(
-        "id, kind, name, institution, value, key_date, key_date_type, remind, notes, held_for, reference_only",
+        "id, kind, name, institution, value, key_date, key_date_type, remind, notes, held_for, reference_only, fund_category, equity_pct, invested",
         { count: "exact" }
       )
       .order("key_date", { ascending: true, nullsFirst: false })
@@ -1138,6 +1138,9 @@ export async function runReadTool(
       notes: f.notes,
       held_for: f.held_for,
       reference_only: f.reference_only,
+      fund_category: f.fund_category,
+      equity_pct: f.equity_pct,
+      invested: f.invested,
     }));
     return paginate(items, count ?? items.length, limit, offset);
   }

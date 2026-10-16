@@ -18,15 +18,44 @@ import {
   type FinanceKeyDateType,
 } from "../reminders/core.ts";
 
-export type FinanceKind = "fd" | "mf" | "stock" | "ncd" | "other";
+export type FinanceKind =
+  | "fd"
+  | "mf"
+  | "stock"
+  | "ncd"
+  | "ppf"
+  | "epf"
+  | "nps"
+  | "ssy"
+  | "gold"
+  | "savings"
+  | "other";
 
-export const FINANCE_KINDS: FinanceKind[] = ["fd", "mf", "stock", "ncd", "other"];
+export const FINANCE_KINDS: FinanceKind[] = [
+  "fd",
+  "mf",
+  "stock",
+  "ncd",
+  "ppf",
+  "epf",
+  "nps",
+  "ssy",
+  "gold",
+  "savings",
+  "other",
+];
 
 export const KIND_LABELS: Record<FinanceKind, string> = {
   fd: "Fixed deposit",
   mf: "Mutual fund",
   stock: "Stock",
   ncd: "NCD",
+  ppf: "PPF",
+  epf: "EPF",
+  nps: "NPS",
+  ssy: "Sukanya Samriddhi",
+  gold: "Gold",
+  savings: "Savings balance",
   other: "Other",
 };
 
@@ -55,6 +84,11 @@ export interface Holding {
   // Kept on record only (his wife's, his parents-in-law's): never on the
   // dashboard, Home, the brief or the calendar. Its own section on Money only.
   reference_only: boolean;
+  // Portfolio fields (16 Oct 2026): a fund's SEBI category key, an equity
+  // share override, and the amount invested where a statement gives it.
+  fund_category: string | null;
+  equity_pct: number | null;
+  invested: number | null;
 }
 
 // The name with its holder, for any surface that mixes everyone's holdings
