@@ -30,6 +30,7 @@ import {
   type FinanceKeyDateType,
   type ObligationFrequency,
 } from "@/lib/reminders/core";
+import { holdingLabel } from "@/lib/money/investments";
 import type { Database } from "@/lib/database.types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -461,7 +462,7 @@ export async function syncFinanceReminder(
   const svc = createServiceClient();
   const { data: item } = await svc
     .from("finance_items")
-    .select("id, name, institution, key_date, key_date_type, remind")
+    .select("id, name, institution, key_date, key_date_type, remind, held_for, reference_only")
     .eq("id", financeItemId)
     .single();
   if (!item) return { created: false, reason: "Holding not found." };
@@ -469,7 +470,8 @@ export async function syncFinanceReminder(
   const state = {
     key_date: item.key_date,
     key_date_type: item.key_date_type as FinanceKeyDateType | null,
-    remind: item.remind,
+    // A reference-only holding is never on his calendar, whatever remind says.
+    remind: item.remind && !item.reference_only,
   };
   if (planFinanceReminder(state) === "remove") {
     await removeReminder(svc, userId, { finance_item_id: financeItemId });
@@ -485,7 +487,7 @@ export async function syncFinanceReminder(
     userId,
     { finance_item_id: financeItemId },
     {
-      title: `Maturing: ${item.name}${where}`,
+      title: `Maturing: ${holdingLabel(item)}${where}`,
       anchorIso,
       // The standard offsets. A maturity is exactly the case the 7/3/1/0 set
       // was designed for: enough notice to actually redirect the money.

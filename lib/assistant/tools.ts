@@ -567,6 +567,12 @@ export const TOOLS: ToolDef[] = [
         "What that date means. 'maturity' where the holding ends on a date and the money has to be redirected, which is worth interrupting him for. 'review' for anything open-ended, such as a stock or an open-ended fund, which has no maturity and would otherwise drift for years."
       ),
       notes: strOrNull("Anything worth remembering."),
+      held_for: strOrNull(
+        "Whose holding it is, as a short relation label such as 'Mother' or 'Wife'. Leave out for his own. Never a name with a PAN, an account or a folio number."
+      ),
+      reference_only: boolOrNull(
+        "True for a holding kept on record only (his wife's, his parents-in-law's): never on the dashboard, Home, the brief or the calendar. Leave false for his own and his mother's, which he manages."
+      ),
     }),
   },
   {
@@ -586,6 +592,12 @@ export const TOOLS: ToolDef[] = [
         "What that date means. Omit to keep."
       ),
       notes: strOrNull("New notes. Omit to keep."),
+      held_for: strOrNull(
+        "Whose holding it is, as a short relation label such as 'Mother' or 'Wife'. Omit to keep; an empty string makes it his own. Never a name with a PAN, an account or a folio number."
+      ),
+      reference_only: boolOrNull(
+        "True for a holding kept on record only (his wife's, his parents-in-law's): never on the dashboard, Home, the brief or the calendar. Leave false for his own and his mother's, which he manages."
+      ),
     }),
   },
   {

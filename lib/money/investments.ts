@@ -12,7 +12,11 @@
 // Relative .ts imports so node --test resolves them, the convention every
 // pure module here uses.
 import { addDays, civilKey, formatINR, type CivilDate } from "../datetime.ts";
-import { financeReminderMode, type FinanceKeyDateType } from "../reminders/core.ts";
+import {
+  financeReminderMode,
+  parseDateKey,
+  type FinanceKeyDateType,
+} from "../reminders/core.ts";
 
 export type FinanceKind = "fd" | "mf" | "stock" | "ncd" | "other";
 
@@ -46,6 +50,96 @@ export interface Holding {
   key_date_type: FinanceKeyDateType | null;
   remind: boolean;
   notes: string | null;
+  // Whose it is: null for his own, else a relation label such as "Mother".
+  held_for: string | null;
+  // Kept on record only (his wife's, his parents-in-law's): never on the
+  // dashboard, Home, the brief or the calendar. Its own section on Money only.
+  reference_only: boolean;
+}
+
+// The name with its holder, for any surface that mixes everyone's holdings
+// (Home, the brief): "SBI FD (Mother)". His own read as plain names.
+export function holdingLabel(h: Pick<Holding, "name" | "held_for">): string {
+  return h.held_for ? `${h.name} (${h.held_for})` : h.name;
+}
+
+export interface HolderGroup {
+  held_for: string | null;
+  title: string;
+  reference_only: boolean;
+  items: Holding[];
+}
+
+// The holdings that count: his own and the ones he manages. Everything that
+// summarises (the dashboard, Home, the brief) reads only these.
+export function managedHoldings(items: Holding[]): Holding[] {
+  return items.filter((h) => !h.reference_only);
+}
+
+// One group per holder and kind of record, so a person can never be split
+// across the dashboard and the reference shelf without it showing. Labels
+// match ignoring case and edge spaces ("Mother" and "mother " are one person).
+// Order: his own, then the people he manages, then reference-only, each
+// alphabetical. Each group is totalled on its own.
+export function groupByHolder(items: Holding[]): HolderGroup[] {
+  const groups = new Map<string, HolderGroup>();
+  for (const h of items) {
+    const label = h.held_for?.trim() || null;
+    const key = `${h.reference_only ? 1 : 0}|${label?.toLowerCase() ?? ""}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        held_for: label,
+        title: label ? `Held for ${label}` : "Yours",
+        reference_only: h.reference_only,
+        items: [],
+      });
+    }
+    groups.get(key)!.items.push(h);
+  }
+  return [...groups.entries()]
+    .sort(([a], [b]) => {
+      const [ra, la] = a.split("|");
+      const [rb, lb] = b.split("|");
+      if (ra !== rb) return ra.localeCompare(rb);
+      if (la === "") return -1;
+      if (lb === "") return 1;
+      return la.localeCompare(lb);
+    })
+    .map(([, g]) => g);
+}
+
+// The dashboard: his and the managed holdings together. Reference-only ones
+// never enter it. Upcoming maturities look 90 days ahead: an FD needs a
+// decision weeks before it matures, not on the day.
+export const MATURITY_HORIZON_DAYS = 90;
+
+export interface Dashboard {
+  total: number;
+  count: number;
+  by_holder: { title: string; count: number; total: number }[];
+  by_kind: KindTotal[];
+  maturing: { id: string; label: string; key_date: string; value: number | null }[];
+  reviews: ReviewDue[];
+}
+
+export function dashboard(items: Holding[], todayKey: string): Dashboard {
+  const managed = managedHoldings(items);
+  const today = parseDateKey(todayKey);
+  const horizonKey = civilKey(addDays(today, MATURITY_HORIZON_DAYS));
+  return {
+    total: totalValue(managed),
+    count: managed.length,
+    by_holder: groupByHolder(managed).map((g) => ({
+      title: g.held_for ?? "You",
+      count: g.items.length,
+      total: totalValue(g.items),
+    })),
+    by_kind: totalsByKind(managed),
+    maturing: dated(managed, "maturity", todayKey)
+      .filter((h) => h.key_date! <= horizonKey)
+      .map((h) => ({ id: h.id, label: holdingLabel(h), key_date: h.key_date!, value: h.value })),
+    reviews: reviewsDue(managed, todayKey, reviewHorizonKey(today)),
+  };
 }
 
 function dated(
@@ -127,12 +221,12 @@ export function reviewsDue(
   todayKey: string,
   horizonKey: string
 ): ReviewDue[] {
-  return items
+  return managedHoldings(items)
     .filter((h) => h.key_date_type === "review" && h.key_date && h.key_date <= horizonKey)
     .sort((a, b) => a.key_date!.localeCompare(b.key_date!))
     .map((h) => ({
       id: h.id,
-      name: h.name,
+      name: holdingLabel(h),
       institution: h.institution,
       key_date: h.key_date!,
       overdue: h.key_date! < todayKey,
@@ -164,5 +258,5 @@ export function reviewLine(due: ReviewDue[]): string | null {
 // Whether this holding interrupts him on the calendar. Exported so the Money
 // screen can say so on the row rather than leaving him to infer it.
 export function remindsOnCalendar(h: Holding): boolean {
-  return h.remind && !!h.key_date && financeReminderMode(h.key_date_type) === "calendar";
+  return !h.reference_only && h.remind && !!h.key_date && financeReminderMode(h.key_date_type) === "calendar";
 }

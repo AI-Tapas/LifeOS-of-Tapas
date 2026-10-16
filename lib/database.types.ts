@@ -732,6 +732,7 @@ export type Database = {
       }
       finance_items: {
         Row: {
+          held_for: string | null
           id: string
           institution: string | null
           key_date: string | null
@@ -742,11 +743,13 @@ export type Database = {
           name: string
           notes: string | null
           principal_or_units: number | null
+          reference_only: boolean
           remind: boolean
           user_id: string
           value: number | null
         }
         Insert: {
+          held_for?: string | null
           id?: string
           institution?: string | null
           key_date?: string | null
@@ -757,11 +760,13 @@ export type Database = {
           name: string
           notes?: string | null
           principal_or_units?: number | null
+          reference_only?: boolean
           remind?: boolean
           user_id?: string
           value?: number | null
         }
         Update: {
+          held_for?: string | null
           id?: string
           institution?: string | null
           key_date?: string | null
@@ -772,6 +777,7 @@ export type Database = {
           name?: string
           notes?: string | null
           principal_or_units?: number | null
+          reference_only?: boolean
           remind?: boolean
           user_id?: string
           value?: number | null

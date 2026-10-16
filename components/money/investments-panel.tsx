@@ -16,8 +16,8 @@ import {
   FINANCE_KINDS,
   KIND_LABELS,
   defaultKeyDateType,
-  nextMaturity,
-  nextReview,
+  groupByHolder,
+  dashboard,
   remindsOnCalendar,
   totalValue,
   totalsByKind,
@@ -52,9 +52,13 @@ export default function InvestmentsPanel({
   const [editing, setEditing] = useState<HoldingRow | "new" | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const maturing = nextMaturity(holdings, todayKey);
-  const review = nextReview(holdings, todayKey);
-  const totals = totalsByKind(holdings);
+  const groups = groupByHolder(holdings);
+  const managed = groups.filter((g) => !g.reference_only);
+  const reference = groups.filter((g) => g.reference_only);
+  const holders = [...new Set(groups.flatMap((g) => (g.held_for ? [g.held_for] : [])))];
+  // Headings only once someone else's money is recorded: with his own alone,
+  // "Yours" would be noise.
+  const showTitles = groups.length > 1 || groups.some((g) => g.held_for);
 
   return (
     <div>
@@ -80,102 +84,47 @@ export default function InvestmentsPanel({
         </p>
       )}
 
-      {holdings.length > 0 && (
-        <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
-          <div className="rounded-lg border border-border bg-surface p-3 shadow-[var(--shadow-card)]">
-            <p className="text-xs font-medium text-secondary">Maturing next</p>
-            {maturing ? (
-              <>
-                <p className="mt-0.5 font-medium">{maturing.name}</p>
-                <p className="text-sm text-secondary">
-                  {dateLabel(maturing.key_date!)}
-                  {maturing.value != null ? ` · ${formatINR(maturing.value)}` : ""}
-                </p>
-              </>
-            ) : (
-              <p className="mt-0.5 text-sm text-secondary">Nothing maturing.</p>
-            )}
-          </div>
-          <div className="rounded-lg border border-border bg-surface p-3 shadow-[var(--shadow-card)]">
-            <p className="text-xs font-medium text-secondary">Due for review</p>
-            {review ? (
-              <>
-                <p className="mt-0.5 font-medium">{review.name}</p>
-                <p className="text-sm text-secondary">{dateLabel(review.key_date!)}</p>
-              </>
-            ) : (
-              <p className="mt-0.5 text-sm text-secondary">Nothing to review.</p>
-            )}
-          </div>
-        </div>
-      )}
-
-      {totals.length > 0 && (
-        <div className="mt-2 rounded-lg border border-border bg-surface p-3 shadow-[var(--shadow-card)]">
-          <p className="text-xs font-medium text-secondary">By kind</p>
-          <ul className="mt-1 divide-y divide-border">
-            {totals.map((t) => (
-              <li key={t.kind} className="flex items-baseline justify-between py-1.5">
-                <span className="text-sm">
-                  {t.label}
-                  <span className="text-secondary"> · {t.count}</span>
-                </span>
-                <span className="text-sm font-medium tabular-nums">{t.total_label}</span>
-              </li>
-            ))}
-            <li className="flex items-baseline justify-between py-1.5">
-              <span className="text-sm font-medium">Recorded in total</span>
-              <span className="text-sm font-semibold tabular-nums">
-                {formatINR(totalValue(holdings))}
-              </span>
-            </li>
-          </ul>
-        </div>
-      )}
-
-      <div className="mt-4 space-y-2">
-        {holdings.length === 0 ? (
+      {holdings.length === 0 ? (
+        <div className="mt-4">
           <Empty title="Nothing recorded yet">
             Add an FD, a fund, a stock or an NCD. A maturity date is chased on
             your calendar; a review date keeps an open holding from drifting
             for years.
           </Empty>
-        ) : (
-          holdings.map((h) => (
-            <button
-              key={h.id}
-              onClick={() => setEditing(h)}
-              className="block w-full rounded-lg border border-border bg-surface p-3 text-left shadow-[var(--shadow-card)]"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="font-medium">{h.name}</p>
-                  <p className="text-xs text-secondary">
-                    {KIND_LABELS[h.kind]}
-                    {h.institution ? ` · ${h.institution}` : ""}
-                  </p>
-                  {h.key_date && (
-                    <p className="mt-0.5 text-sm">
-                      {h.key_date_type === "maturity" ? "Matures" : "Review"}{" "}
-                      {dateLabel(h.key_date)}
-                      {remindsOnCalendar(h) ? " · on the calendar" : ""}
-                    </p>
-                  )}
-                </div>
-                {h.value != null && (
-                  <span className="shrink-0 text-sm font-medium tabular-nums">
-                    {formatINR(h.value)}
-                  </span>
-                )}
-              </div>
-            </button>
-          ))
-        )}
-      </div>
+        </div>
+      ) : (
+        <>
+          {managed.length > 0 && (
+            <DashboardView holdings={holdings} todayKey={todayKey} />
+          )}
+          {managed.map((g) => (
+            <section key={`m|${g.held_for ?? ""}`} className="mt-6">
+              {showTitles && <h3 className="mb-2 text-sm font-semibold">{g.title}</h3>}
+              <HolderGroupView holdings={g.items} onEdit={setEditing} />
+            </section>
+          ))}
+          {reference.length > 0 && (
+            <div className="mt-8 border-t border-border pt-4">
+              <h3 className="text-base font-medium">For reference only</h3>
+              <p className="text-sm text-secondary">
+                Kept on record. Not in the dashboard, on Home, in the brief or
+                on your calendar.
+              </p>
+              {reference.map((g) => (
+                <section key={`r|${g.held_for ?? ""}`} className="mt-4">
+                  <h4 className="mb-2 text-sm font-semibold">{g.title}</h4>
+                  <HolderGroupView holdings={g.items} onEdit={setEditing} />
+                </section>
+              ))}
+            </div>
+          )}
+        </>
+      )}
 
       {editing && (
         <HoldingForm
           holding={editing === "new" ? null : editing}
+          holders={holders}
           onClose={() => setEditing(null)}
           onNotice={setNotice}
         />
@@ -184,7 +133,160 @@ export default function InvestmentsPanel({
   );
 }
 
+const cardCls =
+  "rounded-lg border border-border bg-surface p-3 shadow-[var(--shadow-card)]";
+
+// His holdings and the ones he manages, together. Reference-only holdings
+// never reach this: dashboard() drops them before it adds anything up.
+function DashboardView({ holdings, todayKey }: { holdings: HoldingRow[]; todayKey: string }) {
+  const d = dashboard(holdings, todayKey);
+  return (
+    <div className="mt-4 space-y-2">
+      <div className={cardCls}>
+        <p className="text-xs font-medium text-secondary">Dashboard</p>
+        <p className="mt-0.5 text-2xl font-semibold tabular-nums">{formatINR(d.total)}</p>
+        <p className="text-xs text-secondary">
+          {d.count} {d.count === 1 ? "holding" : "holdings"} recorded
+        </p>
+        {d.by_holder.length > 1 && (
+          <ul className="mt-2 divide-y divide-border">
+            {d.by_holder.map((p) => (
+              <li key={p.title} className="flex items-baseline justify-between py-1.5">
+                <span className="text-sm">
+                  {p.title}
+                  <span className="text-secondary"> · {p.count}</span>
+                </span>
+                <span className="text-sm font-medium tabular-nums">{formatINR(p.total)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div className={cardCls}>
+          <p className="text-xs font-medium text-secondary">By kind, everyone</p>
+          <ul className="mt-1 divide-y divide-border">
+            {d.by_kind.map((t) => (
+              <li key={t.kind} className="flex items-baseline justify-between py-1.5">
+                <span className="text-sm">
+                  {t.label}
+                  <span className="text-secondary"> · {t.count}</span>
+                </span>
+                <span className="text-sm font-medium tabular-nums">{t.total_label}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className={cardCls}>
+          <p className="text-xs font-medium text-secondary">Maturing in the next 90 days</p>
+          {d.maturing.length ? (
+            <ul className="mt-1 divide-y divide-border">
+              {d.maturing.map((m) => (
+                <li key={m.id} className="py-1.5">
+                  <p className="text-sm font-medium">{m.label}</p>
+                  <p className="text-xs text-secondary">
+                    {dateLabel(m.key_date)}
+                    {m.value != null ? ` · ${formatINR(m.value)}` : ""}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-0.5 text-sm text-secondary">Nothing maturing.</p>
+          )}
+          <p className="mt-2 text-xs font-medium text-secondary">Due for review</p>
+          {d.reviews.length ? (
+            <ul className="mt-1 divide-y divide-border">
+              {d.reviews.map((r) => (
+                <li key={r.id} className="py-1.5 text-sm">
+                  {r.name}
+                  <span className={r.overdue ? "text-overdue" : "text-secondary"}>
+                    {" "}· {dateLabel(r.key_date)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-0.5 text-sm text-secondary">Nothing in the next two weeks.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// One holder's totals and holdings, rendered once per holder so each
+// person's totals are their own.
+function HolderGroupView({
+  holdings,
+  onEdit,
+}: {
+  holdings: HoldingRow[];
+  onEdit: (h: HoldingRow) => void;
+}) {
+  const totals = totalsByKind(holdings);
+
+  return (
+    <div>
+      <div className="rounded-lg border border-border bg-surface p-3 shadow-[var(--shadow-card)]">
+        <p className="text-xs font-medium text-secondary">By kind</p>
+        <ul className="mt-1 divide-y divide-border">
+          {totals.map((t) => (
+            <li key={t.kind} className="flex items-baseline justify-between py-1.5">
+              <span className="text-sm">
+                {t.label}
+                <span className="text-secondary"> · {t.count}</span>
+              </span>
+              <span className="text-sm font-medium tabular-nums">{t.total_label}</span>
+            </li>
+          ))}
+          <li className="flex items-baseline justify-between py-1.5">
+            <span className="text-sm font-medium">Recorded in total</span>
+            <span className="text-sm font-semibold tabular-nums">
+              {formatINR(totalValue(holdings))}
+            </span>
+          </li>
+        </ul>
+      </div>
+
+      <div className="mt-2 space-y-2">
+        {holdings.map((h) => (
+          <button
+            key={h.id}
+            onClick={() => onEdit(h)}
+            className="block w-full rounded-lg border border-border bg-surface p-3 text-left shadow-[var(--shadow-card)]"
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="font-medium">{h.name}</p>
+                <p className="text-xs text-secondary">
+                  {KIND_LABELS[h.kind]}
+                  {h.institution ? ` · ${h.institution}` : ""}
+                </p>
+                {h.key_date && (
+                  <p className="mt-0.5 text-sm">
+                    {h.key_date_type === "maturity" ? "Matures" : "Review"}{" "}
+                    {dateLabel(h.key_date)}
+                    {remindsOnCalendar(h) ? " · on the calendar" : ""}
+                  </p>
+                )}
+              </div>
+              {h.value != null && (
+                <span className="shrink-0 text-sm font-medium tabular-nums">
+                  {formatINR(h.value)}
+                </span>
+              )}
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 interface Fields {
+  heldFor: string;
+  referenceOnly: boolean;
   kind: FinanceKind;
   name: string;
   institution: string;
@@ -198,6 +300,8 @@ interface Fields {
 function toFields(h: HoldingRow | null): Fields {
   const kind = h?.kind ?? "fd";
   return {
+    heldFor: h?.held_for ?? "",
+    referenceOnly: h?.reference_only ?? false,
     kind,
     name: h?.name ?? "",
     institution: h?.institution ?? "",
@@ -211,10 +315,12 @@ function toFields(h: HoldingRow | null): Fields {
 
 function HoldingForm({
   holding,
+  holders,
   onClose,
   onNotice,
 }: {
   holding: HoldingRow | null;
+  holders: string[];
   onClose: () => void;
   onNotice: (s: string | null) => void;
 }) {
@@ -249,6 +355,8 @@ function HoldingForm({
       key_date_type: f.keyDate ? f.keyDateType : null,
       remind: f.remind,
       notes: f.notes || null,
+      held_for: f.heldFor.trim() || null,
+      reference_only: f.referenceOnly,
     };
     startTransition(async () => {
       const r = isEdit
@@ -312,6 +420,29 @@ function HoldingForm({
             />
           </Field>
         </div>
+        <Field label="Whose">
+          <input
+            value={f.heldFor}
+            onChange={(e) => setF({ ...f, heldFor: e.target.value })}
+            className={inputCls}
+            list="holding-holders"
+            maxLength={40}
+            placeholder="Leave blank if yours, e.g. Mother"
+          />
+          <datalist id="holding-holders">
+            {holders.map((h) => (
+              <option key={h} value={h} />
+            ))}
+          </datalist>
+        </Field>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={f.referenceOnly}
+            onChange={(e) => setF({ ...f, referenceOnly: e.target.checked })}
+          />
+          For reference only: keep off the dashboard, Home, the brief and the calendar
+        </label>
         <Field label="Where it is held">
           <input
             value={f.institution}

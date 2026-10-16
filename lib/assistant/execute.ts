@@ -1285,6 +1285,10 @@ const performers: Record<string, Performer> = {
           | Database["public"]["Enums"]["finance_key_date_type"]
           | null,
         notes: s(input.notes),
+        held_for: s(input.held_for),
+        // Reference-only holdings are never reminded (the writer refuses too).
+        reference_only: input.reference_only === true,
+        remind: input.reference_only !== true,
       })
       .select("id")
       .single();
@@ -1300,7 +1304,7 @@ const performers: Record<string, Performer> = {
     if (!itemId) throw new Error("finance_item_id is required.");
     const { data: prev } = await supabase
       .from("finance_items")
-      .select("name, institution, value, key_date, key_date_type, notes")
+      .select("name, institution, value, key_date, key_date_type, notes, held_for, reference_only")
       .eq("id", itemId)
       .single();
     if (!prev) throw new Error("Holding not found.");
@@ -1324,6 +1328,10 @@ const performers: Record<string, Performer> = {
             }
           : {}),
         ...(input.notes !== undefined ? { notes: s(input.notes) } : {}),
+        ...(input.held_for !== undefined ? { held_for: s(input.held_for) } : {}),
+        ...(typeof input.reference_only === "boolean"
+          ? { reference_only: input.reference_only }
+          : {}),
       })
       .eq("id", itemId);
     if (error) throw new Error(error.message);
@@ -2601,6 +2609,11 @@ async function performUndo(
           key_date_type: (prev.key_date_type ??
             null) as Database["public"]["Enums"]["finance_key_date_type"] | null,
           notes: prev.notes as string | null,
+          // Snapshots from before 16 Oct 2026 carry neither key: leave alone.
+          ...("held_for" in prev ? { held_for: prev.held_for as string | null } : {}),
+          ...("reference_only" in prev
+            ? { reference_only: prev.reference_only as boolean }
+            : {}),
         })
         .eq("id", itemId).select("id").single());
       // The reminder follows the restored row, so undoing a maturity that was

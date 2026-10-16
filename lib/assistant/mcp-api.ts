@@ -428,7 +428,7 @@ export const READ_TOOL_DESCRIPTIONS: Record<string, string> = {
   lifeos_list_obligations:
     "List recurring obligations such as bills, premiums and subscriptions, with amount, frequency and the day they fall due.",
   lifeos_list_finance_items:
-    "List recorded investments and deposits, with their value and any maturity or review date. key_date_type says which: a maturity carries a calendar reminder because the money has to be redirected on the day, a review date does not interrupt him and appears on Home and in the morning brief instead. Where a holding is held is a short human label, never an account or folio number.",
+    "List recorded investments and deposits, with their value and any maturity or review date. key_date_type says which: a maturity carries a calendar reminder because the money has to be redirected on the day, a review date does not interrupt him and appears on Home and in the morning brief instead. Where a holding is held is a short human label, never an account or folio number. held_for says whose it is (null is his own); reference_only holdings are kept on record only and never count in his totals.",
   lifeos_list_projects:
     "List projects and the work stream each belongs to, for filing tasks under one.",
   lifeos_list_trips:
@@ -1113,7 +1113,7 @@ export async function runReadTool(
     const { data, count, error } = await supabase
       .from("finance_items")
       .select(
-        "id, kind, name, institution, value, key_date, key_date_type, remind, notes",
+        "id, kind, name, institution, value, key_date, key_date_type, remind, notes, held_for, reference_only",
         { count: "exact" }
       )
       .order("key_date", { ascending: true, nullsFirst: false })
@@ -1136,6 +1136,8 @@ export async function runReadTool(
         key_date_type: f.key_date_type as FinanceKeyDateType | null,
       }),
       notes: f.notes,
+      held_for: f.held_for,
+      reference_only: f.reference_only,
     }));
     return paginate(items, count ?? items.length, limit, offset);
   }

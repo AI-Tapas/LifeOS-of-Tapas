@@ -32,6 +32,8 @@ import {
 } from "../lib/reminders/core.ts";
 import {
   KIND_LABELS,
+  dashboard,
+  groupByHolder,
   defaultKeyDateType,
   nextMaturity,
   nextReview,
@@ -67,6 +69,8 @@ function holding(over: Partial<Holding> & { id: string }): Holding {
     key_date_type: null,
     remind: true,
     notes: null,
+    held_for: null,
+    reference_only: false,
     ...over,
   };
 }
@@ -679,4 +683,64 @@ test("the new investment parameters are optional and single-typed", () => {
     assert.ok(!s.required.includes("key_date_type"), `${name} must not require it`);
     assert.ok(!s.required.includes("institution"), `${name} must not require it`);
   }
+});
+
+// --- whose holding: managed vs reference only (16 Oct 2026) ----------------
+
+test("holdings group by holder: his own, then managed, then reference only", () => {
+  const items = [
+    holding({ id: "w", held_for: "Wife", reference_only: true, value: 300 }),
+    holding({ id: "m1", held_for: "Mother", value: 200 }),
+    holding({ id: "me", value: 100 }),
+    holding({ id: "m2", held_for: "mother ", value: 50 }),
+  ];
+  const groups = groupByHolder(items);
+  assert.deepEqual(
+    groups.map((g) => [g.title, g.reference_only, g.items.map((h) => h.id)]),
+    [
+      ["Yours", false, ["me"]],
+      ["Held for Mother", false, ["m1", "m2"]],
+      ["Held for Wife", true, ["w"]],
+    ]
+  );
+});
+
+test("reference-only holdings never reach the dashboard, Home, the brief or the calendar", () => {
+  const items = [
+    holding({ id: "me", value: 100, kind: "fd", key_date: "2026-10-01", key_date_type: "maturity" }),
+    holding({ id: "m", held_for: "Mother", value: 200, key_date: "2026-09-05", key_date_type: "review" }),
+    holding({
+      id: "w",
+      held_for: "Wife",
+      reference_only: true,
+      value: 999,
+      key_date: "2026-09-03",
+      key_date_type: "review",
+    }),
+    holding({
+      id: "fil",
+      held_for: "Father-in-law",
+      reference_only: true,
+      value: 5,
+      key_date: "2026-09-20",
+      key_date_type: "maturity",
+    }),
+  ];
+  const d = dashboard(items, "2026-09-01");
+  assert.equal(d.total, 300);
+  assert.deepEqual(d.by_holder.map((p) => [p.title, p.total]), [["You", 100], ["Mother", 200]]);
+  assert.deepEqual(d.maturing.map((m) => m.id), ["me"]);
+  // Reviews on Home and in the brief carry the holder's name, and skip reference rows.
+  const due = reviewsDue(items, "2026-09-01", "2026-09-15");
+  assert.deepEqual(due.map((r) => r.name), ["A holding (Mother)"]);
+  assert.equal(remindsOnCalendar(items[3]), false);
+  assert.equal(remindsOnCalendar(items[0]), true);
+});
+
+test("Home and the brief ask the database for managed holdings only", () => {
+  assert.match(src("app/(app)/page.tsx"), /\.eq\("reference_only", false\)/);
+  assert.match(src("app/api/cron/brief/route.ts"), /\.eq\("reference_only", false\)/);
+  assert.match(src("lib/reminders/writer.ts"), /remind: item\.remind && !item\.reference_only/);
+  const mig = src("supabase/migrations/20261016000100_holding_held_for.sql");
+  assert.match(mig, /NEVER a PAN, an account number, a folio number/);
 });

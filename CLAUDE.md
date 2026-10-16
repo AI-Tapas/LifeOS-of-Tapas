@@ -2079,3 +2079,25 @@ Migrations `20261015000600_saved_as_draft_enum.sql` and
   (`saveToDraftsAction`); no MCP tool reaches it. History shows "Saved to
   drafts in <mailbox>".
 - Tests: scripts/b36.test.ts and scripts/saved-as-draft-sql.test.ts.
+
+## Whose holding, dashboard and reference-only (16 October 2026)
+
+Migration `20261016000100_holding_held_for.sql`. NOT applied anywhere when
+written; apply it before (or with) the deploy, since Money, Home, the brief
+cron, the reminder writer and the connector all select the new columns.
+
+- `finance_items.held_for` (text, null = his own, else a relation label such
+  as "Mother", at most 40 characters) and `finance_items.reference_only`
+  (boolean, default false). Never a PAN, account or folio number.
+- Managed holdings (his own, his mother's, his daughter's SSY) feed the Money
+  dashboard: one total, split by person and by kind, maturities in the next
+  90 days, reviews in the next 14. `dashboard()` in lib/money/investments.ts.
+- Reference-only holdings (his wife's, his parents-in-law's) show only in
+  their holder's section under "For reference only". They never reach the
+  dashboard, Home, the brief (both queries filter `reference_only = false`,
+  and `reviewsDue` drops them too) or the calendar (the writer forces remind
+  off; the form and the executor save remind false).
+- Home and brief lines name the holder: "SBI FD (Mother)" (`holdingLabel`).
+- add_finance_item and update_finance_item take `held_for` and
+  `reference_only`; lifeos_list_finance_items returns both. Undo restores them.
+- Tests: three in `npm run test:m7b`.

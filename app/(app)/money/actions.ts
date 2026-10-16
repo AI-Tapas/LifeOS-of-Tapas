@@ -208,6 +208,8 @@ export interface HoldingInput {
   key_date_type?: KeyDateType | null;
   remind?: boolean;
   notes?: string | null;
+  held_for?: string | null;
+  reference_only?: boolean;
 }
 
 export type HoldingResult =
@@ -225,6 +227,9 @@ function validateHolding(input: HoldingInput): string | null {
   if (input.value != null && (!Number.isFinite(input.value) || input.value < 0)) {
     return "The value must be a number.";
   }
+  if ((input.held_for?.trim().length ?? 0) > 40) {
+    return "Whose it is should be a short label, 40 characters at most.";
+  }
   return null;
 }
 
@@ -236,8 +241,11 @@ function holdingRow(input: HoldingInput) {
     value: input.value ?? null,
     key_date: input.key_date || null,
     key_date_type: input.key_date ? input.key_date_type ?? null : null,
-    remind: input.remind ?? true,
+    // A reference-only holding never reminds: it is not his to act on.
+    remind: input.reference_only ? false : input.remind ?? true,
     notes: input.notes?.trim() || null,
+    held_for: input.held_for?.trim() || null,
+    reference_only: input.reference_only ?? false,
   };
 }
 
