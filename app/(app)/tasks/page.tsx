@@ -27,6 +27,8 @@ export default async function TasksPage({
   // B32: ?hours=missing (the Home line) lists this month's finished billable
   // tasks that have no hours logged.
   const hoursFilter = (Array.isArray(sp.hours) ? sp.hours[0] : sp.hours) === "missing";
+  // ?from=home: opened from a Home row, so closing the drawer goes back there.
+  const fromHome = (Array.isArray(sp.from) ? sp.from[0] : sp.from) === "home";
   const supabase = await createClient();
   const now = new Date();
   const keepFrom = new Date(now.getTime() - 90 * 86400000).toISOString();
@@ -94,6 +96,7 @@ export default async function TasksPage({
         projects={(projects ?? []) as ProjectRow[]}
         workStreams={(streams ?? []).map((s) => ({ id: s.id, name: s.name })) as WorkStreamRow[]}
         openTaskId={rawTask}
+        returnHome={fromHome && !!rawTask}
         nowIso={now.toISOString()}
       />
     </main>

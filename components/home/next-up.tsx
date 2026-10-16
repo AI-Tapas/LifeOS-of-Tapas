@@ -187,7 +187,11 @@ function Row({
             )}
           </span>
         </button>
-        <div className="min-w-0 flex-1">
+        <Link
+          href={`/tasks?task=${row.id}&from=home`}
+          aria-label={`Open: ${row.title}`}
+          className="press min-w-0 flex-1"
+        >
           <p
             className={
               "break-words text-sm font-medium " +
@@ -204,7 +208,7 @@ function Row({
               className="mt-0.5"
             />
           )}
-        </div>
+        </Link>
         <DueBadge dueTs={row.due_ts} nowIso={nowIso} />
       </div>
       {row.needs_deadline && !dated && !done && (

@@ -141,6 +141,8 @@ interface TasksViewProps {
   // single task, so a note referencing one links here and the drawer opens.
   // An id that matches nothing simply opens nothing.
   openTaskId?: string;
+  // Opened from a Home row: closing that drawer returns to Home.
+  returnHome?: boolean;
   // B26. Arrived from the Home line: only tasks agents have asked him about.
   agentFilter?: boolean;
   // B32: show only this month's finished billable tasks with no hours.
@@ -164,9 +166,11 @@ function TasksBody({
   projects,
   workStreams,
   openTaskId,
+  returnHome,
   agentFilter,
   hoursFilter,
 }: TasksViewProps) {
+  const router = useRouter();
   const [tab, setTab] = useState<Tab>(agentFilter || hoursFilter ? "board" : "overview");
   const [editing, setEditing] = useState<TaskRow | "new" | null>(
     () => tasks.find((t) => t.id === openTaskId) ?? null
@@ -283,7 +287,11 @@ function TasksBody({
           task={editing === "new" ? null : editing}
           projects={projects}
           workStreams={workStreams}
-          onClose={() => setEditing(null)}
+          onClose={() => {
+            // Back to Home only for the drawer Home opened, not later ones.
+            if (returnHome && editing !== "new" && editing.id === openTaskId) router.push("/");
+            setEditing(null);
+          }}
           onNotice={setNotice}
         />
       )}
