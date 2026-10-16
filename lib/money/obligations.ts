@@ -69,11 +69,12 @@ export function dueLabel(o: ObligationSeriesFields): string {
 
 // The next three dates, in his own date style. A rule he cannot read is a
 // rule he has to trust; these are what let him catch a wrong one before it
-// reminds him.
+// reminds him. A monthly series shows only the next date: "the 5th, every
+// month" has nothing to catch, and three of them was noise (16 Oct 2026).
 export function seriesDates(
   o: ObligationSeriesFields,
   todayKey: string,
-  count = 3
+  count = o.frequency === "monthly" ? 1 : 3
 ): string[] {
   if (!o.active) return [];
   try {

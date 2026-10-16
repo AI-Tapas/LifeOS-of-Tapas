@@ -455,11 +455,9 @@ test("a yearly series never reads as the same date three times", () => {
     interval_rule: null,
     anchor_date: null,
   };
-  assert.deepEqual(seriesDates(monthly, "2026-09-01"), [
-    "12 Sept",
-    "12 Oct",
-    "12 Nov",
-  ]);
+  // Monthly shows the next date only; every other frequency shows three.
+  assert.deepEqual(seriesDates(monthly, "2026-09-01"), ["12 Sept"]);
+  assert.deepEqual(seriesDates({ ...monthly, frequency: "bi_monthly" }, "2026-09-01").length, 3);
   // A retired obligation shows no series at all: it is not going to happen.
   assert.deepEqual(seriesDates({ ...monthly, active: false }, "2026-09-01"), []);
 });
