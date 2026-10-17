@@ -158,6 +158,13 @@ export function formatMonthYear(c: CivilDate): string {
 
 // Indian digit grouping, e.g. 12000000 -> "1,20,00,000". Two decimals only when
 // the value is not whole. Prefixed with the rupee sign.
+// Whole rupees, for the Money screen: every amount rounded to the nearest
+// rupee so a column of figures reads evenly (16 Oct 2026, his ask).
+export function formatRupees(n: number | null | undefined): string {
+  if (n === null || n === undefined) return "";
+  return formatINR(Math.round(n));
+}
+
 export function formatINR(n: number | null | undefined): string {
   if (n === null || n === undefined) return "";
   const whole = Number.isInteger(n);

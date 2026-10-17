@@ -11,7 +11,7 @@
 //
 // Relative .ts imports so node --test resolves them, the convention every
 // pure module here uses.
-import { addDays, civilKey, formatINR, type CivilDate } from "../datetime.ts";
+import { addDays, civilKey, formatRupees, type CivilDate } from "../datetime.ts";
 import {
   financeReminderMode,
   parseDateKey,
@@ -221,7 +221,7 @@ export function totalsByKind(items: Holding[]): KindTotal[] {
       label: KIND_LABELS[kind],
       count: of.length,
       total,
-      total_label: unpriced ? "not valued" : formatINR(total),
+      total_label: unpriced ? "not valued" : formatRupees(total),
     };
   }).filter((t) => t.count > 0);
 }

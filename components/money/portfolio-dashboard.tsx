@@ -8,7 +8,7 @@
 // Reference-only holdings never reach it: portfolio() drops them first.
 
 import { useState } from "react";
-import { formatDateIST, formatINR } from "@/lib/datetime";
+import { formatDateIST, formatRupees } from "@/lib/datetime";
 import { dashboard, type Holding } from "@/lib/money/investments";
 import {
   ASSET_CLASS_LABELS,
@@ -36,14 +36,8 @@ const CLASS_DOT: Record<AssetClass, string> = {
 const cardCls =
   "rounded-2xl border border-border bg-surface p-4 shadow-[var(--shadow-card)]";
 
-// Lakh and crore, the way an Indian portfolio app shows a big figure.
-function compactINR(n: number): string {
-  if (Math.abs(n) >= 1e7) return `₹ ${(n / 1e7).toFixed(2)} Cr`;
-  if (Math.abs(n) >= 1e5) return `₹ ${(n / 1e5).toFixed(2)} L`;
-  return formatINR(Math.round(n));
-}
-
-const pctLabel = (n: number) => `${n < 10 && n > 0 ? n.toFixed(1) : Math.round(n)}%`;
+// Whole percents; a share that rounds to 0 but is not nothing says so.
+const pctLabel = (n: number) => (n > 0 && n < 0.5 ? "<1%" : `${Math.round(n)}%`);
 
 function dateLabel(key: string): string {
   return formatDateIST(`${key}T12:00:00+05:30`);
@@ -99,17 +93,16 @@ export default function PortfolioDashboard({
           Net worth
         </p>
         <p className="mt-1 font-serif text-[40px] font-medium leading-none tracking-tight">
-          {compactINR(p.total)}
+          {formatRupees(p.total)}
         </p>
-        <p className="mt-1 text-sm text-secondary tabular-nums">{formatINR(Math.round(p.total))}</p>
         <div className="mt-4 grid grid-cols-3 gap-2 border-t border-border pt-3">
           <Stat label="Equity share" value={pctLabel(p.equity_pct)} />
           <Stat label="Holdings" value={String(p.count)} />
           {p.invested > 0 ? (
             <Stat
               label="Gain"
-              value={`${p.gain >= 0 ? "▲" : "▼"} ${compactINR(Math.abs(p.gain))}`}
-              hint={`on ${compactINR(p.invested)} where cost is known`}
+              value={`${p.gain >= 0 ? "▲" : "▼"} ${formatRupees(Math.abs(p.gain))}`}
+              hint={`on ${formatRupees(p.invested)} where cost is known`}
               tone={p.gain >= 0 ? "ok" : "overdue"}
             />
           ) : (
@@ -139,7 +132,7 @@ export default function PortfolioDashboard({
                     </span>
                   </div>
                   <p className="pl-[18px] text-xs text-secondary tabular-nums">
-                    {compactINR(s.value)}
+                    {formatRupees(s.value)}
                   </p>
                 </li>
               ))}
@@ -162,7 +155,7 @@ export default function PortfolioDashboard({
                     <span className="text-xs text-secondary">{dateLabel(m.key_date)}</span>
                   </span>
                   {m.value != null && (
-                    <span className="shrink-0 text-sm tabular-nums">{compactINR(m.value)}</span>
+                    <span className="shrink-0 text-sm tabular-nums">{formatRupees(m.value)}</span>
                   )}
                 </li>
               ))}
@@ -192,7 +185,7 @@ export default function PortfolioDashboard({
       <div className={cardCls + " p-0"}>
         <div className="flex items-baseline justify-between px-4 pt-4">
           <p className="text-sm font-semibold">Portfolio</p>
-          <p className="text-xs text-muted">% of {compactINR(p.total)}</p>
+          <p className="text-xs text-muted">% of {formatRupees(p.total)}</p>
         </div>
         <div className="mt-2 hidden grid-cols-[1fr_110px_70px_120px_70px] gap-3 border-b border-border px-4 pb-2 text-xs font-medium text-muted md:grid">
           <span>Investment</span>
@@ -217,7 +210,7 @@ export default function PortfolioDashboard({
                   )}
                 </span>
                 <span className="text-right text-sm font-semibold tabular-nums md:order-4">
-                  {formatINR(Math.round(l.value))}
+                  {formatRupees(l.value)}
                 </span>
                 <span className="mt-1 flex items-center gap-1.5 text-xs text-secondary md:order-2 md:mt-0">
                   <span
@@ -249,7 +242,7 @@ export default function PortfolioDashboard({
         <div className={cardCls}>
           <div className="flex items-baseline justify-between">
             <p className="text-sm font-semibold">Mutual funds by category</p>
-            <p className="text-sm font-semibold tabular-nums">{compactINR(p.funds_total)}</p>
+            <p className="text-sm font-semibold tabular-nums">{formatRupees(p.funds_total)}</p>
           </div>
           {p.uncategorised > 0 && (
             <p className="mt-1 text-xs text-today">
@@ -272,7 +265,7 @@ export default function PortfolioDashboard({
                         <span className="text-xs text-muted">· {c.funds.length}</span>
                       </span>
                       <span className="text-sm tabular-nums">
-                        <span className="font-semibold">{compactINR(c.value)}</span>
+                        <span className="font-semibold">{formatRupees(c.value)}</span>
                         <span className="ml-2 inline-block w-11 text-right text-secondary">
                           {pctLabel(c.share)}
                         </span>
@@ -300,7 +293,7 @@ export default function PortfolioDashboard({
                           )}
                         </span>
                         <span className="shrink-0 text-sm tabular-nums text-secondary">
-                          {formatINR(Math.round(f.value))}
+                          {formatRupees(f.value)}
                         </span>
                       </li>
                     ))}
@@ -371,7 +364,7 @@ function Donut({ slices, equityPct }: { slices: AllocationSlice[]; equityPct: nu
             strokeDasharray={`${len} ${c - len}`}
             strokeDashoffset={-starts[i]}
           >
-            <title>{`${s.label}: ${formatINR(Math.round(s.value))} (${pctLabel(s.share)})`}</title>
+            <title>{`${s.label}: ${formatRupees(s.value)} (${pctLabel(s.share)})`}</title>
           </circle>
         );
       })}

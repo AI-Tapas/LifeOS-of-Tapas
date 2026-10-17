@@ -11,7 +11,7 @@ import {
   drawerFooterCls,
   inputCls,
 } from "@/components/ui";
-import { formatDateIST, formatINR } from "@/lib/datetime";
+import { formatDateIST, formatRupees } from "@/lib/datetime";
 import {
   FINANCE_KINDS,
   KIND_LABELS,
@@ -162,7 +162,7 @@ function HolderGroupView({
           <li className="flex items-baseline justify-between py-1.5">
             <span className="text-sm font-medium">Recorded in total</span>
             <span className="text-sm font-semibold tabular-nums">
-              {formatINR(totalValue(holdings))}
+              {formatRupees(totalValue(holdings))}
             </span>
           </li>
         </ul>
@@ -192,7 +192,7 @@ function HolderGroupView({
               </div>
               {h.value != null && (
                 <span className="shrink-0 text-sm font-medium tabular-nums">
-                  {formatINR(h.value)}
+                  {formatRupees(h.value)}
                 </span>
               )}
             </div>

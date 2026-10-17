@@ -10,7 +10,7 @@ import {
   drawerFooterCls,
   inputCls,
 } from "@/components/ui";
-import { formatINR } from "@/lib/datetime";
+import { formatRupees } from "@/lib/datetime";
 import {
   dueLabel,
   frequencyLabel,
@@ -149,7 +149,7 @@ export default function ObligationsPanel({
                       .join(" · ")}
                   </p>
                   <p className="mt-0.5 text-sm">
-                    {o.variable_amount ? "Variable amount" : formatINR(o.amount)}
+                    {o.variable_amount ? "Variable amount" : formatRupees(o.amount)}
                     {o.autopay ? " · autopay" : ""}
                     {o.account_ref ? ` · ${o.account_ref}` : ""}
                   </p>
